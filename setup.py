@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="qhchina",
-    version="0.0.6",
+    version="0.0.7",
     author="Maciej Kurzynski",
     author_email="makurz@gmail.com",
     description="The basic package for Quantitative Humanities · China Lab",

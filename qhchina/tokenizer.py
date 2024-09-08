@@ -116,23 +116,3 @@ class Tokenizer:
             if delimiter is None:
                 return list(text)
             return text.split(delimiter)
-
-tokenizer = Tokenizer()
-tokens = tokenizer.tokenize("这是我的文章")
-print(tokens)
-
-# Tokenizing by space
-tokens = tokenizer.tokenize("This is a test", delimiter=" ")
-print(tokens)
-
-# Tokenizing a batch of texts with spaCy
-texts = ["这是第一篇文章", "这是第二篇文章"]
-tokenizer = Tokenizer(backend="spacy", model_name="zh_core_web_lg", batch_size=2)
-tokens_batch = tokenizer.tokenize(texts, batch_size=2, disable=["ner", "parser"])
-print(tokens_batch)
-
-# Tokenizing a batch of texts using custom delimiter
-texts = ["first text", "second text"]
-tokenizer = Tokenizer()
-tokens_batch = tokenizer.tokenize(texts, delimiter=" ", batch_size=1)
-print(tokens_batch)
