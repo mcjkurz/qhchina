@@ -1,3 +1,4 @@
 # qhchina/__init__.py
 
-from .functions import tokenize, hello
+from .tokenizer import Tokenizer
+from .utils import split_into_chunks
