@@ -26,3 +26,6 @@ dist/
 
 # Macbook stuff
 .DS_Store
+
+# gitignore
+.gitignore
