@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.9"  #  MUST MATCH __version__ in __init__.py
+version = "0.0.14"  #  IMPORTANT: Increment this!  Match __version__ in __init__.py
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -14,15 +14,14 @@ description = "A Python package for NLP tasks related to Chinese text."
 readme = "README.md"
 requires-python = ">=3.8"  # Specify the minimum Python version
 keywords = ["nlp", "chinese", "text analysis", "corpus linguistics"]
-license = {file = "LICENSE.txt"} #if a license is used
-classifiers = [ #choose correct classifiers
+license = {file = "LICENSE.txt"}
+classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License", #if MIT license is used.
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
 dependencies = [
-    "spacy",
     "scipy",
     "numpy"
 ]
@@ -30,7 +29,3 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/mcjkurz/qhchina"  # Replace with your repo URL
 "Bug Tracker" = "https://github.com/mcjkurz/qhchina/issues"
-
-[tool.setuptools.packages.find] #tell setuptools where to find packages
-where = ["."]  # The root directory
-include = ["qhchina*"]
