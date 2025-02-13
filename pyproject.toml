@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.8"  #  MUST MATCH __version__ in __init__.py
+version = "0.0.9"  #  MUST MATCH __version__ in __init__.py
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -33,3 +33,4 @@ dependencies = [
 
 [tool.setuptools.packages.find] #tell setuptools where to find packages
 where = ["."]  # The root directory
+include = ["qhchina*"]
