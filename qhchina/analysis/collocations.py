@@ -1,6 +1,5 @@
 from collections import Counter, defaultdict
 from scipy.stats import fisher_exact
-from tqdm.auto import tqdm
 import numpy as np
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5):
@@ -118,7 +117,7 @@ def calculate_collocations(tokenized_sentences, target_words, method='window', h
     target_words = set(target_words)
 
     if method == 'window':
-        results = _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
+        results = _calculate_collocations_window(tokenized_sentences, target_words, horizon=horizon)
     elif method == 'sentence':
         results = _calculate_collocations_sentence(tokenized_sentences, target_words)
     else:
@@ -131,3 +130,65 @@ def calculate_collocations(tokenized_sentences, target_words, method='window', h
         import pandas
         results = pandas.DataFrame(results)
     return results
+
+def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_sen_count=1, vocab_size=None, as_dataframe=False):
+    if method not in ('window', 'sentence'):
+        raise ValueError("method must be 'window' or 'sentence'")
+
+    word_counts = Counter()
+    sentence_counts = Counter()
+    for sentence in documents:
+        word_counts.update(sentence)
+        sentence_counts.update(set(sentence))
+
+    if vocab_size is None:
+        # Create the set of words to keep.
+        keep_words = set()
+        for word, count in word_counts.items():
+            if (min_abs_count is None or count >= min_abs_count) and \
+                (min_sen_count is None or sentence_counts[word] >= min_sen_count):
+                keep_words.add(word)
+    else: 
+        keep_words = set([word for (word, _) in word_counts.most_common(vocab_size)])
+            
+    # Filter each sentence
+    filtered_documents = []
+    for document in documents:
+        filtered_documents.append([word for word in document if word in keep_words])
+        
+    documents = filtered_documents # Use filtered sentences from now on
+
+    # 2.  Co-occurrence Calculation
+    cooc_counts = defaultdict(lambda: defaultdict(int))
+
+    if method == 'window':
+        for document in documents:
+            for i, word1 in enumerate(document):
+                start = max(0, i - horizon)
+                end = min(len(document), i + horizon + 1)
+                for word2 in document[start:i] + document[i+1:end]:
+                    cooc_counts[word1][word2] += 1
+                    
+    elif method == 'sentence':
+        for document in documents:
+            unique_tokens = list(set(document))  # Use list for indexing
+            for i in range(len(unique_tokens)):
+                for j in range(i + 1, len(unique_tokens)):
+                    word1, word2 = unique_tokens[i], unique_tokens[j]
+                    cooc_counts[word1][word2] += 1
+    
+    all_words = sorted(cooc_counts.keys())
+    word_to_index = {word:i for i,word in enumerate(all_words)}
+    n = len(all_words)
+    cooc_matrix = np.zeros((n,n),dtype=int)
+    for word1, inner_dict in cooc_counts.items():
+        for word2, count in inner_dict.items():
+            cooc_matrix[word_to_index[word1],word_to_index[word2]] = count
+    if as_dataframe:
+        import pandas
+        cooc_matrix = pandas.DataFrame(cooc_matrix)
+        cooc_matrix.index = all_words
+        cooc_matrix.columns = all_words
+        return cooc_matrix
+    else:
+        return cooc_matrix, word_to_index
