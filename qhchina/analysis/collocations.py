@@ -131,51 +131,48 @@ def calculate_collocations(tokenized_sentences, target_words, method='window', h
         results = pandas.DataFrame(results)
     return results
 
-def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_sen_count=1, vocab_size=None, as_dataframe=False):
-    if method not in ('window', 'sentence'):
-        raise ValueError("method must be 'window' or 'sentence'")
+def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, vocab_size=None, binary=False, as_dataframe=False):
+    if method not in ('window', 'document'):
+        raise ValueError("method must be 'window' or 'document'")
 
     word_counts = Counter()
-    sentence_counts = Counter()
-    for sentence in documents:
-        word_counts.update(sentence)
-        sentence_counts.update(set(sentence))
+    document_counts = Counter()
+    for document in documents:
+        word_counts.update(document)
+        document_counts.update(set(document))
 
-    if vocab_size is None:
-        # Create the set of words to keep.
-        keep_words = set()
-        for word, count in word_counts.items():
-            if (min_abs_count is None or count >= min_abs_count) and \
-                (min_sen_count is None or sentence_counts[word] >= min_sen_count):
-                keep_words.add(word)
-    else: 
-        keep_words = set([word for (word, _) in word_counts.most_common(vocab_size)])
+    # Create the list of words to keep.
+    keep_words = {word for word, count in word_counts.items() if count >= min_abs_count and document_counts[word] >= min_doc_count}
+    if vocab_size:
+        keep_words = set(sorted(keep_words, key=lambda word: word_counts[word], reverse=True)[:vocab_size])
             
     # Filter each sentence
-    filtered_documents = []
-    for document in documents:
-        filtered_documents.append([word for word in document if word in keep_words])
-        
-    documents = filtered_documents # Use filtered sentences from now on
-
+    filtered_documents = [[word for word in document if word in keep_words] for document in documents]
+    
     # 2.  Co-occurrence Calculation
     cooc_counts = defaultdict(lambda: defaultdict(int))
 
     if method == 'window':
-        for document in documents:
+        for document in filtered_documents:
             for i, word1 in enumerate(document):
                 start = max(0, i - horizon)
                 end = min(len(document), i + horizon + 1)
                 for word2 in document[start:i] + document[i+1:end]:
-                    cooc_counts[word1][word2] += 1
+                    if binary:
+                        cooc_counts[word1][word2] = 1
+                    else:
+                        cooc_counts[word1][word2] += 1
                     
-    elif method == 'sentence':
-        for document in documents:
-            unique_tokens = list(set(document))  # Use list for indexing
-            for i in range(len(unique_tokens)):
-                for j in range(i + 1, len(unique_tokens)):
-                    word1, word2 = unique_tokens[i], unique_tokens[j]
-                    cooc_counts[word1][word2] += 1
+    elif method == 'document':
+        for document in filtered_documents:
+            for i in range(len(document)):
+                word1 = document[i]
+                context = document[:i] + document[i+1:]
+                for word2 in context:
+                    if binary:
+                        cooc_counts[word1][word2] = 1
+                    else:
+                        cooc_counts[word1][word2] += 1
     
     all_words = sorted(cooc_counts.keys())
     word_to_index = {word:i for i,word in enumerate(all_words)}
@@ -184,11 +181,10 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_sen_
     for word1, inner_dict in cooc_counts.items():
         for word2, count in inner_dict.items():
             cooc_matrix[word_to_index[word1],word_to_index[word2]] = count
+
     if as_dataframe:
         import pandas
-        cooc_matrix = pandas.DataFrame(cooc_matrix)
-        cooc_matrix.index = all_words
-        cooc_matrix.columns = all_words
-        return cooc_matrix
+        cooc_matrix_df = pandas.DataFrame(cooc_matrix, index=all_words, columns=all_words)
+        return cooc_matrix_df
     else:
         return cooc_matrix, word_to_index

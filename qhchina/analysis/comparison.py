@@ -26,13 +26,15 @@ def compare_bows(corpusA, corpusB, method='fisher', min_count=1, as_dataframe=Fa
     all_words = set(freqA.keys()).union(freqB.keys())
     results = []
     
-    for word in tqdm(all_words):
+    for word in all_words:
         a = freqA.get(word, 0)  # Count in Corpus A
         b = freqB.get(word, 0)  # Count in Corpus B
         c = totalA - a          # Other words in Corpus A
         d = totalB - b          # Other words in Corpus B
         
-        if a < min_count or b < min_count:
+        if isinstance(min_count, int):
+            min_count = (min_count, min_count)
+        if a < min_count[0] or b < min_count[1]:
            continue
         table = np.array([[a, b], [c, d]])
 
@@ -59,6 +61,6 @@ def compare_bows(corpusA, corpusB, method='fisher', min_count=1, as_dataframe=Fa
             "p_value": p_value,
         })
     if as_dataframe:
-        import pandas
-        results = pandas.DataFrame(results)
+        import pandas as pd
+        results = pd.DataFrame(results)
     return results
