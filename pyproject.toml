@@ -33,6 +33,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 exclude = ["data"]
 
+[tool.setuptools.package-data]
+"qhchina" = ["qhchina/helpers/fonts/*.otf"]
+
 [project.urls]
 "Homepage" = "https://github.com/mcjkurz/qhchina"  # Replace with your repo URL
 "Bug Tracker" = "https://github.com/mcjkurz/qhchina/issues"
