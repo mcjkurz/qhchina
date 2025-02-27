@@ -2,7 +2,7 @@ from collections import Counter
 import numpy as np
 from scipy.stats import fisher_exact, chi2_contingency
 
-def compare_bows(corpusA, corpusB, method='fisher', min_count=1, as_dataframe=False):
+def compare_corpora(corpusA, corpusB, method='fisher', min_count=1, as_dataframe=False):
     """
     Compare two corpora to identify statistically significant differences in word usage.
     

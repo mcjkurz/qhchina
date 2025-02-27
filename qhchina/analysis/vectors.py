@@ -100,7 +100,7 @@ def get_axis(anchors, vectors):
         return axis
     return axis / axis_norm
 
-def binary_analysis(x, y, words, vectors,
+def project_bias(x, y, words, vectors,
                     title=None, color=None, figsize=(8,8),
                     fontsize=12, filename=None, adjust_text_labels=False, disperse_y=False):
     """
@@ -142,7 +142,6 @@ def binary_analysis(x, y, words, vectors,
     fig, ax = plt.subplots(figsize=figsize)
 
     if axis_y_unit is None:
-        # 1D case: we just scatter along the x-axis, with a small random "jitter" in y
         if disperse_y:
             y_dispersion = np.random.uniform(-0.1, 0.1, size=projections_x.shape)
             y_dispersion_max = np.max(np.abs(y_dispersion))
@@ -216,3 +215,9 @@ def binary_analysis(x, y, words, vectors,
     if filename:
         plt.savefig(filename, bbox_inches='tight', dpi=300)
     plt.show()
+
+def cosine_similarity(v1, v2):
+    """
+    Compute the cosine similarity between two vectors.
+    """
+    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))

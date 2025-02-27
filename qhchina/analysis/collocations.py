@@ -111,7 +111,7 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words):
 
     return results
 
-def calculate_collocations(tokenized_sentences, target_words, method='window', horizon=5, stopwords=None, as_dataframe=False):
+def find_collocations(tokenized_sentences, target_words, method='window', horizon=5, stopwords=None, as_dataframe=False):
     if not isinstance(target_words, list):
         target_words = [target_words]
     target_words = set(target_words)
@@ -177,7 +177,7 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
     all_words = sorted(cooc_counts.keys())
     word_to_index = {word:i for i,word in enumerate(all_words)}
     n = len(all_words)
-    
+
     cooc_matrix = np.zeros((n,n),dtype=int)
     for word1, inner_dict in cooc_counts.items():
         for word2, count in inner_dict.items():
