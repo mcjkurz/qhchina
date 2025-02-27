@@ -1,5 +1,5 @@
 # qhchina/__init__.py
-__version__ = "0.0.15"
+__version__ = "0.0.16"
 
 from .analysis import calculate_collocations, cooc_matrix, compare_bows, project_2d, binary_analysis, get_axis
 from .preprocessing import split_into_chunks

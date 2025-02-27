@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.15"  #  IMPORTANT: Increment this!  Match __version__ in __init__.py
+version = "0.0.16"  #  IMPORTANT: Increment this!  Match __version__ in __init__.py
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
