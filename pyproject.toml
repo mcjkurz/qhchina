@@ -30,6 +30,9 @@ dependencies = [
     "scikit_learn"
 ]
 
+[tool.setuptools.packages.find]
+exclude = ["data"]
+
 [project.urls]
 "Homepage" = "https://github.com/mcjkurz/qhchina"  # Replace with your repo URL
 "Bug Tracker" = "https://github.com/mcjkurz/qhchina/issues"
