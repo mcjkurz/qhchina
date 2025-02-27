@@ -1,7 +1,6 @@
 import shutil
 import matplotlib
 import requests
-from fontTools.ttLib import TTFont
 from pathlib import Path
 
 PACKAGE_PATH = Path(__file__).parents[0].resolve()
