@@ -111,15 +111,15 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words):
 
     return results
 
-def find_collocations(tokenized_sentences, target_words, method='window', horizon=5, stopwords=None, as_dataframe=False):
+def find_collocates(sentences, target_words, method='window', horizon=5, stopwords=None, as_dataframe=False):
     if not isinstance(target_words, list):
         target_words = [target_words]
     target_words = set(target_words)
 
     if method == 'window':
-        results = _calculate_collocations_window(tokenized_sentences, target_words, horizon=horizon)
+        results = _calculate_collocations_window(sentences, target_words, horizon=horizon)
     elif method == 'sentence':
-        results = _calculate_collocations_sentence(tokenized_sentences, target_words)
+        results = _calculate_collocations_sentence(sentences, target_words)
     else:
         raise NotImplementedError(f"The method {method} is not implemented.")
 
