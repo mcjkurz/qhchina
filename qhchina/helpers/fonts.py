@@ -11,13 +11,16 @@ def set_font(font='Noto Sans CJK TC') -> None:
     matplotlib.rcParams['font.sans-serif'] = [font, 'sans-serif']
     matplotlib.rcParams['axes.unicode_minus'] = False
 
-def load_font(target_font : str = 'Noto Sans CJK TC') -> None:
+def load_fonts(target_font : str = 'Noto Sans CJK TC') -> None:
+    print(HELPERS_PATH)
+    print(CJK_FONT_PATH)
+    print(MPL_FONT_PATH)
     cjk_fonts = [file.name for file in Path(f'{CJK_FONT_PATH}').glob('**/*') if not file.name.startswith(".")]
-        
     for font in cjk_fonts:
         source = Path(f'{CJK_FONT_PATH}/{font}').resolve()
         target = Path(f'{MPL_FONT_PATH}/{font}').resolve()
         shutil.copy(source, target)
         matplotlib.font_manager.fontManager.addfont(f'{target}')
         print(font)
-    set_font(target_font)
+    if target_font:
+        set_font(target_font)
