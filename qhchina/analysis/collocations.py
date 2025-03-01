@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
 from scipy.stats import fisher_exact
 import numpy as np
+import pandas as pd
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5):
     total_tokens = 0  # Total number of token positions in the corpus
@@ -127,8 +128,7 @@ def find_collocates(sentences, target_words, method='window', horizon=5, stopwor
         results = [result for result in results if result["collocate"] not in stopwords]
 
     if as_dataframe:
-        import pandas
-        results = pandas.DataFrame(results)
+        results = pd.DataFrame(results)
     return results
 
 def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, 
@@ -253,8 +253,6 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
     
     # Return results based on parameters
     if as_dataframe:
-        import pandas as pd
-        
         if use_sparse:
             # Convert sparse matrix to dense for DataFrame
             # Note: This could be memory-intensive for very large matrices

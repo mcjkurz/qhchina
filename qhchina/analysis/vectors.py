@@ -24,15 +24,6 @@ def project_2d(vectors,
     title (str, optional): Title of the plot. Defaults to None.
     color (list of str or str, optional): List of colors for the vectors or a single color. Defaults to None.
     """
-    # Ensure vectors are lists or tuples
-    if not isinstance(vectors, (list, tuple, dict)):
-        raise ValueError("vectors must be a list, tuple, or dict")
-
-    # If vectors is a list or tuple, ensure each element is a list or tuple
-    if isinstance(vectors, (list, tuple)):
-        if not all(isinstance(vec, (list, tuple)) for vec in vectors):
-            raise ValueError("Each vector must be a list or tuple")
-
     # Ensure labels match the number of vectors if provided
     if labels is not None:
         if len(labels) != len(vectors):
@@ -130,14 +121,14 @@ def project_bias(x, y, targets, word_vectors,
     :param adjust_text_labels: if True, tries to automatically adjust text to reduce overlap
     """
     # Ensure x is a list of tuples
-    if isinstance(x, (tuple, list)) and len(x) == 2:
+    if isinstance(x, tuple) and len(x) == 2:
         x = [x]
     if not all(isinstance(pair, tuple) for pair in x):
         raise ValueError("x must be a tuple or a list of tuples")
 
     # Ensure y is a list of tuples or None
     if y is not None:
-        if isinstance(y, (tuple, list)) and len(y) == 2:
+        if isinstance(y, tuple) and len(y) == 2:
             y = [y]
         if not all(isinstance(pair, tuple) for pair in y):
             raise ValueError("y must be a tuple, a list of tuples, or None")

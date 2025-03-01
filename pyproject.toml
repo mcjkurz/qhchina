@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.19"
+version = "0.0.22"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -26,7 +26,8 @@ dependencies = [
     "numpy",
     "matplotlib",
     "pandas",
-    "scikit_learn"
+    "scikit_learn",
+    "adjustText"
 ]
 
 [tool.setuptools.packages.find]

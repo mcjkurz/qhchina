@@ -1,5 +1,5 @@
 # qhchina/__init__.py
-__version__ = "0.0.19"
+__version__ = "0.0.22"
 
 from .analysis import (find_collocates, 
                        cooc_matrix, 
