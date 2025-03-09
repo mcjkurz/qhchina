@@ -80,11 +80,18 @@ def project_2d(vectors,
         plt.savefig(filename, bbox_inches='tight', dpi=300)
     plt.show()
 
-def get_axis(anchors):
+def get_bias_direction(anchors):
     """
     Given either a single tuple (pos_anchor, neg_anchor) or a list of tuples,
-    compute the mean difference vector (pos - neg) and return the normalized axis.
-    Assumes anchors are already vectors.
+    compute the direction vector for measuring bias by taking the mean of 
+    differences between positive and negative anchor pairs.
+    
+    Parameters:
+    anchors: A tuple (pos_vector, neg_vector) or list of such tuples
+            Each vector in the pairs should be a numpy array
+    
+    Returns:
+    numpy array representing the bias direction vector (unnormalized)
     """
     if isinstance(anchors, tuple):
         anchors = [anchors]
@@ -94,12 +101,38 @@ def get_axis(anchors):
     for (pos_vector, neg_vector) in anchors:
         diffs.append(pos_vector - neg_vector)
     
-    axis = np.mean(diffs, axis=0)  # average across all pairs
-    axis_norm = np.linalg.norm(axis)
-    if axis_norm == 0:
-        # Edge case: if all diffs sum to zero (very unlikely), return zeros
-        return axis
-    return axis / axis_norm
+    bias_direction = np.mean(diffs, axis=0)
+    # normalize the bias direction
+    bias_norm = np.linalg.norm(bias_direction)
+    return bias_direction / bias_norm
+
+def calculate_bias(anchors, targets, word_vectors):
+    """
+    Calculate bias scores for target words along an axis defined by anchor pairs.
+    
+    Parameters:
+    anchors: tuple or list of tuples, e.g. ("man", "woman") or [("king", "queen"), ("man", "woman")]
+    targets: list of words to calculate bias for
+    word_vectors: keyed vectors (e.g. from word2vec_model.wv)
+    
+    Returns:
+    numpy array of bias scores (dot products) for each target word
+    """
+    # Ensure anchors is a list of tuples
+    if isinstance(anchors, tuple) and len(anchors) == 2:
+        anchors = [anchors]
+    if not all(isinstance(pair, tuple) for pair in anchors):
+        raise ValueError("anchors must be a tuple or a list of tuples")
+
+    # Get vectors for anchor pairs
+    anchor_vectors = [(word_vectors[pos], word_vectors[neg]) for pos, neg in anchors]
+    
+    # Calculate the bias direction
+    bias_direction = get_bias_direction(anchor_vectors)
+    
+    # Calculate dot products for each target
+    target_vectors = [word_vectors[target] for target in targets]
+    return np.array([np.dot(vec, bias_direction) for vec in target_vectors])
 
 def project_bias(x, y, targets, word_vectors,
                     title=None, color=None, figsize=(8,8),
@@ -109,31 +142,20 @@ def project_bias(x, y, targets, word_vectors,
       - axis_x: derived from x (single tuple or list of tuples)
       - axis_y: derived from y (single tuple or list of tuples), if provided
 
-    :param x: tuple or a list of tuples for the horizontal axis, e.g. ("同志","敌人") or [("man","woman"), ...]
-    :param y: tuple or a list of tuples for the vertical axis, or None for 1D
-    :param targets: list of words to plot
-    :param word_vectors: keyed vectors (e.g. from word2vec_model.wv)
-    :param title: optional plot title
-    :param color: either a single color or list of colors for the words
-    :param figsize: (width, height) in inches
-    :param fontsize: font size for word labels
-    :param filename: if given, saves the figure to disk
-    :param adjust_text_labels: if True, tries to automatically adjust text to reduce overlap
+    Parameters remain the same as before, but calculation of bias scores is now handled separately.
     """
-    # Ensure x is a list of tuples
+    # Input validation
     if isinstance(x, tuple) and len(x) == 2:
         x = [x]
     if not all(isinstance(pair, tuple) for pair in x):
         raise ValueError("x must be a tuple or a list of tuples")
 
-    # Ensure y is a list of tuples or None
     if y is not None:
         if isinstance(y, tuple) and len(y) == 2:
             y = [y]
         if not all(isinstance(pair, tuple) for pair in y):
             raise ValueError("y must be a tuple, a list of tuples, or None")
 
-    # Ensure targets is a list
     if not isinstance(targets, list):
         raise ValueError("targets must be a list of words to be plotted")
 
@@ -143,30 +165,16 @@ def project_bias(x, y, targets, word_vectors,
         raise ValueError(f"The following targets are missing in vectors and cannot be plotted: {', '.join(missing_targets)}")
 
     texts = []
-
-    axis_x_unit = get_axis([(word_vectors[pos_target], word_vectors[neg_target]) 
-                            for pos_target, neg_target in x])
-
-    axis_y_unit = None
-    if y is not None:
-        axis_y_unit = get_axis([(word_vectors[pos_target], word_vectors[neg_target]) 
-                                for pos_target, neg_target in y])
-
     targets = list(set(targets))  # remove duplicates
-    target_vectors = [word_vectors[target] for target in targets]
 
-    projections_x = np.array([
-        np.dot(vec, axis_x_unit) for vec in target_vectors
-    ])
-
-    if axis_y_unit is not None:
-        projections_y = np.array([
-            np.dot(vec, axis_y_unit) for vec in target_vectors
-        ])
+    # Calculate bias scores
+    projections_x = calculate_bias(x, targets, word_vectors)
+    projections_y = calculate_bias(y, targets, word_vectors) if y is not None else None
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    if axis_y_unit is None:
+    if projections_y is None:
+        # 1D visualization
         if disperse_y:
             y_dispersion = np.random.uniform(-0.1, 0.1, size=projections_x.shape)
             y_dispersion_max = np.max(np.abs(y_dispersion))
@@ -198,7 +206,7 @@ def project_bias(x, y, targets, word_vectors,
         ax.set_ylim((-y_dispersion_max*1.2, y_dispersion_max*1.2))
 
     else:
-        # 2D case: we have both x and y
+        # 2D visualization
         for i, (proj_x, proj_y) in enumerate(zip(projections_x, projections_y)):
             c = color[i] if (isinstance(color, list)) else color
             ax.scatter(proj_x, proj_y, color=c)

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.22"
+version = "0.0.23"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -27,11 +27,14 @@ dependencies = [
     "matplotlib",
     "pandas",
     "scikit_learn",
-    "adjustText"
+    "adjustText",
+    "transformers",
+    "torch"
+
 ]
 
 [tool.setuptools.packages.find]
-exclude = ["data"]
+exclude = ["data", "tests"]
 
 [tool.setuptools.package-data]
 "qhchina" = ["helpers/fonts/*.otf"]
