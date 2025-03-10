@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import numpy as np
 from typing import List, Optional, Union, Dict, Any, Tuple
 from pathlib import Path
@@ -18,26 +18,34 @@ def set_device(device: Optional[str] = None) -> str:
     
     Args:
         device: Optional device specification ('cuda', 'mps', 'cpu', or None)
-                If None, will automatically select the best available device
+                If None, will return 'cpu'. Only returns 'cuda' or 'mps' if explicitly specified.
     
     Returns:
         str: The selected device ('cuda', 'mps', or 'cpu')
     """
-    if device is None:
+    if device == "cuda":
         if torch.cuda.is_available():
             return "cuda"
-        elif torch.backends.mps.is_available():
+        else:
+            print("CUDA not available, using CPU")
+            return "cpu"
+    elif device == "mps":
+        if torch.backends.mps.is_available():
             return "mps"
         else:
+            print("MPS not available, using CPU")
             return "cpu"
-    return device
+    return "cpu"
 
 class TextDataset(Dataset):
-    def __init__(self, texts: List[str], tokenizer: AutoTokenizer, max_length: int = 512, labels: Optional[List[int]] = None):
+    def __init__(self, texts: List[str], 
+                 tokenizer: AutoTokenizer, 
+                 max_length: Optional[int] = None, 
+                 labels: Optional[List[int]] = None):
         self.encodings = tokenizer(texts, 
                                    truncation=True, 
-                                   padding=True, 
-                                   max_length=max_length, 
+                                   padding=True,
+                                   max_length=max_length,
                                    return_tensors='pt', 
                                    return_token_type_ids=False)
         self.labels = labels
@@ -80,12 +88,12 @@ def plot_training_curves(
     plt.close()
 
 def train_bert_classifier(
-    model: PreTrainedModel,
+    model: AutoModelForSequenceClassification,
     train_dataset: Dataset,
-    val_dataset: Optional[Dataset] = None,
+    valid_dataset: Optional[Dataset] = None,
     batch_size: int = 16,
     learning_rate: float = 2e-5,
-    num_epochs: int = 3,
+    num_epochs: int = 1,
     device: Optional[str] = None,
     scheduler_type: str = "linear",
     warmup_steps: int = 0,
@@ -100,7 +108,7 @@ def train_bert_classifier(
     Args:
         model: Pre-loaded BERT model for classification
         train_dataset: PyTorch Dataset for training
-        val_dataset: Optional PyTorch Dataset for validation. If None, no validation is performed.
+        valid_dataset: Optional PyTorch Dataset for validation. If None, no validation is performed.
         batch_size: Training batch size
         learning_rate: Learning rate for training
         num_epochs: Number of training epochs
@@ -116,8 +124,8 @@ def train_bert_classifier(
         Dictionary containing training history and final model
     """
     print(f"Training set size: {len(train_dataset)}")
-    if val_dataset is not None:
-        print(f"Validation set size: {len(val_dataset)}")
+    if valid_dataset is not None:
+        print(f"Validation set size: {len(valid_dataset)}")
     
     # Set device
     device = set_device(device)
@@ -127,7 +135,7 @@ def train_bert_classifier(
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size) if val_dataset is not None else None
+    val_loader = DataLoader(valid_dataset, batch_size=batch_size) if valid_dataset is not None else None
     
     # Initialize optimizer
     optimizer = AdamW(model.parameters(), lr=learning_rate)
@@ -188,7 +196,7 @@ def train_bert_classifier(
     # Training history
     history = {
         'batch_losses': [],  # List of (batch_number, loss) tuples
-        'val_loss': [] if val_dataset is not None else None
+        'val_loss': [] if valid_dataset is not None else None
     }
     
     # Setup logging directory
@@ -253,8 +261,11 @@ def train_bert_classifier(
         # Calculate epoch metrics
         epoch_loss = total_loss / num_batches
         
+        print(f'Epoch {epoch + 1}:')
+        print(f'Train Loss: {epoch_loss:.4f}')
+        
         # Validation if val_dataset is provided
-        if val_dataset is not None:
+        if valid_dataset is not None:
             model.eval()
             val_loss = 0
             
@@ -272,12 +283,7 @@ def train_bert_classifier(
             val_loss = val_loss / len(val_loader)
             history['val_loss'].append(val_loss)
             
-            print(f'Epoch {epoch + 1}:')
-            print(f'Train Loss: {epoch_loss:.4f}')
             print(f'Val Loss: {val_loss:.4f}')
-        else:
-            print(f'Epoch {epoch + 1}:')
-            print(f'Train Loss: {epoch_loss:.4f}')
         
         # Save checkpoint if save_dir is provided
         if save_dir:
@@ -302,12 +308,12 @@ def train_bert_classifier(
         'model': model,
         'history': history,
         'train_size': len(train_dataset),
-        'val_size': len(val_dataset) if val_dataset is not None else None
+        'val_size': len(valid_dataset) if valid_dataset is not None else None
     }
 
 
 def evaluate(
-    model: PreTrainedModel,
+    model: AutoModelForSequenceClassification,
     dataset: Dataset,
     batch_size: int = 32,
     device: Optional[str] = None,
@@ -347,7 +353,7 @@ def evaluate(
         )
     
     # Get predictions using classify function
-    predictions = classify(
+    predictions = predict(
         model=model,
         dataset=dataset,
         batch_size=batch_size,
@@ -355,12 +361,21 @@ def evaluate(
     )
     all_predictions = np.array(predictions)
     
-    # Calculate metrics
+    # Calculate metrics with different averaging methods
     accuracy = accuracy_score(all_labels, all_predictions)
-    precision, recall, f1, _ = precision_recall_fscore_support(
+    
+    # Weighted average (takes class imbalance into account)
+    weighted_precision, weighted_recall, weighted_f1, _ = precision_recall_fscore_support(
         all_labels, 
         all_predictions, 
         average='weighted'
+    )
+    
+    # Macro average (treats all classes equally)
+    macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
+        all_labels, 
+        all_predictions, 
+        average='macro'
     )
     
     # Calculate per-class metrics
@@ -374,7 +389,8 @@ def evaluate(
         class_metrics[f'class_{label}'] = {
             'precision': class_precision,
             'recall': class_recall,
-            'f1': class_f1
+            'f1': class_f1,
+            'support': np.sum(all_labels == label)  # Add class support (number of samples)
         }
     
     # Calculate confusion matrix
@@ -383,9 +399,16 @@ def evaluate(
     # Create results dictionary
     results = {
         'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
+        'weighted_avg': {
+            'precision': weighted_precision,
+            'recall': weighted_recall,
+            'f1': weighted_f1
+        },
+        'macro_avg': {
+            'precision': macro_precision,
+            'recall': macro_recall,
+            'f1': macro_f1
+        },
         'class_metrics': class_metrics,
         'confusion_matrix': conf_matrix.tolist(),
         'predictions': all_predictions.tolist(),
@@ -395,9 +418,16 @@ def evaluate(
     # Print summary
     print("\nEvaluation Results:")
     print(f"Accuracy: {accuracy:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall: {recall:.4f}")
-    print(f"F1 Score: {f1:.4f}")
+    
+    print("\nWeighted Average (accounts for class imbalance):")
+    print(f"Precision: {weighted_precision:.4f}")
+    print(f"Recall: {weighted_recall:.4f}")
+    print(f"F1 Score: {weighted_f1:.4f}")
+    
+    print("\nMacro Average (treats all classes equally):")
+    print(f"Precision: {macro_precision:.4f}")
+    print(f"Recall: {macro_recall:.4f}")
+    print(f"F1 Score: {macro_f1:.4f}")
     
     print("\nPer-class Metrics:")
     for label, metrics in class_metrics.items():
@@ -405,16 +435,20 @@ def evaluate(
         print(f"  Precision: {metrics['precision']:.4f}")
         print(f"  Recall: {metrics['recall']:.4f}")
         print(f"  F1: {metrics['f1']:.4f}")
+        print(f"  Support: {metrics['support']}")
+    
+    # Print confusion matrix
+    print("\nConfusion Matrix:")
+    print(conf_matrix)
     
     return results
 
-def classify(
-    model: PreTrainedModel,
+def predict(
+    model: AutoModelForSequenceClassification,
     texts: Optional[Union[str, List[str]]] = None,
     dataset: Optional[Dataset] = None,
     tokenizer: Optional[AutoTokenizer] = None,
     batch_size: int = 32,
-    max_length: int = 512,
     device: Optional[str] = None,
     return_probs: bool = False,
 ) -> Union[List[int], Dict[str, Any]]:
@@ -427,7 +461,6 @@ def classify(
         dataset: PyTorch Dataset to use for inference (required if texts is None)
         tokenizer: Pre-loaded tokenizer corresponding to the model (required if texts is provided)
         batch_size: Batch size for inference
-        max_length: Maximum sequence length for tokenization (only used if texts is provided)
         device: Device to run inference on ('cuda', 'mps', or 'cpu')
         return_probs: Whether to return prediction probabilities
     
@@ -461,7 +494,7 @@ def classify(
             texts = [texts]
         
         # Create dataset from texts
-        dataset = TextDataset(texts, tokenizer, max_length)
+        dataset = TextDataset(texts, tokenizer)
     
     dataloader = DataLoader(dataset, batch_size=batch_size)
     
@@ -500,20 +533,18 @@ def classify(
     else:
         return all_predictions
 
-def create_datasets(
-    texts: List[str],
-    labels: List[int],
+def make_datasets(
+    data: List[Tuple[str, int]],
     tokenizer: AutoTokenizer,
     split: Union[Tuple[float, float], Tuple[float, float, float]],
-    max_length: int = 512,
+    max_length: Optional[int] = None,
     random_seed: int = 42,
 ) -> Union[Tuple[Dataset, Dataset], Tuple[Dataset, Dataset, Dataset]]:
     """
-    Create train/val/test datasets from texts and labels with stratification.
+    Create train/val/test datasets from a list of (text, label) tuples with stratification.
     
     Args:
-        texts: List of texts
-        labels: List of labels
+        data: List of tuples where each tuple contains (text, label)
         tokenizer: Tokenizer to use for text encoding
         split: Tuple of proportions for splits:
             - (train_prop, val_prop) for train/val split
@@ -535,6 +566,9 @@ def create_datasets(
     
     if abs(sum(split) - 1.0) > 1e-6:
         raise ValueError("Proportions must sum to 1.0")
+    
+    # Unzip the data into texts and labels
+    texts, labels = zip(*data)
     
     # Calculate split sizes
     total_size = len(texts)
@@ -584,14 +618,14 @@ def create_datasets(
         return train_dataset, val_dataset
 
 def bert_encode(
-    model: PreTrainedModel,
+    model: AutoModelForSequenceClassification,
     tokenizer: AutoTokenizer,
     texts: List[str],
     batch_size: int = 32,
-    max_length: int = 512,
+    max_length: Optional[int] = None,
     pooling_strategy: str = 'cls',
     device: Optional[str] = None,
-) -> Union[np.ndarray, List[np.ndarray]]:
+) -> List[np.ndarray]:
     """
     Extract embeddings from a BERT model for given text(s).
     
@@ -600,15 +634,11 @@ def bert_encode(
         tokenizer: Pre-loaded tokenizer corresponding to the model
         texts: List of texts to encode
         batch_size: Batch size for processing
-        max_length: Maximum sequence length for tokenization
         pooling_strategy: Strategy for pooling embeddings ('cls' or 'mean')
         device: Device to run inference on ('cuda', 'mps', or 'cpu')
     
     Returns:
-        If single text:
-            numpy array of shape (hidden_size,)
-        If list of texts:
-            list of numpy arrays, each of shape (hidden_size,)
+        list of numpy arrays, each of shape (hidden_size,)
     """    
     # Set device
     device = set_device(device)

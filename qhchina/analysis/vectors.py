@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from adjustText import adjust_text
 
 def project_2d(vectors, 
                labels=None, 
@@ -69,6 +68,7 @@ def project_2d(vectors,
             text = ax.text(vector[0], vector[1], labels[i], fontsize=fontsize, ha='left')
             texts.append(text)
     if adjust_text_labels and labels:
+        from adjustText import adjust_text
         adjust_text(texts, arrowprops=dict(arrowstyle='-', color='gray', lw=0.5))
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
@@ -104,6 +104,8 @@ def get_bias_direction(anchors):
     bias_direction = np.mean(diffs, axis=0)
     # normalize the bias direction
     bias_norm = np.linalg.norm(bias_direction)
+    # make sure it's not 0, otherwise make it 1
+
     return bias_direction / bias_norm
 
 def calculate_bias(anchors, targets, word_vectors):
@@ -173,6 +175,15 @@ def project_bias(x, y, targets, word_vectors,
 
     fig, ax = plt.subplots(figsize=figsize)
 
+    pos_anchors_x = []
+    neg_anchors_x = []
+    for pair in x:
+        pos_anchors_x.append(pair[0])
+        neg_anchors_x.append(pair[1]) 
+    
+    axis_label = f"{', '.join(neg_anchors_x)} {'-'*20} {', '.join(pos_anchors_x)}"
+    ax.set_xlabel(axis_label, fontsize=fontsize)
+
     if projections_y is None:
         # 1D visualization
         if disperse_y:
@@ -191,16 +202,6 @@ def project_bias(x, y, targets, word_vectors,
 
         # Draw a horizontal axis at y=0
         ax.axhline(0, color='gray', linewidth=0.5)
-
-        pos_anchors = []
-        neg_anchors = []
-        for pair in x:
-            pos_anchors.append(pair[0])
-            neg_anchors.append(pair[1]) 
-        
-        axis_label = f"{', '.join(neg_anchors)} {'-'*20} {', '.join(pos_anchors)}"
-        ax.set_xlabel(axis_label, fontsize=fontsize)
-
         # Hide y-ticks
         ax.set_yticks([])
         ax.set_ylim((-y_dispersion_max*1.2, y_dispersion_max*1.2))
@@ -214,15 +215,6 @@ def project_bias(x, y, targets, word_vectors,
                            fontsize=fontsize, ha='left')
             texts.append(text)
 
-        pos_anchors_x = []
-        neg_anchors_x = []
-        for pair in x:
-            pos_anchors_x.append(pair[0])
-            neg_anchors_x.append(pair[1]) 
-        
-        axis_label_x = f"{', '.join(neg_anchors_x)} {'-'*20} {', '.join(pos_anchors_x)}"
-        ax.set_xlabel(axis_label_x, fontsize=fontsize)
-
         pos_anchors_y = []
         neg_anchors_y = []
         for pair in y:
@@ -233,6 +225,7 @@ def project_bias(x, y, targets, word_vectors,
         ax.set_ylabel(axis_label_y, fontsize=fontsize)
 
     if adjust_text_labels:
+        from adjustText import adjust_text
         adjust_text(texts, arrowprops=dict(arrowstyle='-', color='gray', lw=0.5))
 
     ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
@@ -247,3 +240,47 @@ def cosine_similarity(v1, v2):
     Compute the cosine similarity between two vectors.
     """
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
+def most_similar(target_vector, vectors, labels=None, metric='cosine', top_n=None):
+    """
+    Find the most similar vectors to a target vector using the specified similarity metric.
+    
+    Parameters:
+    target_vector (numpy.ndarray): The reference vector to compare against
+    vectors (list or numpy.ndarray): List of vectors to compare with the target
+    labels (list, optional): Labels corresponding to the vectors. If provided, returns (label, score) pairs
+    metric (str or callable, optional): Similarity metric to use. Can be 'cosine' or a callable that takes two vectors
+    top_n (int, optional): Number of top results to return. If None, returns all results
+    
+    Returns:
+    If labels provided: List of (label, score) tuples sorted by similarity score in descending order
+    If no labels: List of (index, score) tuples sorted by similarity score in descending order
+    """
+    if not isinstance(vectors, np.ndarray):
+        vectors = np.array(vectors)
+    
+    if callable(metric):
+        similarity_func = metric
+    elif metric == 'cosine':
+        similarity_func = cosine_similarity
+    else:
+        raise ValueError("metric must be 'cosine' or a callable function")
+    
+    # Calculate similarities
+    similarities = [similarity_func(target_vector, vec) for vec in vectors]
+    
+    # Create pairs of (index/label, similarity)
+    if labels:
+        if len(labels) != len(vectors):
+            raise ValueError("Number of labels must match number of vectors")
+        pairs = list(zip(labels, similarities))
+    else:
+        pairs = list(enumerate(similarities))
+    
+    # Sort by similarity in descending order
+    sorted_pairs = sorted(pairs, key=lambda x: x[1], reverse=True)
+    
+    # Return top_n results if specified
+    if top_n is not None:
+        return sorted_pairs[:top_n]
+    return sorted_pairs
