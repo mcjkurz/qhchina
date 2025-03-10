@@ -1,16 +1,22 @@
 from collections import Counter
 import numpy as np
 from scipy.stats import fisher_exact, chi2_contingency
+from typing import List, Dict, Tuple, Union
 
-def compare_corpora(corpusA, corpusB, method='fisher', min_count=1, as_dataframe=False):
+def compare_corpora(corpusA : List[str], 
+                    corpusB : List[str], 
+                    method : str = 'fisher', 
+                    min_count : Union[int, Tuple[int, int]] = 1,
+                    as_dataframe : bool = False) -> List[Dict]:
     """
     Compare two corpora to identify statistically significant differences in word usage.
     
     Parameters:
       corpusA (list of str): List of tokens from corpus A.
       corpusB (list of str): List of tokens from corpus B.
-      significance (float): p-value threshold for significance.
       method (str): 'fisher' for Fisher's exact test or 'chi2' for the chi-square test.
+      min_count (int or tuple): minimum count for a word to be included in the analysis.
+      as_dataframe (bool): Whether to return a pandas DataFrame.
       
     Returns:
       List[dict]: Each dict contains information about a word's frequency in both corpora,

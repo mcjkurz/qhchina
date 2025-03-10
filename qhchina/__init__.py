@@ -8,7 +8,7 @@ For more specialized functions, import from specific modules:
 - qhchina.educational: Educational visualization tools
 """
 
-__version__ = "0.0.25"
+__version__ = "0.0.26"
 
 # Most commonly used analysis functions
 from .analysis import (
