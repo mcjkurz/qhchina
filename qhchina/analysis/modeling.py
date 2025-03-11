@@ -42,6 +42,10 @@ class TextDataset(Dataset):
                  tokenizer: AutoTokenizer, 
                  max_length: Optional[int] = None, 
                  labels: Optional[List[int]] = None):
+
+        if labels is not None and len(labels) != len(texts):
+            raise ValueError(f"Number of labels ({len(labels)}) must match number of texts ({len(texts)})")
+            
         self.encodings = tokenizer(texts, 
                                    truncation=True, 
                                    padding=True,
@@ -76,7 +80,14 @@ def plot_training_curves(
     
     # Plot batch losses
     batch_numbers, losses = zip(*history['batch_losses'])
-    plt.plot(batch_numbers, losses, label='Batch Loss')
+    plt.plot(batch_numbers, losses, label='Training Loss')
+    
+    # Plot validation loss if available
+    if history['val_loss'] is not None and len(history['val_loss']) > 0:
+        # Create x-axis points for validation loss
+        # Assuming validation happens once per epoch
+        val_points = np.linspace(0, len(batch_numbers), len(history['val_loss']))
+        plt.plot(val_points, history['val_loss'], 'r-', label='Validation Loss')
     
     plt.title(title)
     plt.xlabel('Batch Number')
@@ -143,13 +154,16 @@ def train_bert_classifier(
     # Calculate total steps for scheduling
     total_steps = len(train_loader) * num_epochs
     if max_train_batches is not None:
-        total_steps = min(max_train_batches * num_epochs, total_steps)
+        total_steps = min(max_train_batches, total_steps)
+    
+    if warmup_steps >= total_steps:
+        raise ValueError(f"warmup_steps ({warmup_steps}) must be less than total_steps ({total_steps})")
     
     # Create warmup scheduler
     if warmup_steps > 0:
         warmup_scheduler = LinearLR(
             optimizer,
-            start_factor=0.0,
+            start_factor=1e-6,
             end_factor=1.0,
             total_iters=warmup_steps
         )
@@ -159,7 +173,7 @@ def train_bert_classifier(
             main_scheduler = LinearLR(
                 optimizer,
                 start_factor=1.0,
-                end_factor=0.0,
+                end_factor=1e-6,
                 total_iters=total_steps - warmup_steps
             )
         elif scheduler_type == "cosine":
@@ -182,7 +196,7 @@ def train_bert_classifier(
             scheduler = LinearLR(
                 optimizer,
                 start_factor=1.0,
-                end_factor=0.0,
+                end_factor=1e-6,
                 total_iters=total_steps
             )
         elif scheduler_type == "cosine":
@@ -206,7 +220,11 @@ def train_bert_classifier(
     
     # Training loop
     batch_number = 0
+    finished_trainig = False
+
     for epoch in range(num_epochs):
+        if finished_trainig:
+            break
         model.train()
         total_loss = 0
         num_batches = 0
@@ -216,6 +234,7 @@ def train_bert_classifier(
         for batch_idx, batch in enumerate(progress_bar):
             # Check if we've reached max_train_batches
             if max_train_batches is not None and batch_idx >= max_train_batches:
+                finished_trainig = True
                 break
                 
             # Move batch to device
@@ -231,8 +250,13 @@ def train_bert_classifier(
             scheduler.step()
             optimizer.zero_grad()
             
-            # Update metrics
+            # Get loss value and clear memory
             current_loss = loss.item()
+            del outputs, loss
+            if device == "cuda":
+                torch.cuda.empty_cache()
+            
+            # Update metrics
             total_loss += current_loss
             num_batches += 1
             
@@ -268,6 +292,7 @@ def train_bert_classifier(
         if valid_dataset is not None:
             model.eval()
             val_loss = 0
+            val_batches = 0
             
             with torch.no_grad():
                 val_progress = tqdm(val_loader, desc=f'Validation')
@@ -276,11 +301,17 @@ def train_bert_classifier(
                     outputs = model(**batch)
                     current_val_loss = outputs.loss.item()
                     val_loss += current_val_loss
+                    val_batches += 1
                     val_progress.set_postfix({
                         'loss': f'{current_val_loss:.4f}'
                     })
+                    
+                    # Clear memory
+                    del outputs
+                    if device == "cuda":
+                        torch.cuda.empty_cache()
             
-            val_loss = val_loss / len(val_loader)
+            val_loss = val_loss / val_batches
             history['val_loss'].append(val_loss)
             
             print(f'Val Loss: {val_loss:.4f}')
@@ -330,6 +361,10 @@ def evaluate(
     Returns:
         Dictionary containing evaluation metrics and statistics
     """
+    # Input validation
+    if len(dataset) == 0:
+        raise ValueError("Dataset is empty")
+    
     # Set device
     device = set_device(device)
     
@@ -337,12 +372,36 @@ def evaluate(
     model = model.to(device)
     model.eval()
     
-    # Get true labels from dataset and verify number of classes
-    all_labels = []
+    # Create dataloader
     dataloader = DataLoader(dataset, batch_size=batch_size)
-    for batch in dataloader:
-        all_labels.extend(batch['labels'].numpy())
+    
+    # Process batches
+    all_labels = []
+    all_predictions = []
+    
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Evaluating"):
+            # Get labels
+            labels = batch['labels'].numpy()
+            all_labels.extend(labels)
+            
+            # Move batch to device
+            batch = {k: v.to(device) for k, v in batch.items()}
+            
+            # Forward pass
+            outputs = model(**batch)
+            
+            # Get predictions
+            predictions = torch.argmax(outputs.logits, dim=-1)
+            all_predictions.extend(predictions.cpu().numpy())
+            
+            # Clear GPU memory if needed
+            if device == "cuda":
+                torch.cuda.empty_cache()
+    
+    # Convert to numpy arrays
     all_labels = np.array(all_labels)
+    all_predictions = np.array(all_predictions)
     
     # Sanity check: verify number of unique labels matches model's num_labels
     unique_labels = np.unique(all_labels)
@@ -351,15 +410,6 @@ def evaluate(
             f"Number of unique labels ({len(unique_labels)}) does not match "
             f"model's expected number of labels ({model.config.num_labels})"
         )
-    
-    # Get predictions using classify function
-    predictions = predict(
-        model=model,
-        dataset=dataset,
-        batch_size=batch_size,
-        device=device
-    )
-    all_predictions = np.array(predictions)
     
     # Calculate metrics with different averaging methods
     accuracy = accuracy_score(all_labels, all_predictions)
@@ -390,7 +440,7 @@ def evaluate(
             'precision': class_precision,
             'recall': class_recall,
             'f1': class_f1,
-            'support': np.sum(all_labels == label)  # Add class support (number of samples)
+            'support': np.sum(all_labels == label)
         }
     
     # Calculate confusion matrix
@@ -437,7 +487,6 @@ def evaluate(
         print(f"  F1: {metrics['f1']:.4f}")
         print(f"  Support: {metrics['support']}")
     
-    # Print confusion matrix
     print("\nConfusion Matrix:")
     print(conf_matrix)
     
@@ -445,7 +494,7 @@ def evaluate(
 
 def predict(
     model: AutoModelForSequenceClassification,
-    texts: Optional[Union[str, List[str]]] = None,
+    texts: Optional[List[str]] = None,
     dataset: Optional[Dataset] = None,
     tokenizer: Optional[AutoTokenizer] = None,
     batch_size: int = 32,
@@ -457,7 +506,7 @@ def predict(
     
     Args:
         model: Pre-loaded BERT model for classification
-        texts: Single text or list of texts to predict (required if dataset is None)
+        texts: List of texts to predict (required if dataset is None)
         dataset: PyTorch Dataset to use for inference (required if texts is None)
         tokenizer: Pre-loaded tokenizer corresponding to the model (required if texts is provided)
         batch_size: Batch size for inference
@@ -489,10 +538,6 @@ def predict(
     
     # Create dataloader
     if texts is not None:
-        # Convert single text to list
-        if isinstance(texts, str):
-            texts = [texts]
-        
         # Create dataset from texts
         dataset = TextDataset(texts, tokenizer)
     
