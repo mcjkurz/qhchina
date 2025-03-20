@@ -1,13 +1,13 @@
-"""Analysis module for text and vector operations.
+"""Analytics module for text and vector operations.
 
 This module provides tools for:
-- Collocation analysis
+- Collocation analytics
 - Corpus comparison
 - Vector operations and projections
 - BERT-based modeling and classification
 """
 
-# Collocation analysis
+# Collocation analytics
 from .collocations import (
     find_collocates,
     cooc_matrix,
@@ -34,4 +34,10 @@ from .modeling import (
     set_device,
     predict,
     bert_encode,
+    semantic_change,
+    align_vectors,
+    visualize_semantic_trajectory,
+    visualize_semantic_trajectory_complete,
+    make_datasets,
+    add_corpus_tags,
 )

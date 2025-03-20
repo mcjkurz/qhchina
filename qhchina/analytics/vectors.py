@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
 def project_2d(vectors, 
                labels=None, 
@@ -237,9 +238,20 @@ def project_bias(x, y, targets, word_vectors,
 
 def cosine_similarity(v1, v2):
     """
-    Compute the cosine similarity between two vectors.
+    Compute the cosine similarity between vectors.
+    If v1 and v2 are single vectors, computes similarity between them.
+    If either is a matrix of vectors, uses sklearn's implementation for efficiency.
     """
-    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    # Convert inputs to numpy arrays if they aren't already
+    v1 = np.asarray(v1)
+    v2 = np.asarray(v2)
+    
+    # Handle single vector case
+    if v1.ndim == 1 and v2.ndim == 1:
+        return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    
+    # For matrix case, use sklearn's implementation
+    return sklearn_cosine_similarity(v1, v2)
 
 def most_similar(target_vector, vectors, labels=None, metric='cosine', top_n=None):
     """
