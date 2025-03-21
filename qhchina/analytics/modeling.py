@@ -153,6 +153,8 @@ def train_bert_classifier(
     print(f"Training set size: {len(train_dataset)}")
     if val_dataset is not None:
         print(f"Validation set size: {len(val_dataset)}")
+    if val_interval is not None and val_dataset is None:
+        raise ValueError("val_dataset must be provided if val_interval is not None")
     
     # Set device
     device = set_device(device)
@@ -327,6 +329,8 @@ def train_bert_classifier(
                 history['val_metrics'] = []
             val_results['batch'] = total_batches_processed
             history['val_metrics'].append(val_results)
+            # print val loss
+            print(f'Validation Loss: {val_results["loss"]:.6f}')
             model.train()  # Set back to training mode
         
         # Save checkpoint if save_dir is provided
@@ -444,14 +448,16 @@ def evaluate(
     weighted_precision, weighted_recall, weighted_f1, _ = precision_recall_fscore_support(
         all_labels, 
         all_predictions, 
-        average='weighted'
+        average='weighted',
+        zero_division=0
     )
     
     # Macro average (treats all classes equally)
     macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
         all_labels, 
         all_predictions, 
-        average='macro'
+        average='macro',
+        zero_division=0
     )
     
     # Calculate per-class metrics
@@ -460,7 +466,8 @@ def evaluate(
         class_precision, class_recall, class_f1, _ = precision_recall_fscore_support(
             all_labels == label,
             all_predictions == label,
-            average='binary'
+            average='binary',
+            zero_division=0
         )
         class_metrics[f'class_{label}'] = {
             'precision': class_precision,
@@ -596,7 +603,7 @@ def make_datasets(
     tokenizer: AutoTokenizer,
     split: Union[Tuple[float, float], Tuple[float, float, float]],
     max_length: Optional[int] = None,
-    random_seed: int = 42,
+    random_seed: int = None,
 ) -> Union[Tuple[Dataset, Dataset], Tuple[Dataset, Dataset, Dataset]]:
     """
     Create train/val/test datasets from a list of (text, label) tuples with stratification.
@@ -627,6 +634,13 @@ def make_datasets(
     
     # Unzip the data into texts and labels
     texts, labels = zip(*data)
+    
+    # Print class distribution in original data
+    print("\nOriginal dataset class distribution:")
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    total = len(labels)
+    for label, count in zip(unique_labels, counts):
+        print(f"Class {label}: {count} examples ({count/total:.2%})")
     
     # Calculate split sizes
     total_size = len(texts)
@@ -664,13 +678,24 @@ def make_datasets(
     val_dataset = TextDataset(val_texts, tokenizer, max_length, val_labels)
     
     # Print split sizes
-    print(f"Total samples: {total_size}")
+    print(f"\nTotal samples: {total_size}")
     print(f"Training set size: {len(train_dataset)}")
     print(f"Validation set size: {len(val_dataset)}")
     
+    # Print class distribution for each split
+    print("\nTraining set class distribution:")
+    print_class_distribution(train_dataset)
+    
+    print("\nValidation set class distribution:")
+    print_class_distribution(val_dataset)
+    
     if len(split) == 3:
         test_dataset = TextDataset(test_texts, tokenizer, max_length, test_labels)
-        print(f"Test set size: {len(test_dataset)}")
+        print(f"\nTest set size: {len(test_dataset)}")
+        
+        print("\nTest set class distribution:")
+        print_class_distribution(test_dataset)
+        
         return train_dataset, val_dataset, test_dataset
     else:
         return train_dataset, val_dataset
@@ -1224,7 +1249,7 @@ def visualize_semantic_trajectory(
     method='pca', n_neighbors=5, perplexity=30, figsize=(12, 8),
     filename=None, transformations=None, adjust_text_labels=False,
     target_position_method='neighbor_mean', umap_n_neighbors=15, umap_min_dist=0.1, 
-    seed=42, fontsize=12, arrowstyle='-|>', arrow_color='blue', arrow_mutation_scale=15):
+    seed=None, fontsize=12, arrowstyle='-|>', arrow_color='blue', arrow_mutation_scale=15):
     """
     Visualize the semantic trajectory of a target word across corpora by showing its movement
     relative to its most significant neighbors in each transition period.
@@ -1445,7 +1470,7 @@ def visualize_semantic_trajectory_complete(semantic_change_results, target_word,
                                         method='pca', n_neighbors=5, perplexity=30, figsize=(15, 10),
                                         filename=None, transformations=None, adjust_text_labels=False,
                                         target_position_method='neighbor_mean', umap_n_neighbors=15, 
-                                        umap_min_dist=0.1, seed=42, fontsize=12, arrowstyle='-|>', 
+                                        umap_min_dist=0.1, seed=None, fontsize=12, arrowstyle='-|>', 
                                         arrow_color='blue', arrow_mutation_scale=15):
     """
     Create a comprehensive visualization of a target word's semantic trajectory across all transitions
@@ -1729,3 +1754,17 @@ def visualize_semantic_trajectory_complete(semantic_change_results, target_word,
         print(f"Saved complete trajectory plot to {filename}_complete.png")
     
     plt.close()
+
+def print_class_distribution(dataset):
+    """Print the distribution of classes in a dataset."""
+    if dataset.labels is None:
+        print("Dataset has no labels")
+        return
+    
+    labels = dataset.labels
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    total = len(labels)
+    
+    print("Class distribution:")
+    for label, count in zip(unique_labels, counts):
+        print(f"Class {label}: {count} examples ({count/total:.2%})")
