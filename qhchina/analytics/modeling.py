@@ -851,20 +851,21 @@ def add_corpus_tags(corpora, labels, target_words):
     
     return processed_corpora
 
-def semantic_change(corpora_data, target_words, method='consecutive', min_freq=5, top_n=None, 
-                   stopwords=None, window=5, min_length=1, vector_size=256, epochs=5, 
-                   anchor_words=1000, limit_most_similar=None, return_models=False, seed=None):
+def semantic_change(corpora_data, target_words, method='full', min_freq=5, top_n=None, 
+                   stopwords=None, window=5, min_length=1, vector_size=256, epochs=3, 
+                   anchor_words=1000, limit_most_similar=None, return_models=False, seed=None,
+                   batch_size=32, calculate_loss=False):
     """
-    Analyze semantic change of target words across consecutive corpora using either independent
-    or consecutive training approach.
+    Analyze semantic change of target words across consecutive corpora using various methods.
     
     Args:
         corpora_data: List of (label, corpus) tuples, where each corpus is a list of tokenized sentences
                      The order of tuples determines the order of analysis
         target_words: List of words to track for semantic change
-        method: Analysis method ('consecutive' or 'independent')
-                - consecutive: Train one model with tagged words
-                - independent: Train separate models and align with Procrustes
+        method: Analysis method ('window', 'procrustes', or 'full')
+                - window: Train one model with tagged words for each consecutive pair
+                - procrustes: Train separate models and align with Procrustes
+                - full: (default) Train one model on a combined corpus with balanced token counts
         min_freq: Minimum frequency threshold for words
         top_n: Number of top similar/dissimilar words to return (if None, return all)
         stopwords: Set of stopwords to exclude from final results
@@ -877,6 +878,8 @@ def semantic_change(corpora_data, target_words, method='consecutive', min_freq=5
                           similar words to the target in either time period
         return_models: Whether to return trained Word2Vec models along with results
         seed: Random seed for reproducibility
+        batch_size: Batch size for Word2Vec training
+        calculate_loss: Whether to calculate and return loss during Word2Vec training
     Returns:
         If return_models=False:
             Dict of format:
@@ -895,38 +898,52 @@ def semantic_change(corpora_data, target_words, method='consecutive', min_freq=5
     corpora = [corpus for _, corpus in corpora_data]
     transformations = None
     
-    if method == 'consecutive':
-        results, models = _semantic_change_consecutive(
+    if method == 'window':
+        results, models = _semantic_change_window(
             corpora, labels, target_words, min_freq, top_n,
             stopwords, window, min_length, vector_size, epochs,
-            limit_most_similar, seed
+            limit_most_similar, seed, batch_size, calculate_loss
         )
-    elif method == 'independent':
-        results, models, transformations = _semantic_change_independent(
+    elif method == 'procrustes':
+        results, models, transformations = _semantic_change_procrustes(
             corpora, labels, target_words, min_freq, top_n,
             stopwords, window, min_length, vector_size, epochs,
-            anchor_words, limit_most_similar, seed
+            anchor_words, limit_most_similar, seed, batch_size, calculate_loss
+        )
+    elif method == 'full':
+        results, models = _semantic_change_full(
+            corpora, labels, target_words, min_freq, top_n,
+            stopwords, window, min_length, vector_size, epochs,
+            limit_most_similar, seed, batch_size, calculate_loss
         )
     else:
-        raise ValueError("Method must be 'consecutive' or 'independent'")
+        raise ValueError("Method must be 'window', 'procrustes', or 'full'")
     
     if return_models:
-        return results, models, transformations
+        if transformations is not None:
+            return results, models, transformations
+        return results, models
     return results
 
-def _semantic_change_consecutive(corpora, labels, target_words, min_freq=5, top_n=None,
+def _semantic_change_window(corpora, labels, target_words, min_freq=5, top_n=None,
                            stopwords=None, window=5, min_length=1, vector_size=256, 
-                           epochs=5, limit_most_similar=None, seed=None):
+                           epochs=5, limit_most_similar=None, seed=None, batch_size=32, calculate_loss=False):
     """
-    Analyze semantic change using consecutive training approach.
+    Analyze semantic change using window training approach.
+    
+    This approach uses TemporalWord2Vec with a sliding window over pairs of corpora.
+    For each consecutive pair of corpora, a single model is trained where target words
+    are tagged with their respective time periods.
+    
     Internal helper function for semantic_change().
     """
-    from gensim.models import Word2Vec
+    from qhchina.analytics.word2vec import TemporalWord2Vec
     from sklearn.metrics.pairwise import cosine_similarity
     from tqdm.auto import tqdm
     import numpy as np
     import random
     from collections import Counter
+    from qhchina.helpers.texts import sample_sentences_to_token_count
     random.seed(seed)
     
     results = {}
@@ -940,7 +957,7 @@ def _semantic_change_consecutive(corpora, labels, target_words, min_freq=5, top_
     
     # Analyze each consecutive pair of corpora
     pbar = tqdm(enumerate(corpus_pairs), total=len(corpus_pairs), 
-               desc="Analyzing corpus pairs (consecutive)")
+               desc="Analyzing corpus pairs (window)")
     for i, (label1, label2) in pbar:
         label_pair = f"{label1}->{label2}"
         pbar.set_description(f"Analyzing: {label1}->{label2}")
@@ -950,34 +967,27 @@ def _semantic_change_consecutive(corpora, labels, target_words, min_freq=5, top_
         tokens_next = sum(len(sent) for sent in processed_corpora[i+1])
         min_tokens = min(tokens_prev, tokens_next)
         
-        # Sample sentences to match token count
-        def sample_sentences_to_token_count(corpus, target_tokens):
-            sampled_sentences = []
-            current_tokens = 0
-            sentence_indices = list(range(len(corpus)))
-            random.shuffle(sentence_indices)
-            
-            for idx in sentence_indices:
-                sentence = corpus[idx]
-                if current_tokens + len(sentence) <= target_tokens:
-                    sampled_sentences.append(sentence)
-                    current_tokens += len(sentence)
-                if current_tokens >= target_tokens:
-                    break
-            return sampled_sentences
-        
+        # Sample sentences to balance token counts
         corpus_prev = sample_sentences_to_token_count(processed_corpora[i], min_tokens)
         corpus_next = sample_sentences_to_token_count(processed_corpora[i+1], min_tokens)
         combined_corpus = corpus_prev + corpus_next
         
-        # Train Word2Vec model on combined corpus
-        model = Word2Vec(sentences=combined_corpus,
-                       vector_size=vector_size,
-                       window=window,
-                       min_count=min_freq,
-                       workers=1,
-                       epochs=epochs,
-                       seed=seed)
+        # Create temporal word map for this pair of corpora
+        # Map each target word to its temporal variants for this pair
+        temporal_word_map = {target: [f"{target}_{label1}", f"{target}_{label2}"] for target in target_words}
+        
+        # Train TemporalWord2Vec model on combined corpus
+        model = TemporalWord2Vec(
+            temporal_word_map=temporal_word_map,
+            vector_size=vector_size,
+            window=window,
+            min_count=min_freq,
+            epochs=epochs,
+            seed=seed,
+            sg=1,  # Use Skip-gram architecture for better results with temporal words
+            batch_size=batch_size
+        )
+        model.train(sentences=combined_corpus, calculate_loss=calculate_loss)
         
         models[label_pair] = model
         
@@ -986,29 +996,36 @@ def _semantic_change_consecutive(corpora, labels, target_words, min_freq=5, top_
         vocab_counts_next = Counter(word for sent in corpus_next for word in sent)
         
         # Find common vocabulary meeting frequency requirements (without min_length filter)
+        # Exclude temporal variants from the common vocabulary
+        temporal_variants = set()
+        for variants in temporal_word_map.values():
+            temporal_variants.update(variants)
+            
         common_vocab = [word for word in vocab_counts_prev if 
                       word in vocab_counts_next and
                       vocab_counts_prev[word] >= min_freq and
                       vocab_counts_next[word] >= min_freq and
-                      word in model.wv.key_to_index]
+                      word in model.vocab and
+                      word not in temporal_variants]  # Exclude temporal variants
         
         # Get vectors for all common words
-        vocab_vectors = np.array([model.wv[word] for word in common_vocab])
+        vocab_vectors = np.array([model.get_vector(word) for word in common_vocab])
         results[label_pair] = {}
         
         # Analyze each target word
         for target in target_words:
-            target_prev = f"{target}_{labels[i]}"
-            target_next = f"{target}_{labels[i+1]}"
+            target_prev = f"{target}_{label1}"
+            target_next = f"{target}_{label2}"
             
-            if target_prev not in model.wv or target_next not in model.wv:
+            # Skip if either temporal variant is not in the model's vocabulary
+            if target_prev not in model.vocab or target_next not in model.vocab:
                 continue
             
             # If limit_most_similar is provided, filter common_vocab to only include
             # words that are among the most similar to either target state
             if limit_most_similar is not None:
-                similar_prev = set(word for word, _ in model.wv.most_similar(target_prev, topn=limit_most_similar))
-                similar_next = set(word for word, _ in model.wv.most_similar(target_next, topn=limit_most_similar))
+                similar_prev = set(word for word, _ in model.most_similar(target_prev, topn=limit_most_similar))
+                similar_next = set(word for word, _ in model.most_similar(target_next, topn=limit_most_similar))
                 similar_words = similar_prev.union(similar_next)
                 
                 # Filter common_vocab and vocab_vectors
@@ -1023,45 +1040,54 @@ def _semantic_change_consecutive(corpora, labels, target_words, min_freq=5, top_
                 common_vocab = filtered_vocab
                 vocab_vectors = filtered_vectors
             
+            # Get the temporal variant vectors
+            target_prev_vector = model.get_vector(target_prev).reshape(1, -1)
+            target_next_vector = model.get_vector(target_next).reshape(1, -1)
+            
+            # Calculate cosine similarities between each temporal variant and the common vocabulary
             sims_prev = cosine_similarity(
-                model.wv[target_prev].reshape(1, -1),
+                target_prev_vector,
                 vocab_vectors
             )[0]
             
             sims_next = cosine_similarity(
-                model.wv[target_next].reshape(1, -1),
+                target_next_vector,
                 vocab_vectors
             )[0]
             
+            # Calculate changes in similarity
             changes = [(word, sim_next - sim_prev) 
                       for word, sim_prev, sim_next 
                       in zip(common_vocab, sims_prev, sims_next)]
             
-            # Filter results by min_length and stopwords (keeping corpus tags intact)
+            # Filter results by min_length and stopwords
             filtered_changes = []
             for word, change in changes:
                 if len(word) >= min_length and (not stopwords or word not in stopwords):
                     filtered_changes.append((word, change))
             
+            # Sort by change magnitude (most positive first)
             filtered_changes.sort(key=lambda x: x[1], reverse=True)
             
+            # Optionally limit to top_n most changed in each direction
             if top_n is not None and len(filtered_changes) > top_n * 2:
-                moved_towards = filtered_changes[:top_n]
-                moved_away_from = filtered_changes[-top_n:]
+                moved_towards = filtered_changes[:top_n]  # Words with greatest positive change
+                moved_away_from = filtered_changes[-top_n:]  # Words with greatest negative change
                 filtered_changes = moved_towards + moved_away_from
             
             results[label_pair][target] = filtered_changes
     
     return results, models
 
-def _semantic_change_independent(corpora, labels, target_words, min_freq=5, top_n=None,
+def _semantic_change_procrustes(corpora, labels, target_words, min_freq=5, top_n=None,
                              stopwords=None, window=5, min_length=1, vector_size=256, 
-                             epochs=5, anchor_words=1000, limit_most_similar=None, seed=None):
+                             epochs=5, anchor_words=1000, limit_most_similar=None, seed=None,
+                             batch_size=32, calculate_loss=False):
     """
-    Analyze semantic change using independent training approach with Procrustes alignment.
+    Analyze semantic change using procrustes training approach with Procrustes alignment.
     Internal helper function for semantic_change().
     """
-    from gensim.models import Word2Vec
+    from qhchina.analytics.word2vec import Word2Vec
     from sklearn.metrics.pairwise import cosine_similarity
     from tqdm.auto import tqdm
     import numpy as np
@@ -1088,19 +1114,21 @@ def _semantic_change_independent(corpora, labels, target_words, min_freq=5, top_
         word_counts.append(counts)
         corpus_sizes.append(total_words)
         
-        model = Word2Vec(sentences=corpus,
-                       vector_size=vector_size,
-                       window=window,
-                       min_count=min_freq,
-                       workers=1,
-                       epochs=epochs,
-                       seed=seed)
+        model = Word2Vec(
+            vector_size=vector_size,
+            window=window,
+            min_count=min_freq,
+            epochs=epochs,
+            seed=seed,
+            batch_size=batch_size
+        )
+        model.train(sentences=corpus, calculate_loss=calculate_loss)
         models[labels[i]] = model
     
     # Analyze consecutive pairs
     corpus_pairs = list(zip(labels[:-1], labels[1:]))
     pbar = tqdm(enumerate(corpus_pairs), 
-               total=len(corpus_pairs), desc="Analyzing model pairs (independent)")
+               total=len(corpus_pairs), desc="Analyzing model pairs (procrustes)")
     
     for i, (label1, label2) in pbar:
         model1 = models[label1]
@@ -1115,8 +1143,8 @@ def _semantic_change_independent(corpora, labels, target_words, min_freq=5, top_
         size2 = corpus_sizes[i+1]
         
         # Find common vocabulary between models (excluding target words)
-        common_vocab = [word for word in model1.wv.key_to_index 
-                      if word in model2.wv.key_to_index and
+        common_vocab = [word for word in model1.vocab if 
+                      word in model2.vocab and
                       counts1[word] >= min_freq and
                       counts2[word] >= min_freq and
                       word not in target_words]
@@ -1139,27 +1167,27 @@ def _semantic_change_independent(corpora, labels, target_words, min_freq=5, top_
             anchor_vocab = common_vocab  # Fallback to all common words if not enough anchors
         
         # Get vectors for alignment using anchor words
-        anchor_vecs1 = np.array([model1.wv[word] for word in anchor_vocab])
-        anchor_vecs2 = np.array([model2.wv[word] for word in anchor_vocab])
+        anchor_vecs1 = np.array([model1.get_vector(word) for word in anchor_vocab])
+        anchor_vecs2 = np.array([model2.get_vector(word) for word in anchor_vocab])
         
         # Align second space to first space using anchor words
         _, transformation = align_vectors(anchor_vecs2, anchor_vecs1)
         transformations[label_pair] = transformation  # Store the transformation matrix
         
         # Get vectors for all common words (for similarity computation)
-        vecs1 = np.array([model1.wv[word] for word in common_vocab])
+        vecs1 = np.array([model1.get_vector(word) for word in common_vocab])
         
         results[label_pair] = {}
         
         # Analyze each target word
         for target in target_words:
-            if target not in model1.wv or target not in model2.wv:
+            if target not in model1.vocab or target not in model2.vocab:
                 continue
             
             # If limit_most_similar is provided, filter common_vocab
             if limit_most_similar is not None:
-                similar1 = set(word for word, _ in model1.wv.most_similar(target, topn=limit_most_similar))
-                similar2 = set(word for word, _ in model2.wv.most_similar(target, topn=limit_most_similar))
+                similar1 = set(word for word, _ in model1.most_similar(target, topn=limit_most_similar))
+                similar2 = set(word for word, _ in model2.most_similar(target, topn=limit_most_similar))
                 similar_words = similar1.union(similar2)
                 
                 # Filter common_vocab and vectors
@@ -1175,8 +1203,8 @@ def _semantic_change_independent(corpora, labels, target_words, min_freq=5, top_
                 vecs1 = filtered_vecs
             
             # Get target vectors from both spaces
-            target_vec1 = model1.wv[target]
-            target_vec2 = model2.wv[target]
+            target_vec1 = model1.get_vector(target)
+            target_vec2 = model2.get_vector(target)
             
             # Align target vector from second space using the same transformation
             aligned_target_vec2 = np.dot(target_vec2.reshape(1, -1), transformation.T)
@@ -1212,6 +1240,153 @@ def _semantic_change_independent(corpora, labels, target_words, min_freq=5, top_
             results[label_pair][target] = filtered_changes
     
     return results, models, transformations
+
+def _semantic_change_full(corpora, labels, target_words, min_freq=5, top_n=None,
+                           stopwords=None, window=5, min_length=1, vector_size=256, 
+                           epochs=5, limit_most_similar=None, seed=None, batch_size=32, calculate_loss=False):
+    """
+    Analyze semantic change using a full training approach.
+    This method builds a single combined corpus with balanced token counts from all time periods,
+    then trains a single TemporalWord2Vec model on this combined corpus.
+    
+    Internal helper function for semantic_change().
+    """
+    from qhchina.analytics.word2vec import TemporalWord2Vec
+    from sklearn.metrics.pairwise import cosine_similarity
+    from tqdm.auto import tqdm
+    import numpy as np
+    import random
+    from collections import Counter
+    from qhchina.helpers.texts import sample_sentences_to_token_count
+    random.seed(seed)
+    
+    results = {}
+    models = {}
+    
+    # Process all corpora to add tags to target words
+    processed_corpora = add_corpus_tags(corpora, labels, target_words)
+    
+    # Count tokens in each corpus
+    token_counts = [sum(len(sent) for sent in corpus) for corpus in processed_corpora]
+    min_tokens = min(token_counts)
+    
+    # Sample each corpus to have roughly the same number of tokens
+    sampled_corpora = []
+    for corpus in processed_corpora:
+        sampled_corpus = sample_sentences_to_token_count(corpus, min_tokens)
+        sampled_corpora.append(sampled_corpus)
+    
+    # Combine all sampled corpora into one
+    combined_corpus = []
+    for corpus in sampled_corpora:
+        combined_corpus.extend(corpus)
+    
+    # Create temporal word map for TemporalWord2Vec
+    temporal_word_map = {target: [f"{target}_{label}" for label in labels] for target in target_words}
+    
+    # Train a single TemporalWord2Vec model on the combined corpus
+    model = TemporalWord2Vec(
+        temporal_word_map=temporal_word_map,
+        vector_size=vector_size,
+        window=window,
+        min_count=min_freq,
+        epochs=epochs,
+        seed=seed,
+        sg=1,  # Use Skip-gram architecture
+        batch_size=batch_size
+    )
+    model.train(sentences=combined_corpus, calculate_loss=calculate_loss)
+    
+    # Store the trained model
+    models['full'] = model
+    
+    # Create list of consecutive pairs for the results
+    corpus_pairs = list(zip(labels[:-1], labels[1:]))
+    
+    # Analyze each consecutive pair of corpora using the same model
+    pbar = tqdm(enumerate(corpus_pairs), total=len(corpus_pairs), 
+               desc="Analyzing corpus pairs (full)")
+    
+    for i, (label1, label2) in pbar:
+        label_pair = f"{label1}->{label2}"
+        pbar.set_description(f"Analyzing: {label1}->{label2}")
+        
+        # Get vocabulary counts in both corpora using Counter
+        vocab_counts_prev = Counter(word for sent in sampled_corpora[i] for word in sent)
+        vocab_counts_next = Counter(word for sent in sampled_corpora[i+1] for word in sent)
+        
+        # Find common vocabulary meeting frequency requirements (without min_length filter)
+        common_vocab = [word for word in vocab_counts_prev if 
+                      word in vocab_counts_next and
+                      vocab_counts_prev[word] >= min_freq and
+                      vocab_counts_next[word] >= min_freq and
+                      word in model.vocab]
+        
+        # Get vectors for all common words
+        vocab_vectors = np.array([model.get_vector(word) for word in common_vocab])
+        results[label_pair] = {}
+        
+        # Analyze each target word
+        for target in target_words:
+            target_prev = f"{target}_{label1}"
+            target_next = f"{target}_{label2}"
+            
+            # Check if target variants exist in the model
+            if model.get_vector(target_prev) is None or model.get_vector(target_next) is None:
+                continue
+            
+            # If limit_most_similar is provided, filter common_vocab to only include
+            # words that are among the most similar to either target state
+            if limit_most_similar is not None:
+                similar_prev = set(word for word, _ in model.most_similar(target_prev, topn=limit_most_similar))
+                similar_next = set(word for word, _ in model.most_similar(target_next, topn=limit_most_similar))
+                similar_words = similar_prev.union(similar_next)
+                
+                # Filter common_vocab and vocab_vectors
+                filtered_indices = [i for i, word in enumerate(common_vocab) if word in similar_words]
+                if not filtered_indices:  # Skip if no similar words found
+                    continue
+                    
+                filtered_vocab = [common_vocab[i] for i in filtered_indices]
+                filtered_vectors = vocab_vectors[filtered_indices]
+                
+                # Update for the rest of the analysis
+                common_vocab = filtered_vocab
+                vocab_vectors = filtered_vectors
+            
+            target_prev_vector = np.array(model.get_vector(target_prev)).reshape(1, -1)
+            target_next_vector = np.array(model.get_vector(target_next)).reshape(1, -1)
+            
+            sims_prev = cosine_similarity(
+                target_prev_vector,
+                vocab_vectors
+            )[0]
+            
+            sims_next = cosine_similarity(
+                target_next_vector,
+                vocab_vectors
+            )[0]
+            
+            changes = [(word, sim_next - sim_prev) 
+                      for word, sim_prev, sim_next 
+                      in zip(common_vocab, sims_prev, sims_next)]
+            
+            # Filter results by min_length and stopwords (keeping corpus tags intact)
+            filtered_changes = []
+            for word, change in changes:
+                if len(word) >= min_length and (not stopwords or word not in stopwords):
+                    filtered_changes.append((word, change))
+            
+            filtered_changes.sort(key=lambda x: x[1], reverse=True)
+            
+            if top_n is not None and len(filtered_changes) > top_n * 2:
+                moved_towards = filtered_changes[:top_n]
+                moved_away_from = filtered_changes[-top_n:]
+                filtered_changes = moved_towards + moved_away_from
+            
+            results[label_pair][target] = filtered_changes
+    
+    return results, models
 
 def align_vectors(source_vectors, target_vectors):
     """
@@ -1312,7 +1487,7 @@ def visualize_semantic_trajectory(
         # Get the appropriate model(s) based on approach
         if is_consecutive: # for consecutive approach, we have one model per transition
             model = word2vec_models[pair]
-            if target_prev not in model.wv or target_next not in model.wv:
+            if target_prev not in model.vocab or target_next not in model.vocab:
                 plt.text(0.5, 0.5, f"Word not found in {pair}", 
                        ha='center', va='center')
                 plt.close()
@@ -1320,7 +1495,7 @@ def visualize_semantic_trajectory(
         else: # for independent approach, we have two models per transition
             model1 = word2vec_models[label1]
             model2 = word2vec_models[label2]
-            if target_word not in model1.wv or target_word not in model2.wv:
+            if target_word not in model1.vocab or target_word not in model2.vocab:
                 plt.text(0.5, 0.5, f"Word not found in {pair}", 
                        ha='center', va='center')
                 plt.close()
@@ -1344,12 +1519,12 @@ def visualize_semantic_trajectory(
         # Get vectors for neighbor words and target words if using embedding method
         if is_consecutive: 
             # for consecutive approach, we have one vector space per transition
-            neighbor_vectors = np.array([model.wv[word] for word in neighbor_words])
+            neighbor_vectors = np.array([model.get_vector(word) for word in neighbor_words])
             if target_position_method == 'embedding':
                 all_vectors = np.vstack([
                     neighbor_vectors,
-                    model.wv[target_prev].reshape(1, -1),
-                    model.wv[target_next].reshape(1, -1)
+                    model.get_vector(target_prev).reshape(1, -1),
+                    model.get_vector(target_next).reshape(1, -1)
                 ])
             else:
                 all_vectors = neighbor_vectors # we will add target vectors later by averaging
@@ -1357,11 +1532,11 @@ def visualize_semantic_trajectory(
             # for independent approach, we have two vector spaces per transition
             # we use the first space for all neighbors & target vector pre-transition
             # and the second space only for the target vector post-transition, which we need to align to the first space
-            neighbor_vectors = np.array([model1.wv[word] for word in neighbor_words])
+            neighbor_vectors = np.array([model1.get_vector(word) for word in neighbor_words])
             if target_position_method == 'embedding':
                 # For independent models, align the target vector from second model
-                target_vec1 = model1.wv[target_word].reshape(1, -1)
-                target_vec2_aligned = np.dot(model2.wv[target_word].reshape(1, -1), 
+                target_vec1 = model1.get_vector(target_word).reshape(1, -1)
+                target_vec2_aligned = np.dot(model2.get_vector(target_word).reshape(1, -1), 
                                    transformations[pair].T)
                 all_vectors = np.vstack([
                     neighbor_vectors, 
@@ -1466,7 +1641,7 @@ def visualize_semantic_trajectory(
         
         plt.close()
 
-def visualize_semantic_trajectory_complete(semantic_change_results, target_word, word2vec_models, 
+def visualize_semantic_trajectory_full(semantic_change_results, target_word, word2vec_models, 
                                         method='pca', n_neighbors=5, perplexity=30, figsize=(15, 10),
                                         filename=None, transformations=None, adjust_text_labels=False,
                                         target_position_method='neighbor_mean', umap_n_neighbors=15, 
@@ -1540,8 +1715,8 @@ def visualize_semantic_trajectory_complete(semantic_change_results, target_word,
         # Get vectors for the first set of neighbors (moved_away) FROM THE SECOND MODEL
         second_model = word2vec_models[second_label]
         for word in moved_away:
-            if word in second_model.wv:
-                vector = second_model.wv[word]
+            if word in second_model.vocab:
+                vector = second_model.get_vector(word)
                 
                 # Align vector back to the first space using the inverse transformation
                 inverse_transform = transformations[first_pair]
@@ -1555,8 +1730,8 @@ def visualize_semantic_trajectory_complete(semantic_change_results, target_word,
         # Add target vector for first corpus if using embedding method
         if target_position_method == 'embedding':
             first_model = word2vec_models[first_label]
-            if target_word in first_model.wv:
-                target_vectors_dict[first_label] = first_model.wv[target_word]
+            if target_word in first_model.vocab:
+                target_vectors_dict[first_label] = first_model.get_vector(target_word)
     
     # Process all transitions to get "moved towards" neighbors and update vectors
     for i, pair in enumerate(corpus_pairs):
@@ -1572,8 +1747,8 @@ def visualize_semantic_trajectory_complete(semantic_change_results, target_word,
             next_model = word2vec_models[next_label]
             # Get vectors from next model
             for word in moved_towards:
-                if word in next_model.wv:
-                    vector = next_model.wv[word]
+                if word in next_model.vocab:
+                    vector = next_model.get_vector(word)
                     
                     # Start with the original vector
                     aligned_vector = vector.copy()
@@ -1590,8 +1765,8 @@ def visualize_semantic_trajectory_complete(semantic_change_results, target_word,
             
             # Store aligned target vector if using embedding method
             if target_position_method == 'embedding':
-                if target_word in next_model.wv:
-                    target_vec = next_model.wv[target_word]
+                if target_word in next_model.vocab:
+                    target_vec = next_model.get_vector(target_word)
                     aligned_target = target_vec.copy()
                     
                     # Apply transformations from most recent to earliest
