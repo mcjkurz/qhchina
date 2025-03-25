@@ -7,8 +7,8 @@ title: BERT Text Classification
 
 A comprehensive toolkit for fine-tuning BERT models for text classification tasks with PyTorch.
 
-[![GitHub stars](https://img.shields.io/github/stars/username/repo-name.svg?style=social&label=Star)](https://github.com/username/repo-name)
-[![GitHub forks](https://img.shields.io/github/forks/username/repo-name.svg?style=social&label=Fork)](https://github.com/username/repo-name/fork)
+[![GitHub stars](https://img.shields.io/github/stars/mcjkurz/qhchina.svg?style=social&label=Star)](https://github.com/mcjkurz/qhchina)
+[![GitHub forks](https://img.shields.io/github/forks/mcjkurz/qhchina.svg?style=social&label=Fork)](https://github.com/mcjkurz/qhchina/fork)
 
 ## Features
 
@@ -29,16 +29,16 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from analytics.modeling import make_datasets, train_bert_classifier, predict
 
 # Load pre-trained model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
 model = AutoModelForSequenceClassification.from_pretrained(
-    "bert-base-uncased", 
+    "bert-base-chinese", 
     num_labels=2
 )
 
 # Prepare data
 data = [
-    ("This movie is great!", 1),
-    ("I hated this movie.", 0),
+    ("这部电影非常精彩！", 1),  # This movie is excellent!
+    ("我讨厌这部电影。", 0),    # I hate this movie.
     # Add more examples...
 ]
 
@@ -62,7 +62,7 @@ results = train_bert_classifier(
 )
 
 # Make predictions
-new_texts = ["A fantastic film!", "Terrible acting."]
+new_texts = ["一部精彩的影片！", "演技很差劲。"]  # A fantastic film!, Terrible acting.
 predictions = predict(
     model=results["model"],
     texts=new_texts,

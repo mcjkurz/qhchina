@@ -2,55 +2,56 @@
 
 This repository contains documentation for the `train_bert_classifier` function and related functionality from the `analytics.modeling` module.
 
+## Documentation
+
+The full documentation is available as a GitHub Pages site at:
+https://mcjkurz.github.io/qhchina/
+
 ## Structure
 
-- `bert_classifier_docs.md`: Main documentation with comprehensive API reference
-- `index.md`: Landing page with quick overview and examples
-- `_config.yml`: Configuration for GitHub Pages
-- `assets/`: Directory for images and other static assets
+- `docs/`: Documentation folder containing all documentation files
+  - `bert_classifier_docs.md`: Main documentation with comprehensive API reference
+  - `index.md`: Landing page with quick overview and examples
+  - `_config.yml`: Configuration for GitHub Pages
+  - `assets/`: Directory for images and other static assets
 
-## Viewing the Documentation
+## Local Development
 
-You can view this documentation in several ways:
+To view the documentation locally:
 
-### Locally (with Jekyll)
+1. Navigate to the `docs` directory
+2. Install Jekyll and dependencies:
+   ```bash
+   gem install bundler jekyll
+   bundle install
+   ```
+3. Run the local server:
+   ```bash
+   bundle exec jekyll serve
+   ```
+4. Open a browser and go to `http://localhost:4000`
 
-1. Install Jekyll by following [these instructions](https://jekyllrb.com/docs/installation/)
-2. Clone this repository
-3. Navigate to the repository directory
-4. Run `bundle exec jekyll serve`
-5. Open a browser and go to `http://localhost:4000`
+## Documentation Features
 
-### On GitHub Pages
+The documentation includes:
 
-Once you push this repository to GitHub, you can set up GitHub Pages:
+- Complete API reference for all BERT classifier functions
+- Examples with Chinese text using bert-base-chinese
+- Detailed parameter descriptions
+- Code examples for common use cases
+- Performance optimization tips
 
-1. Go to your repository on GitHub
-2. Click "Settings"
-3. Scroll down to the "GitHub Pages" section
-4. Select the branch you want to use (usually `main` or `master`)
-5. Choose the "root" folder
-6. Click "Save"
+## GitHub Pages Setup
 
-Your documentation will be available at `https://[your-username].github.io/[repo-name]/`
+To enable GitHub Pages for this repository:
 
-## Customizing the Documentation
+1. Go to the repository settings on GitHub
+2. Scroll down to the "GitHub Pages" section
+3. Under "Source", select the branch you want to use (e.g., `main`)
+4. Choose "docs" folder
+5. Click "Save"
 
-### Styling
-
-The documentation uses the Cayman theme by default. You can customize it by:
-
-1. Modifying `_config.yml` to use a different theme
-2. Adding custom CSS in the `assets/css` directory
-
-### Content
-
-- Edit `bert_classifier_docs.md` to update the API reference
-- Edit `index.md` to update the landing page
-
-## Contributing
-
-If you find errors or want to improve the documentation, please submit a pull request or open an issue.
+The documentation will be available at `https://mcjkurz.github.io/qhchina/`
 
 ## License
 

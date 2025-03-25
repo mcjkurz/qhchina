@@ -50,16 +50,16 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from analytics.modeling import make_datasets, train_bert_classifier, predict
 
 # Load pre-trained model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
 model = AutoModelForSequenceClassification.from_pretrained(
-    "bert-base-uncased", 
+    "bert-base-chinese", 
     num_labels=2
 )
 
 # Prepare data
 data = [
-    ("This movie is great!", 1),
-    ("I hated this movie.", 0),
+    ("这部电影非常精彩！", 1),  # This movie is excellent!
+    ("我讨厌这部电影。", 0),    # I hate this movie.
     # Add more examples...
 ]
 
@@ -84,7 +84,7 @@ results = train_bert_classifier(
 )
 
 # Make predictions
-new_texts = ["A fantastic film!", "Terrible acting."]
+new_texts = ["一部精彩的影片！", "演技很差劲。"]  # A fantastic film!, Terrible acting.
 predictions = predict(
     model=results["model"],
     texts=new_texts,
@@ -313,15 +313,18 @@ from analytics.modeling import make_datasets, train_bert_classifier, evaluate, p
 
 # Prepare data: (text, label) pairs
 data = [
-    ("Absolutely loved this movie!", 1),
-    ("The acting was terrible", 0),
+    ("这部电影太棒了，我非常喜欢！", 1),  # This movie is great, I really like it!
+    ("演员的表演很差，剧情也很无聊", 0),   # The actors' performance was poor, and the plot was boring
+    ("导演的镜头语言非常丰富", 1),        # The director's camera language is very rich
+    ("配乐不合适，破坏了整体观感", 0),     # The soundtrack is inappropriate, ruining the overall viewing experience
+    ("故事情节引人入胜，节奏感很强", 1),   # The storyline is engaging with a strong sense of rhythm
     # More examples...
 ]
 
 # Load pre-trained model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
 model = AutoModelForSequenceClassification.from_pretrained(
-    "bert-base-uncased", 
+    "bert-base-chinese", 
     num_labels=2  # Binary classification
 )
 
@@ -359,8 +362,8 @@ print(f"F1 Score: {eval_results['weighted_avg']['f1']:.4f}")
 
 # Make predictions
 new_texts = [
-    "I would recommend this movie to everyone!",
-    "Don't waste your time on this film."
+    "我会推荐这部电影给所有人！",        # I would recommend this movie to everyone!
+    "不要浪费时间看这部电影。"          # Don't waste your time on this film.
 ]
 
 predictions = predict(
@@ -374,7 +377,7 @@ for text, pred, probs in zip(new_texts,
                              predictions["predictions"], 
                              predictions["probabilities"]):
     print(f"Text: {text}")
-    print(f"Prediction: {'Positive' if pred == 1 else 'Negative'}")
+    print(f"Prediction: {'积极 (Positive)' if pred == 1 else '消极 (Negative)'}")
     print(f"Confidence: {max(probs)*100:.1f}%\n")
 ```
 
@@ -382,9 +385,17 @@ for text, pred, probs in zip(new_texts,
 
 ```python
 # For a multi-class scenario (e.g., topic classification)
+data = [
+    ("中国经济在第二季度增长了5.5%", 0),    # China's economy grew by 5.5% in the second quarter (Economy)
+    ("新冠疫苗接种计划将于下月开始", 1),    # The COVID-19 vaccination program will begin next month (Health)
+    ("今年奥运会将在东京举行", 2),         # This year's Olympics will be held in Tokyo (Sports)
+    ("新的环保政策将减少碳排放", 3),       # New environmental policies will reduce carbon emissions (Environment)
+    # More examples...
+]
+
 model = AutoModelForSequenceClassification.from_pretrained(
-    "bert-base-uncased", 
-    num_labels=4  # 4 classes
+    "bert-base-chinese", 
+    num_labels=4  # 4 classes: Economy(0), Health(1), Sports(2), Environment(3)
 )
 
 # Then follow similar steps as above
