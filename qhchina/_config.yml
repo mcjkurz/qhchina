@@ -1,0 +1,24 @@
+theme: jekyll-theme-cayman
+title: BERT Text Classification
+description: A comprehensive toolkit for fine-tuning BERT models for text classification tasks
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+plugins:
+  - jekyll-seo-tag
+
+# GitHub Pages Navigation
+header_pages:
+  - bert_classifier_docs.md
+
+# Google Analytics (replace with your ID if needed)
+# google_analytics: UA-XXXXXXXXX-X
+
+# Social media links
+github_username: username
+repository: username/repo-name
+
+# Custom variables
+show_downloads: true
+logo: /assets/img/logo.png 
