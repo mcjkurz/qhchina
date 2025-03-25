@@ -923,37 +923,33 @@ class Word2Vec:
         epoch_losses = []
 
         total_words = sum(len(sentence) for sentence in sentences)
-        
+
         # Training loop
         for epoch in range(epochs):
+            random.shuffle(sentences)
             current_alpha = self.alpha - alpha_delta * epoch
+            print(f"Epoch {epoch+1}/{epochs} - Learning rate: {current_alpha}")
             total_loss = 0
             example_count = 0
             batch_count = 0
-            window_count = 0
 
-            # Track average loss over recent batches
+            # For tracking moving average loss
             recent_losses = []
-            
-            # For tracking loss within the current window
-            current_window_loss = 0
-            current_window_examples = 0
             
             # Show progress bar only if calculating loss
             if calculate_loss:
-                # Estimate the number of examples
-                estimated_examples = total_words * 2 * self.window
+                # Create a tqdm progress bar that doesn't show progress percentage
                 progress_bar = tqdm(
-                    total=estimated_examples,
                     desc=f"Epoch {epoch+1}/{epochs}",
-                    unit="examples"
+                    bar_format='{desc}{postfix}',
+                    position=0,
+                    leave=True
                 )
             
             # Single example training mode (batch_size = 1)
             if batch_size <= 1:
                 # Skip-gram training
                 if self.sg:
-                    last_input_idx = None  # Track last center word to detect window changes
                     for input_idx, output_idx in self.generate_skipgram_examples(sentences):
                         # Train on this skipgram example
                         loss = self._train_skipgram_example(input_idx, output_idx, current_alpha)
@@ -962,32 +958,15 @@ class Word2Vec:
                         total_loss += loss
                         example_count += 1
                         
-                        # Accumulate loss for current window
-                        current_window_loss += loss
-                        current_window_examples += 1
+                        # Add to recent losses for moving average
+                        recent_losses.append(loss)
+                        if len(recent_losses) > 1000:
+                            recent_losses.pop(0)
                         
-                        # Update progress bar if using
-                        if calculate_loss:
-                            progress_bar.update(1)
-                            
-                            # Only update progress bar description when window changes
-                            if last_input_idx != input_idx:
-                                window_count += 1
-                                if current_window_examples > 0:
-                                    window_avg_loss = current_window_loss / current_window_examples
-                                    recent_losses.append(window_avg_loss)
-                                    if len(recent_losses) > 1000:
-                                        recent_losses.pop(0)
-                                    
-                                    # Update progress with recent average loss
-                                    if recent_losses:
-                                        recent_avg = sum(recent_losses) / len(recent_losses)
-                                        progress_bar.set_postfix(loss=f"{recent_avg:.6f}")
-                                
-                                # Reset window tracking
-                                current_window_loss = 0
-                                current_window_examples = 0
-                                last_input_idx = input_idx
+                        # Update progress bar with current loss if using
+                        if calculate_loss and example_count % 100 == 0:  # Update every 100 examples to avoid too frequent updates
+                            recent_avg = sum(recent_losses) / len(recent_losses)
+                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, examples={example_count}")
                 else:
                     # CBOW training
                     for input_indices, output_idx in self.generate_cbow_examples(sentences):
@@ -997,39 +976,26 @@ class Word2Vec:
                         # Accumulate total loss and example count
                         total_loss += loss
                         example_count += 1
-                        window_count += 1
                         
-                        # Update progress bar if using
-                        if calculate_loss:
-                            progress_bar.update(1)
-                            
-                            # Add this example's loss to recent losses
-                            recent_losses.append(loss)
-                            if len(recent_losses) > 1000:
-                                recent_losses.pop(0)
-                            
-                            # Update progress with recent average loss
-                            if recent_losses:
-                                recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix(loss=f"{recent_avg:.6f}")
+                        # Add to recent losses for moving average
+                        recent_losses.append(loss)
+                        if len(recent_losses) > 1000:
+                            recent_losses.pop(0)
+                        
+                        # Update progress bar with current loss if using
+                        if calculate_loss and example_count % 100 == 0:  # Update every 100 examples
+                            recent_avg = sum(recent_losses) / len(recent_losses)
+                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, examples={example_count}")
             
             # Batch training mode (batch_size > 1)
             else:
                 # Skip-gram batch training
                 if self.sg:
                     batch_samples = []
-                    last_input_idx = None
-                    words_in_batch = 0
-                    
                     for input_idx, output_idx in self.generate_skipgram_examples(sentences):
                         # Add this example to the current batch
                         batch_samples.append((input_idx, output_idx))
                         
-                        # Track window changes for word count
-                        if input_idx != last_input_idx:
-                            words_in_batch += 1
-                            last_input_idx = input_idx
-                        
                         # If we've collected enough examples, process the batch
                         if len(batch_samples) >= batch_size:
                             # Train on this batch
@@ -1039,26 +1005,22 @@ class Word2Vec:
                             # Accumulate total loss and example count
                             total_loss += batch_loss
                             example_count += len(batch_samples)
-                            window_count += words_in_batch
                             
                             # Calculate batch average loss
                             batch_avg_loss = batch_loss / len(batch_samples)
                             
-                            # Add this batch's loss to recent losses list
+                            # Add to recent losses for moving average
                             recent_losses.append(batch_avg_loss)
                             if len(recent_losses) > 1000:
                                 recent_losses.pop(0)
                             
-                            # Update progress bar if using
+                            # Update progress bar with current loss if using
                             if calculate_loss:
-                                progress_bar.update(len(batch_samples))
-                                if recent_losses:
-                                    recent_avg = sum(recent_losses) / len(recent_losses)
-                                    progress_bar.set_postfix(loss=f"{recent_avg:.6f}")
+                                recent_avg = sum(recent_losses) / len(recent_losses)
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
                             
                             # Reset batch
                             batch_samples = []
-                            words_in_batch = 0
                     
                     # Process any remaining examples in the last batch
                     if batch_samples:
@@ -1067,21 +1029,21 @@ class Word2Vec:
                         # Accumulate total loss and example count
                         total_loss += batch_loss
                         example_count += len(batch_samples)
-                        window_count += words_in_batch
+                        batch_count += 1
                         
                         # Update progress bar if using
                         if calculate_loss:
-                            progress_bar.update(len(batch_samples))
+                            batch_avg_loss = batch_loss / len(batch_samples)
+                            recent_losses.append(batch_avg_loss)
+                            recent_avg = sum(recent_losses) / len(recent_losses)
+                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
                 
                 # CBOW batch training
                 else:
                     batch_samples = []
-                    examples_in_batch = 0
-                    
                     for input_indices, output_idx in self.generate_cbow_examples(sentences):
                         # Add this example to the current batch
                         batch_samples.append((input_indices, output_idx))
-                        examples_in_batch += 1
                         
                         # If we've collected enough examples, process the batch
                         if len(batch_samples) >= batch_size:
@@ -1092,24 +1054,22 @@ class Word2Vec:
                             # Accumulate total loss and example count
                             total_loss += batch_loss
                             example_count += len(batch_samples)
-                            window_count += examples_in_batch  # Each CBOW example is one window
                             
                             # Calculate batch average loss
                             batch_avg_loss = batch_loss / len(batch_samples)
                             
-                            # Add this batch's loss to recent losses list
+                            # Add to recent losses for moving average
                             recent_losses.append(batch_avg_loss)
                             if len(recent_losses) > 1000:
                                 recent_losses.pop(0)
                             
-                            # Update progress bar if using
+                            # Update progress bar with current loss if using
                             if calculate_loss:
-                                progress_bar.update(examples_in_batch)
-                                progress_bar.set_postfix(batch_loss=f"{batch_avg_loss:.6f}")
+                                recent_avg = sum(recent_losses) / len(recent_losses)
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
                             
                             # Reset batch
                             batch_samples = []
-                            examples_in_batch = 0
                     
                     # Process any remaining examples in the last batch
                     if batch_samples:
@@ -1118,24 +1078,22 @@ class Word2Vec:
                         # Accumulate total loss and example count
                         total_loss += batch_loss
                         example_count += len(batch_samples)
-                        window_count += examples_in_batch
+                        batch_count += 1
                         
                         # Update progress bar if using
                         if calculate_loss:
-                            progress_bar.update(examples_in_batch)
-            
-            # Close progress bar if using
-            if calculate_loss:
-                progress_bar.close()
+                            batch_avg_loss = batch_loss / len(batch_samples)
+                            recent_losses.append(batch_avg_loss)
+                            recent_avg = sum(recent_losses) / len(recent_losses)
+                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
             
             # Calculate epoch average loss
             epoch_avg_loss = total_loss / max(1, example_count)
             epoch_losses.append(epoch_avg_loss)
             
-            # Print epoch summary if calculating loss
+            # Close the progress bar and print epoch summary
             if calculate_loss:
-                print(f"Epoch {epoch+1}/{epochs} - Loss: {epoch_avg_loss:.6f} - "
-                     f"Examples: {example_count} - Windows: {window_count}")
+                progress_bar.close()
 
         self.total_examples += example_count
         self.epoch_losses.extend(epoch_losses)

@@ -24,3 +24,6 @@ def load_fonts(target_font : str = 'Noto Sans CJK TC') -> None:
         print(font)
     if target_font:
         set_font(target_font)
+
+def current_font() -> str:
+    return matplotlib.rcParams['font.sans-serif'][0]

@@ -1,0 +1,77 @@
+Semantic change results for transition: 1960s->1980s
+
+Target word: computer
+Words moved towards:
+  in: 0.0001
+  telephone: 0.0001
+  to: 0.0000
+  with: 0.0000
+  storage: 0.0000
+  the: 0.0000
+  file: 0.0000
+  process: 0.0000
+  on: 0.0000
+  ibm: 0.0000
+
+Words moved away from:
+  of: 0.0000
+  line: -0.0000
+  program: -0.0000
+  machine: -0.0000
+  information: -0.0000
+  is: -0.0000
+  system: -0.0000
+  for: -0.0001
+  that: -0.0001
+  by: -0.0001
+
+Target word: phone
+Words moved towards:
+  to: 0.0000
+  telephone: 0.0000
+  in: 0.0000
+  ibm: 0.0000
+  record: 0.0000
+  storage: 0.0000
+  program: 0.0000
+  for: 0.0000
+  machine: -0.0000
+  process: -0.0000
+
+Words moved away from:
+  number: -0.0000
+  is: -0.0000
+  the: -0.0000
+  with: -0.0000
+  that: -0.0000
+  and: -0.0000
+  system: -0.0000
+  line: -0.0001
+  information: -0.0001
+  by: -0.0001
+
+Target word: data
+Words moved towards:
+  with: 0.0001
+  for: 0.0000
+  to: 0.0000
+  in: 0.0000
+  on: 0.0000
+  system: -0.0000
+  by: -0.0000
+  ibm: -0.0000
+  process: -0.0000
+  that: -0.0000
+
+Words moved away from:
+  and: -0.0000
+  program: -0.0000
+  line: -0.0000
+  file: -0.0000
+  information: -0.0000
+  record: -0.0001
+  call: -0.0001
+  machine: -0.0001
+  telephone: -0.0001
+  of: -0.0001
+

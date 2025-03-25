@@ -1641,33 +1641,39 @@ def visualize_semantic_trajectory(
         
         plt.close()
 
-def visualize_semantic_trajectory_full(semantic_change_results, target_word, word2vec_models, 
+def visualize_semantic_trajectory_full(semantic_change_results, target_word, model, 
                                         method='pca', n_neighbors=5, perplexity=30, figsize=(15, 10),
-                                        filename=None, transformations=None, adjust_text_labels=False,
+                                        filename=None, adjust_text_labels=False,
                                         target_position_method='neighbor_mean', umap_n_neighbors=15, 
                                         umap_min_dist=0.1, seed=None, fontsize=12, arrowstyle='-|>', 
                                         arrow_color='blue', arrow_mutation_scale=15):
     """
-    Create a comprehensive visualization of a target word's semantic trajectory across all transitions
-    in a single plot using the independent approach with Procrustes alignment.
+    Create visualization of a target word's semantic trajectory across time periods
+    specifically designed for the 'full' method of semantic_change.
+    
+    This function works only with the output of semantic_change with method='full', 
+    which trains a single model with all temporal variants in the same vector space.
     
     Args:
         semantic_change_results: Results dictionary from semantic_change function
         target_word: The target word to visualize
-        word2vec_models: Dictionary mapping corpus labels to Word2Vec models
+        model: The TemporalWord2Vec model from semantic_change with method='full'
         method: Dimensionality reduction method ('pca', 'tsne', or 'umap')
         n_neighbors: Number of most significant neighbors to show for each transition
         perplexity: Perplexity parameter for t-SNE (if method='tsne')
         figsize: Figure size tuple
         filename: If provided, save the plot to this file
-        transformations: Dictionary mapping corpus pairs to transformation matrices
         adjust_text_labels: Whether to use adjustText to prevent label overlap
         target_position_method: How to determine target word position ('embedding' or 'neighbor_mean')
                               'embedding': Project target word vector along with neighbor vectors
-                              'neighbor_mean': Use mean of neighbor vectors (default)
+                              'neighbor_mean': Use mean of neighbor vectors after projection
         umap_n_neighbors: Number of neighbors to consider for UMAP (if method='umap')
         umap_min_dist: Minimum distance parameter for UMAP (if method='umap')
         seed: Random seed for reproducibility
+        fontsize: Base font size for text elements
+        arrowstyle: Style of arrows for matplotlib FancyArrowPatch
+        arrow_color: Color of trajectory arrows
+        arrow_mutation_scale: Size factor for arrows
     """
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyArrowPatch
@@ -1689,197 +1695,166 @@ def visualize_semantic_trajectory_full(semantic_change_results, target_word, wor
     
     # Get all corpus labels in order
     corpus_pairs = list(semantic_change_results.keys())
-    all_labels = list(word2vec_models.keys())
     
-    # Using dictionaries to track neighbor words by corpus
-    neighbor_words_dict = {}  # {corpus_label: [list of neighbor words]}
+    # Extract all labels from the pairs (e.g., "1960s->1980s" gives "1960s", "1980s")
+    all_labels = []
+    for pair in corpus_pairs:
+        labels = pair.split("->")
+        if len(all_labels) == 0:
+            all_labels.append(labels[0])  # Add the first label from the first pair
+        all_labels.append(labels[1])  # Always add the second label
     
-    # Dictionary to track all aligned vectors for each neighbor word
-    all_aligned_vectors = {}  # {word: [list of aligned vectors]}
+    # Create dictionaries to track context words by corpus transition
+    context_words_dict = {}  # {corpus_pair: {"towards": [words], "away": [words]}}
     
-    # Dictionary to store target vectors (aligned to first space)
-    target_vectors_dict = {}  # {corpus_label: aligned vector}
-    
-    # Process first corpus to get initial position
-    first_label = all_labels[0]
-    second_label = all_labels[1]  # Get the second label for the first transition
-    first_pair = corpus_pairs[0]
-    first_changes = semantic_change_results[first_pair][target_word]
-    
-    # Get initial neighbors (moved away from) for first target position
-    moved_away = [word for word, change in first_changes[-n_neighbors:]]
-    
-    if moved_away: # now get vectors for the neighbors
-        neighbor_words_dict[first_label] = moved_away
-        
-        # Get vectors for the first set of neighbors (moved_away) FROM THE SECOND MODEL
-        second_model = word2vec_models[second_label]
-        for word in moved_away:
-            if word in second_model.vocab:
-                vector = second_model.get_vector(word)
-                
-                # Align vector back to the first space using the inverse transformation
-                inverse_transform = transformations[first_pair]
-                aligned_vector = np.dot(vector, inverse_transform)
-                
-                # Add to the all_aligned_vectors dictionary
-                if word not in all_aligned_vectors:
-                    all_aligned_vectors[word] = []
-                all_aligned_vectors[word].append(aligned_vector)
-        
-        # Add target vector for first corpus if using embedding method
-        if target_position_method == 'embedding':
-            first_model = word2vec_models[first_label]
-            if target_word in first_model.vocab:
-                target_vectors_dict[first_label] = first_model.get_vector(target_word)
-    
-    # Process all transitions to get "moved towards" neighbors and update vectors
-    for i, pair in enumerate(corpus_pairs):
-        next_label = all_labels[i+1]
+    # Process the semantic change results to gather context words
+    for pair_idx, pair in enumerate(corpus_pairs):
+        if target_word not in semantic_change_results[pair]:
+            print(f"Warning: '{target_word}' not found in transition {pair}")
+            continue
+            
         changes = semantic_change_results[pair][target_word]
-        
-        # Get words that the target moved towards in this transition
-        moved_towards = [word for word, change in changes[:n_neighbors]]
-        
-        if moved_towards: # now get vectors for the neighbors
-            neighbor_words_dict[next_label] = moved_towards
+        if not changes:
+            print(f"Warning: No changes for '{target_word}' in transition {pair}")
+            continue
             
-            next_model = word2vec_models[next_label]
-            # Get vectors from next model
-            for word in moved_towards:
-                if word in next_model.vocab:
-                    vector = next_model.get_vector(word)
-                    
-                    # Start with the original vector
-                    aligned_vector = vector.copy()
-                    
-                    # Apply all transformations from this period back to the first period
-                    for j in range(i, -1, -1):
-                        pair_key = f"{all_labels[j]}->{all_labels[j+1]}"
-                        aligned_vector = np.dot(aligned_vector, transformations[pair_key].T)
-                    
-                    # Add to the all_aligned_vectors dictionary
-                    if word not in all_aligned_vectors:
-                        all_aligned_vectors[word] = []
-                    all_aligned_vectors[word].append(aligned_vector)
-            
-            # Store aligned target vector if using embedding method
-            if target_position_method == 'embedding':
-                if target_word in next_model.vocab:
-                    target_vec = next_model.get_vector(target_word)
-                    aligned_target = target_vec.copy()
-                    
-                    # Apply transformations from most recent to earliest
-                    for j in range(i, -1, -1):
-                        pair_key = f"{all_labels[j]}->{all_labels[j+1]}"
-                        aligned_target = np.dot(aligned_target, transformations[pair_key].T)
-                    
-                    target_vectors_dict[next_label] = aligned_target
+        # Get top words moved towards and away from
+        words_towards = [word for word, _ in changes[:n_neighbors]]
+        words_away = [word for word, _ in changes[-n_neighbors:]]
         
-    # Average the aligned vectors for each word
-    averaged_vectors = {}
-    for word, vectors in all_aligned_vectors.items():
-        averaged_vectors[word] = np.mean(vectors, axis=0)
+        context_words_dict[pair] = {
+            "towards": words_towards,
+            "away": words_away
+        }
     
-    # Collect all unique neighbor words across all corpora
-    all_neighbor_words = []
+    # Get all unique context words
+    all_context_words = set()
+    for pair_data in context_words_dict.values():
+        all_context_words.update(pair_data["towards"])
+        all_context_words.update(pair_data["away"])
+    all_context_words = list(all_context_words)
+    
+    # Check if we have the temporal variants of the target word
+    target_variants = []
     for label in all_labels:
-        if label in neighbor_words_dict:
-            for word in neighbor_words_dict[label]:
-                if word not in all_neighbor_words and word in averaged_vectors:
-                    all_neighbor_words.append(word)
+        target_variant = f"{target_word}_{label}"
+        if target_variant in model.vocab:
+            target_variants.append(target_variant)
+        else:
+            print(f"Warning: '{target_variant}' not found in model vocabulary")
+            return
     
-    # Collect vectors for projection
-    all_neighbor_vectors = [averaged_vectors[word] for word in all_neighbor_words 
-                          if word in averaged_vectors]
-    all_neighbor_vectors = np.array(all_neighbor_vectors)
+    # Get vectors for all context words
+    context_vectors = []
+    valid_context_words = []
+    for word in all_context_words:
+        if word in model.vocab:
+            context_vectors.append(model.get_vector(word))
+            valid_context_words.append(word)
+        else:
+            print(f"Warning: Context word '{word}' not found in model vocabulary")
     
+    if not valid_context_words:
+        print(f"No valid context words found for '{target_word}'. Cannot create visualization.")
+        return
+    
+    # Prepare vectors for projection based on the target_position_method
     if target_position_method == 'embedding':
-        # Collect target vectors for each corpus (already aligned to first space)
-        target_vectors = [target_vectors_dict[label] 
-                        for label in all_labels 
-                        if label in target_vectors_dict]
-        
-        all_target_vectors = np.array(target_vectors)
-        # Combine neighbor and target vectors for projection
-        all_vectors = np.vstack([all_neighbor_vectors, all_target_vectors])
+        # Include target vectors in the projection
+        target_vectors = [model.get_vector(variant) for variant in target_variants]
+        all_vectors = np.vstack([context_vectors, target_vectors])
     else:
-        all_vectors = all_neighbor_vectors
+        # Only project context words, target positions will be calculated later
+        all_vectors = np.array(context_vectors)
     
-    # Project all vectors to 2D
+    # Project vectors to 2D
     if method == 'pca':
-        projector = PCA(n_components=2)
+        projector = PCA(n_components=2, random_state=seed)
         projected = projector.fit_transform(all_vectors)
         explained_var = projector.explained_variance_ratio_
         x_label = f"PC1 ({explained_var[0]:.1%} variance)"
         y_label = f"PC2 ({explained_var[1]:.1%} variance)"
     elif method == 'tsne':
-        projector = TSNE(n_components=2, perplexity=min(perplexity, len(all_vectors) - 1))
+        projector = TSNE(n_components=2, perplexity=min(perplexity, len(all_vectors) - 1), random_state=seed)
         projected = projector.fit_transform(all_vectors)
         x_label = "t-SNE Dimension 1"
         y_label = "t-SNE Dimension 2"
     elif method == 'umap':
-        # Use UMAP for dimensionality reduction
         projector = umap.UMAP(
             n_components=2,
             n_neighbors=min(umap_n_neighbors, len(all_vectors) - 1),
             min_dist=umap_min_dist,
-            random_state=seed,
-            n_jobs=None  # Use None instead of 1 to avoid the warning
+            random_state=seed
         )
         projected = projector.fit_transform(all_vectors)
         x_label = "UMAP Dimension 1"
         y_label = "UMAP Dimension 2"
     
-    # Create the plot
-    plt.figure(figsize=figsize)
+    # Get context positions from projection
+    context_positions = projected
     
-    # Split projected points back into neighbors and targets
+    # Create mapping from words to positions for neighbor_mean method
+    word_to_position = {}
+    for i, word in enumerate(valid_context_words):
+        word_to_position[word] = context_positions[i]
+    
+    # Determine target positions based on the method
     if target_position_method == 'embedding':
-        num_target_vecs = len([label for label in all_labels if label in target_vectors_dict])
-        if num_target_vecs > 0:
-            neighbor_points = projected[:-num_target_vecs]
-            target_positions = projected[-num_target_vecs:]
-        else:
-            neighbor_points = projected
-            target_positions = []
-    else:
-        neighbor_points = projected
+        # Get target positions directly from projection
+        # They're the last len(target_variants) vectors
+        target_positions = projected[-len(target_variants):]
+        # Adjust context_positions to exclude target positions
+        context_positions = projected[:-len(target_variants)]
+    else:  # neighbor_mean
+        # Calculate target positions based on the mean of relevant context words
         target_positions = []
         
-        # Calculate target positions using neighbor means for each corpus
-        for label in all_labels:
-            if label in neighbor_words_dict:
-                # Get words that are neighbors for this corpus
-                corpus_neighbors = neighbor_words_dict[label]
-                
-                # Find indices of these neighbors in the all_neighbor_words list
-                neighbor_indices = [all_neighbor_words.index(word) 
-                                  for word in corpus_neighbors 
-                                  if word in all_neighbor_words]
-                
-                if neighbor_indices:
-                    # Calculate center based on this corpus's neighbors
-                    center = np.mean(neighbor_points[neighbor_indices], axis=0)
-                    target_positions.append(center)
+        for i, label in enumerate(all_labels):
+            if i == 0:
+                # For the first position, use the mean of "away from" words from the first transition
+                first_pair = corpus_pairs[0]
+                if first_pair in context_words_dict:
+                    away_words = context_words_dict[first_pair]["away"]
+                    away_positions = [word_to_position[w] for w in away_words if w in word_to_position]
+                    
+                    if away_positions:
+                        target_pos = np.mean(away_positions, axis=0)
+                        target_positions.append(target_pos)
+                    else:
+                        print(f"Warning: No valid 'away from' words for first position. Using center.")
+                        target_positions.append(np.mean(context_positions, axis=0))
+                else:
+                    print(f"Warning: No data for transition {first_pair}. Using center.")
+                    target_positions.append(np.mean(context_positions, axis=0))
+            else:
+                # For later positions, use the mean of "towards" words from the previous transition
+                prev_pair = corpus_pairs[i-1]
+                if prev_pair in context_words_dict:
+                    towards_words = context_words_dict[prev_pair]["towards"]
+                    towards_positions = [word_to_position[w] for w in towards_words if w in word_to_position]
+                    
+                    if towards_positions:
+                        target_pos = np.mean(towards_positions, axis=0)
+                        target_positions.append(target_pos)
+                    else:
+                        print(f"Warning: No valid 'towards' words for position {i}. Using center.")
+                        target_positions.append(np.mean(context_positions, axis=0))
+                else:
+                    print(f"Warning: No data for transition {prev_pair}. Using center.")
+                    target_positions.append(np.mean(context_positions, axis=0))
         
-        target_positions = np.array(target_positions) if target_positions else np.array([])
+        target_positions = np.array(target_positions)
     
-    # If we have no target positions, we can't plot the trajectory
-    if len(target_positions) == 0:
-        print(f"No target positions calculated for word '{target_word}'. Cannot create trajectory plot.")
-        plt.close()
-        return
+    # Create plot
+    plt.figure(figsize=figsize)
     
-    # Plot all neighbor words
-    plt.scatter(neighbor_points[:, 0], neighbor_points[:, 1],
-               c='gray', alpha=0.6, label='Context Words')
+    # Plot context words
+    plt.scatter(context_positions[:, 0], context_positions[:, 1], c='gray', alpha=0.6, label='Context Words')
     
-    # Plot target positions and trajectory
-    plt.scatter(target_positions[:, 0], target_positions[:, 1],
-               c='blue', s=100, label='Target Word')
+    # Plot target positions
+    plt.scatter(target_positions[:, 0], target_positions[:, 1], c='blue', s=100, label='Target Word')
     
-    # Add arrows between target positions
+    # Add trajectory arrows
     for i in range(len(target_positions) - 1):
         arrow = FancyArrowPatch(
             target_positions[i], target_positions[i + 1],
@@ -1892,25 +1867,25 @@ def visualize_semantic_trajectory_full(semantic_change_results, target_word, wor
     # Add labels
     texts = []
     
-    # Add neighbor word labels
-    for i, word in enumerate(all_neighbor_words):
-        if i < len(neighbor_points):  # Safety check
-            texts.append(plt.text(neighbor_points[i, 0], neighbor_points[i, 1], word,
-                                fontsize=fontsize*0.8, alpha=0.7))
+    # Add context word labels
+    for i, word in enumerate(valid_context_words):
+        texts.append(plt.text(context_positions[i, 0], context_positions[i, 1], word,
+                            fontsize=fontsize*0.8, alpha=0.7))
     
     # Add target word labels with corpus tags
-    valid_labels = [label for label in all_labels if label in neighbor_words_dict]
-    for i, label in enumerate(valid_labels):
-        if i < len(target_positions):
-            target_label = f"{target_word}_{label}"
-            texts.append(plt.text(target_positions[i, 0], target_positions[i, 1],
-                                target_label, fontsize=fontsize, fontweight='bold', c='red'))
+    for i, label in enumerate(all_labels):
+        target_label = f"{target_word}_{label}"
+        texts.append(plt.text(target_positions[i, 0], target_positions[i, 1],
+                            target_label, fontsize=fontsize, fontweight='bold', c='red'))
     
     if adjust_text_labels and len(texts) > 0:
-        from adjustText import adjust_text
-        adjust_text(texts, arrowprops=dict(arrowstyle='->', color='gray', alpha=0.5))
+        try:
+            from adjustText import adjust_text
+            adjust_text(texts, arrowprops=dict(arrowstyle='->', color='gray', alpha=0.5))
+        except ImportError:
+            print("Warning: adjustText package not found. Install with 'pip install adjustText' for better label placement.")
     
-    plt.title(f"Semantic Trajectory of '{target_word}' Across All Periods", fontsize=fontsize*1.2, pad=10)
+    plt.title(f"Semantic Trajectory of '{target_word}' Across Time Periods", fontsize=fontsize*1.2)
     plt.xlabel(x_label, fontsize=fontsize)
     plt.ylabel(y_label, fontsize=fontsize)
     plt.grid(True, linestyle='--', alpha=0.7)

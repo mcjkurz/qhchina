@@ -10,7 +10,17 @@ This module provides:
 from .installers import install_package
 
 # Text loading
-from .texts import load_texts
+from .texts import load_texts, sample_sentences_to_token_count
 
 # Font management
-from .fonts import load_fonts, set_font
+from .fonts import load_fonts, set_font, current_font
+
+# Make all functions available at module level
+__all__ = [
+    # Installers
+    'install_package',
+    # Texts
+    'load_texts', 'sample_sentences_to_token_count',
+    # Fonts
+    'load_fonts', 'set_font', 'current_font',
+]

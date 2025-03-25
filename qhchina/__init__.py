@@ -12,14 +12,7 @@ __version__ = "0.0.30"
 
 # Helper functions
 from .helpers import (
-    install_package,
-    load_texts,
     load_fonts,
     set_font,
+    current_font,
 )
-
-# For explicit access to submodules
-from . import analytics
-from . import preprocessing
-from . import helpers
-from . import educational
