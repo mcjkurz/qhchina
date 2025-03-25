@@ -1,4 +1,9 @@
-# BERT Text Classification
+---
+layout: default
+title: BERT Classification - qhChina Documentation
+---
+
+# BERT Text Classification with qhChina
 
 A comprehensive toolkit for fine-tuning BERT models for text classification tasks with PyTorch.
 
@@ -27,7 +32,7 @@ A comprehensive toolkit for fine-tuning BERT models for text classification task
 
 ## Overview
 
-This package provides tools for fine-tuning pre-trained BERT models for text classification tasks. Key features include:
+The qhChina package provides tools for fine-tuning pre-trained BERT models for text classification tasks. Key features include:
 
 - Easy dataset preparation with stratified train/validation/test splits
 - A customizable training loop with learning rate scheduling
@@ -40,14 +45,22 @@ This package provides tools for fine-tuning pre-trained BERT models for text cla
 ## Installation
 
 ```bash
-pip install transformers torch numpy scikit-learn matplotlib tqdm
+pip install qhchina
+```
+
+Or install from source:
+
+```bash
+git clone https://github.com/mcjkurz/qhchina.git
+cd qhchina
+pip install -e .
 ```
 
 ## Quick Start
 
 ```python
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from analytics.modeling import make_datasets, train_bert_classifier, predict
+from qhchina.analytics import make_datasets, train_bert_classifier, predict
 
 # Load pre-trained model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
@@ -201,93 +214,69 @@ Train a BERT-based classifier with custom training loop.
 - `val_interval` (Optional[int]): Number of batches between validation runs
 
 **Returns:**
-Dictionary containing:
-- `model`: Trained model
-- `history`: Training history (loss and metrics)
-- `train_size`: Number of training examples
-- `val_size`: Number of validation examples (if applicable)
+- `dict`: Dictionary containing:
+  - `model`: Fine-tuned model
+  - `history`: Training history (loss, metrics)
+  - `metrics`: Final validation metrics
+  - `device`: Device used for training
 
 ### evaluate()
 
 ```python
-evaluate(model, dataset, batch_size=32, device=None)
+evaluate(model, test_dataset, batch_size=16, device=None)
 ```
 
-Evaluate a BERT-based classifier on a dataset.
+Evaluate a trained model on a test dataset.
 
 **Parameters:**
-- `model` (AutoModelForSequenceClassification): Pre-loaded BERT model for classification
-- `dataset` (Dataset): PyTorch Dataset to evaluate
+- `model` (AutoModelForSequenceClassification): Trained model
+- `test_dataset` (Dataset): PyTorch Dataset for testing
 - `batch_size` (int): Batch size for evaluation
-- `device` (Optional[str]): Device to evaluate on ('cuda', 'mps', or 'cpu')
+- `device` (Optional[str]): Device to use for evaluation
 
 **Returns:**
-Dictionary containing evaluation metrics:
-- `loss`: Average loss
-- `accuracy`: Overall accuracy
-- `weighted_avg`: Weighted precision, recall, and F1 scores
-- `macro_avg`: Macro precision, recall, and F1 scores
-- `class_metrics`: Per-class metrics
-- `confusion_matrix`: Confusion matrix
-- `predictions`: All predictions
-- `true_labels`: All true labels
+- `dict`: Dictionary containing evaluation metrics (accuracy, precision, recall, F1, confusion matrix)
 
 ### predict()
 
 ```python
-predict(
-    model,
-    texts=None,
-    dataset=None,
-    tokenizer=None,
-    batch_size=32,
-    device=None,
-    return_probs=False
-)
+predict(model, texts, tokenizer, max_length=128, batch_size=16, device=None, return_probs=False)
 ```
 
-Make predictions on new texts using a trained BERT classifier.
+Make predictions with a trained model on new texts.
 
 **Parameters:**
-- `model` (AutoModelForSequenceClassification): Pre-loaded BERT model for classification
-- `texts` (Optional[List[str]]): List of texts to predict
-- `dataset` (Optional[Dataset]): PyTorch Dataset to use for inference
-- `tokenizer` (Optional[AutoTokenizer]): Pre-loaded tokenizer (required if texts is provided)
-- `batch_size` (int): Batch size for inference
-- `device` (Optional[str]): Device to run inference on ('cuda', 'mps', or 'cpu')
-- `return_probs` (bool): Whether to return prediction probabilities
+- `model` (AutoModelForSequenceClassification): Trained model
+- `texts` (List[str]): List of texts to classify
+- `tokenizer` (AutoTokenizer): Tokenizer corresponding to the model
+- `max_length` (int): Maximum sequence length for tokenization
+- `batch_size` (int): Batch size for prediction
+- `device` (Optional[str]): Device to use for prediction
+- `return_probs` (bool): Whether to return probability distributions
 
 **Returns:**
-- If `return_probs` is False: List of predicted labels
-- If `return_probs` is True: Dictionary with 'predictions' (labels) and 'probabilities'
+- If `return_probs=True`: List of tuples (probabilities, predicted_class)
+- If `return_probs=False`: List of predicted classes
 
 ### bert_encode()
 
 ```python
-bert_encode(
-    model,
-    tokenizer,
-    texts,
-    batch_size=None,
-    max_length=None,
-    pooling_strategy='cls',
-    device=None
-)
+bert_encode(texts, model, tokenizer, pooling="cls", max_length=128, batch_size=16, device=None)
 ```
 
-Extract embeddings from a transformer model for given text(s).
+Encode texts into BERT embeddings.
 
 **Parameters:**
-- `model` (AutoModelForSequenceClassification): Pre-loaded transformer model
-- `tokenizer` (AutoTokenizer): Pre-loaded tokenizer
 - `texts` (List[str]): List of texts to encode
-- `batch_size` (Optional[int]): If None, process texts individually. If provided, process in batches
-- `max_length` (Optional[int]): Maximum sequence length for tokenization
-- `pooling_strategy` (str): Strategy for pooling embeddings ('cls' or 'mean')
-- `device` (Optional[str]): Device to run inference on ('cuda', 'mps', or 'cpu')
+- `model`: BERT model (can be a standard BERT model or a classification model)
+- `tokenizer` (AutoTokenizer): Tokenizer corresponding to the model
+- `pooling` (str): Pooling strategy ('cls' for CLS token, 'mean' for mean pooling)
+- `max_length` (int): Maximum sequence length for tokenization
+- `batch_size` (int): Batch size for encoding
+- `device` (Optional[str]): Device to use for encoding
 
 **Returns:**
-- List of numpy arrays, each of shape (hidden_size,)
+- `numpy.ndarray`: Array of shape (len(texts), embedding_dim) with text embeddings
 
 ### set_device()
 
@@ -298,37 +287,37 @@ set_device(device=None)
 Determine the appropriate device for computation.
 
 **Parameters:**
-- `device` (Optional[str]): Optional device specification ('cuda', 'mps', 'cpu', or None)
+- `device` (Optional[str]): Device specification ('cuda', 'mps', 'cpu', or None)
 
 **Returns:**
-- str: The selected device ('cuda', 'mps', or 'cpu')
+- `str`: The selected device ('cuda', 'mps', or 'cpu')
 
 ## Examples
 
-### Binary Sentiment Classification
+### Binary Classification
 
 ```python
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from analytics.modeling import make_datasets, train_bert_classifier, evaluate, predict
+from qhchina.analytics import make_datasets, train_bert_classifier, evaluate, predict
 
 # Prepare data: (text, label) pairs
 data = [
-    ("这部电影太棒了，我非常喜欢！", 1),  # This movie is great, I really like it!
-    ("演员的表演很差，剧情也很无聊", 0),   # The actors' performance was poor, and the plot was boring
-    ("导演的镜头语言非常丰富", 1),        # The director's camera language is very rich
-    ("配乐不合适，破坏了整体观感", 0),     # The soundtrack is inappropriate, ruining the overall viewing experience
-    ("故事情节引人入胜，节奏感很强", 1),   # The storyline is engaging with a strong sense of rhythm
-    # More examples...
+    ("这部电影非常精彩！", 1),  # Positive
+    ("演员的表演很出色。", 1),  # Positive
+    ("故事情节有趣。", 1),      # Positive
+    ("我讨厌这部电影。", 0),    # Negative
+    ("演技很差劲。", 0),        # Negative
+    ("浪费时间的电影。", 0),    # Negative
 ]
 
-# Load pre-trained model and tokenizer
+# Load model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
 model = AutoModelForSequenceClassification.from_pretrained(
     "bert-base-chinese", 
-    num_labels=2  # Binary classification
+    num_labels=2
 )
 
-# Create datasets with 80/20 split
+# Create datasets with stratification
 train_dataset, val_dataset = make_datasets(
     data=data,
     tokenizer=tokenizer,
@@ -341,78 +330,162 @@ results = train_bert_classifier(
     model=model,
     train_dataset=train_dataset,
     val_dataset=val_dataset,
-    batch_size=16,
+    batch_size=2,
     learning_rate=2e-5,
-    num_epochs=3,
-    device="cuda",
-    warmup_steps=100,
-    logging_dir="./logs",
-    save_dir="./checkpoints"
+    num_epochs=3
 )
-
-# Evaluate final model
-eval_results = evaluate(
-    model=results["model"],
-    dataset=val_dataset,
-    batch_size=32
-)
-
-print(f"Accuracy: {eval_results['accuracy']:.4f}")
-print(f"F1 Score: {eval_results['weighted_avg']['f1']:.4f}")
 
 # Make predictions
-new_texts = [
-    "我会推荐这部电影给所有人！",        # I would recommend this movie to everyone!
-    "不要浪费时间看这部电影。"          # Don't waste your time on this film.
-]
-
+new_texts = ["这是一部非常好看的电影", "这个故事很无聊"]
 predictions = predict(
     model=results["model"],
     texts=new_texts,
-    tokenizer=tokenizer,
-    return_probs=True
+    tokenizer=tokenizer
 )
-
-for text, pred, probs in zip(new_texts, 
-                             predictions["predictions"], 
-                             predictions["probabilities"]):
-    print(f"Text: {text}")
-    print(f"Prediction: {'积极 (Positive)' if pred == 1 else '消极 (Negative)'}")
-    print(f"Confidence: {max(probs)*100:.1f}%\n")
+print(f"Predicted classes: {predictions}")
 ```
 
 ### Multi-class Classification
 
 ```python
-# For a multi-class scenario (e.g., topic classification)
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from qhchina.analytics import make_datasets, train_bert_classifier
+
+# Prepare multi-class data: (text, label) pairs
 data = [
-    ("中国经济在第二季度增长了5.5%", 0),    # China's economy grew by 5.5% in the second quarter (Economy)
-    ("新冠疫苗接种计划将于下月开始", 1),    # The COVID-19 vaccination program will begin next month (Health)
-    ("今年奥运会将在东京举行", 2),         # This year's Olympics will be held in Tokyo (Sports)
-    ("新的环保政策将减少碳排放", 3),       # New environmental policies will reduce carbon emissions (Environment)
-    # More examples...
+    ("这是一篇关于体育的新闻。", 0),  # Sports
+    ("足球比赛昨天结束了。", 0),     # Sports
+    ("经济增长率达到新高。", 1),     # Economy
+    ("股市今天上涨了。", 1),        # Economy
+    ("新技术改变了我们的生活。", 2), # Technology
+    ("人工智能正在迅速发展。", 2),   # Technology
 ]
 
+# Load model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
 model = AutoModelForSequenceClassification.from_pretrained(
     "bert-base-chinese", 
-    num_labels=4  # 4 classes: Economy(0), Health(1), Sports(2), Environment(3)
+    num_labels=3  # 3 classes
 )
 
-# Then follow similar steps as above
+# Create datasets
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    split=(0.7, 0.3)
+)
+
+# Train model
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    val_dataset=val_dataset,
+    num_epochs=5
+)
+```
+
+### Text Encoding
+
+```python
+from transformers import AutoModel, AutoTokenizer
+from qhchina.analytics import bert_encode
+
+# Load base model (not classification model)
+model_name = "bert-base-chinese"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+
+# Texts to encode
+texts = [
+    "中国经济持续发展。",
+    "北京是中国的首都。"
+]
+
+# Encode texts (get BERT embeddings)
+embeddings = bert_encode(
+    texts=texts,
+    model=model,
+    tokenizer=tokenizer,
+    pooling="cls"  # Use CLS token embedding
+)
+
+print(f"Embedding shape: {embeddings.shape}")  # (2, 768) for bert-base
 ```
 
 ## Visualizations
 
-The training process automatically generates visualizations when `logging_dir` is provided:
+The `train_bert_classifier()` function automatically generates training visualizations:
 
-- **Training curves**: Shows training loss and validation loss over time
-- **Learning rate**: Visualizes the learning rate schedule with warmup
+1. **Loss curve**: Shows training loss (and validation loss if available) over time
+2. **Metrics curve**: Shows evaluation metrics (accuracy, F1) over time
+
+These visualizations are saved to the specified `logging_dir` if provided.
 
 ## Performance Tips
 
-1. **Hardware acceleration**: Use CUDA or MPS for faster training
-2. **Batch size optimization**: Use the largest batch size that fits in your GPU memory
-3. **Learning rate tuning**: Start with 2e-5 and adjust based on validation performance
-4. **Warmup steps**: For large datasets, use ~10% of total steps as warmup
-5. **Sequence length**: Use the shortest sequence length that captures the necessary context
-6. **Memory optimization**: Set `max_train_batches` for quick experiments 
+### Batch Size
+
+Choose an appropriate batch size based on your hardware:
+
+- For high-end GPUs: 16-32 (or higher)
+- For consumer GPUs: 8-16
+- For CPU: 4-8
+
+### Sequence Length
+
+Limit sequence length based on your data needs:
+
+```python
+# For efficiency with short texts
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    max_length=64  # Shorter sequences
+)
+
+# For long documents that need more context
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    max_length=256  # Longer sequences
+)
+```
+
+### Learning Rate
+
+Typically best values for BERT fine-tuning:
+
+```python
+# Smaller learning rate for stable training
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    learning_rate=1e-5
+)
+
+# Default learning rate
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    learning_rate=2e-5
+)
+
+# Larger learning rate for faster convergence (may be less stable)
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    learning_rate=5e-5
+)
+```
+
+### Warmup Steps
+
+Using warmup can improve training stability:
+
+```python
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    warmup_steps=100  # Gradual learning rate warmup
+)
+``` 
