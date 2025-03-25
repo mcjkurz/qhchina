@@ -20,6 +20,7 @@ Features:
 - Dynamic window sizing with shrink_windows parameter
 - Properly managed learning rate decay
 - Sigmoid precomputation for faster training
+- Vocabulary size restriction with max_vocab_size parameter
 """
 
 import numpy as np
@@ -41,6 +42,16 @@ class Word2Vec:
       and output is the center word.
     
     Training is performed one example at a time, with negative examples generated for each positive example.
+    
+    Features:
+    - CBOW and Skip-gram architectures with appropriate example generation
+    - Training with individual examples (one by one)
+    - Explicit negative sampling for each training example
+    - Subsampling of frequent words
+    - Dynamic window sizing with shrink_windows parameter
+    - Properly managed learning rate decay
+    - Sigmoid precomputation for faster training
+    - Vocabulary size restriction with max_vocab_size parameter
     """
     
     def __init__(
@@ -55,12 +66,11 @@ class Word2Vec:
         seed: int = 1,
         alpha: float = 0.025,
         min_alpha: float = 0.0001,
-        epochs: int = 5,
         sample: float = 1e-3,  # Threshold for subsampling frequent words
         shrink_windows: bool = True,  # Whether to use dynamic window size
-        batch_size: int = 32,  # Batch size for future batch training implementation
         exp_table_size: int = 1000,  # Size of sigmoid lookup table
         max_exp: float = 6.0,  # Range of sigmoid precomputation [-max_exp, max_exp]
+        max_vocab_size: Optional[int] = None,  # Maximum vocabulary size, None for no limit
     ):
         """
         Initialize the Word2Vec model.
@@ -77,13 +87,13 @@ class Word2Vec:
         seed: Seed for random number generator
         alpha: Initial learning rate
         min_alpha: Minimum learning rate
-        epochs: Number of iterations over the corpus
         sample: Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
         shrink_windows: If True, the effective window size is uniformly sampled from [1, window] 
                         for each target word during training. If False, always use the full window.
-        batch_size: Batch size for future batch training implementation
         exp_table_size: Size of sigmoid lookup table for precomputation
         max_exp: Range of values for sigmoid precomputation [-max_exp, max_exp]
+        max_vocab_size: Maximum vocabulary size to keep, keeping the most frequent words.
+                        None means no limit (keep all words above min_count).
         """
         self.vector_size = vector_size
         self.window = window
@@ -95,10 +105,9 @@ class Word2Vec:
         self.seed = seed
         self.alpha = alpha
         self.min_alpha = min_alpha
-        self.epochs = epochs
         self.sample = sample  # Threshold for subsampling
         self.shrink_windows = shrink_windows  # Dynamic window size
-        self.batch_size = batch_size  # For future batch implementation
+        self.max_vocab_size = max_vocab_size  # Maximum vocabulary size
         
         # Parameters for sigmoid precomputation
         self.exp_table_size = exp_table_size
@@ -214,6 +223,14 @@ class Word2Vec:
         # Filter words by min_count and create vocabulary
         retained_words = {word for word, count in self.word_counts.items() if count >= self.min_count}
         
+        # If max_vocab_size is set, keep only the most frequent words
+        if self.max_vocab_size is not None and len(retained_words) > self.max_vocab_size:
+            # Sort words by frequency (highest first) and take the top max_vocab_size
+            top_words = [word for word, _ in self.word_counts.most_common(self.max_vocab_size)]
+            # Intersect with words that meet min_count criteria
+            retained_words = {word for word in top_words if word in retained_words}
+            print(f"Vocabulary limited to {len(retained_words)} most frequent words due to max_vocab_size={self.max_vocab_size}")
+        
         # Create mappings
         self.index2word = []
         for word, count in self.word_counts.most_common():
@@ -224,7 +241,7 @@ class Word2Vec:
         
         self.corpus_word_count = sum(self.vocab[word][1] for word in self.vocab)
         self.vocab_size = len(self.vocab)
-        print(f"Vocabulary size: {self.vocab_size}")
+        print(f"Vocabulary size: {self.vocab_size} words")
 
     def _calculate_discard_probs(self) -> None:
         """
@@ -887,34 +904,30 @@ class Word2Vec:
         
         return total_loss
 
-    def train(self, sentences: List[List[str]], 
-              epochs: Optional[int] = None, 
-              batch_size: Optional[int] = None,
+    def train(self, sentences: List[str], 
+              epochs: int = 1, 
+              batch_size: int = 32,
               calculate_loss: bool = False) -> List[float]:
         """
         Train the Word2Vec model.
         
         Parameters:
         -----------
-        sentences: List of tokenized sentences
-        epochs: Number of training epochs
-        batch_size: Batch size for training. If None, use self.batch_size. If 1, use example-by-example training.
-        calculate_loss: Whether to calculate and display loss during training with a progress bar
+        sentences: List of tokenized sentences to train on. Required for training.
+        epochs: Number of training epochs.
+        batch_size: Batch size for training. If 1, use example-by-example training.
+        calculate_loss: Whether to calculate and display loss during training.
         
         Returns:
         --------
         List of average losses per epoch
-        """
+        """ 
         # Build vocabulary if it doesn't exist yet
         if not self.vocab:
             self.build_vocab(sentences)
             self._initialize_weights()
             if self.sample > 0:
                 self._calculate_discard_probs()
-        if epochs is None:
-            epochs = self.epochs
-        if batch_size is None:
-            batch_size = self.batch_size
         
         # Calculate linear decay of learning rate
         alpha_delta = (self.alpha - self.min_alpha) / max(1, epochs - 1)
@@ -923,6 +936,7 @@ class Word2Vec:
         epoch_losses = []
 
         total_words = sum(len(sentence) for sentence in sentences)
+        print(f"Training on {len(sentences)} sentences with {total_words} words...")
 
         # Training loop
         for epoch in range(epochs):
@@ -1172,7 +1186,7 @@ class Word2Vec:
             'sg': self.sg,
             'sample': self.sample,
             'shrink_windows': self.shrink_windows,
-            'batch_size': self.batch_size,
+            'max_vocab_size': self.max_vocab_size,
             'W': self.W,
             'W_prime': self.W_prime
         }
@@ -1197,7 +1211,7 @@ class Word2Vec:
         # Get values with defaults if not found
         shrink_windows = model_data.get('shrink_windows', False)
         sample = model_data.get('sample', 1e-3)
-        batch_size = model_data.get('batch_size', 32)
+        max_vocab_size = model_data.get('max_vocab_size', None)
         
         model = cls(
             vector_size=model_data['vector_size'],
@@ -1209,7 +1223,7 @@ class Word2Vec:
             sg=model_data['sg'],
             sample=sample,
             shrink_windows=shrink_windows,
-            batch_size=batch_size
+            max_vocab_size=max_vocab_size
         )
         
         model.vocab = model_data['vocab']
@@ -1256,41 +1270,125 @@ def plot_training_loss(epoch_losses, title="Word2Vec Training Loss"):
     
     plt.show()
 
-class TemporalWord2Vec(Word2Vec):
+class TempRefWord2Vec(Word2Vec):
     """
-    Extension of Word2Vec implementing Temporal Referencing (TR) for tracking semantic change.
+    Implementation of Word2Vec with Temporal Referencing (TR) for tracking semantic change.
     
-    In this implementation, target words for specific time periods are represented as
-    word_period (e.g., "bread_1" for period 1), but remain unchanged when used as context words.
-    This allows tracking semantic change of words across different time periods in a single model.
+    This class extends Word2Vec to implement temporal referencing, where target words
+    are represented with time period indicators (e.g., "bread_1800" for period 1800s) when used
+    as target words, but remain unchanged when used as context words.
     
-    Temporal Referencing is applied only to Skip-gram architecture and for specific target words.
+    The class takes multiple corpora corresponding to different time periods and automatically
+    creates temporal references for specified target words.
+    
+    Usage:
+    ------
+    1. Initialize with corpora from different time periods, labels for the periods,
+       and target words to track for semantic change
+    2. The model will process, balance, and combine the corpora
+    3. Call train() without arguments to train on the preprocessed data
+    4. Access semantic change through most_similar() or by directly analyzing the word vectors
+       of temporal variants (e.g., "bread_1800" vs "bread_1900")
+    
+    Example:
+    --------
+    ```python
+    # Corpora from different time periods
+    corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
+    corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
+    
+    # Initialize model
+    model = TempRefWord2Vec(
+        corpora=[corpus_1800s, corpus_1900s],
+        labels=["1800s", "1900s"],
+        targets=["bread", "food", "money"],
+        vector_size=100,
+        window=5,
+        sg=0  # Use CBOW
+    )
+    
+    # Train (uses preprocessed internal corpus)
+    model.train(epochs=5)
+    
+    # Analyze semantic change
+    model.most_similar("bread_1800")  # Words similar to "bread" in the 1800s
+    model.most_similar("bread_1900")  # Words similar to "bread" in the 1900s
+    ```
     """
     
     def __init__(
         self,
-        temporal_word_map: Dict[str, List[str]] = None,
-        **kwargs
+        corpora: List[List[List[str]]],  # List of corpora, each corpus is a list of sentences
+        labels: List[str],               # Labels for each corpus (e.g., time periods)
+        targets: List[str],              # Target words to trace semantic change
+        **kwargs                         # Parameters passed to Word2Vec parent class
     ):
         """
-        Initialize TemporalWord2Vec with temporal word mapping.
+        Initialize TempRefWord2Vec with multiple corpora and target words to track.
         
         Parameters:
         -----------
-        temporal_word_map: Dictionary mapping base words to their temporal variants
-                          E.g., {"bread": ["bread_1", "bread_2", "bread_3"]}
-        **kwargs: Arguments passed to Word2Vec parent class
+        corpora: List of corpora, each corpus is a list of sentences for a time period
+        labels: Labels for each corpus (e.g., time periods like "1800s", "1900s")
+        targets: List of target words to trace semantic change
+        **kwargs: Arguments passed to Word2Vec parent class (vector_size, window, etc.)
         """
-        super().__init__(**kwargs)
+        # Import the sampling function
+        from qhchina.helpers.texts import sample_sentences_to_token_count, add_corpus_tags
         
-        # Initialize temporal word mapping
-        self.temporal_word_map = temporal_word_map or {}
+        # Check that corpora and labels have the same length
+        if len(corpora) != len(labels):
+            raise ValueError(f"Number of corpora ({len(corpora)}) must match number of labels ({len(labels)})")
         
-        # Create a reverse mapping for quick lookup: temporal variant -> base word
+        # Calculate token counts and determine minimum
+        corpus_token_counts = [sum(len(sentence) for sentence in corpus) for corpus in corpora]
+        target_token_count = min(corpus_token_counts)
+        print(f"Balancing corpora to minimum size: {target_token_count} tokens")
+        
+        # Balance corpus sizes
+        balanced_corpora = []
+        for i, corpus in enumerate(corpora):
+            if corpus_token_counts[i] <= target_token_count:
+                balanced_corpora.append(corpus)
+            else:
+                sampled_corpus = sample_sentences_to_token_count(corpus, target_token_count)
+                balanced_corpora.append(sampled_corpus)
+        
+        # Add corpus tags to the corpora
+        tagged_corpora = add_corpus_tags(balanced_corpora, labels, targets)
+
+        # Initialize combined corpus before using it
+        self.combined_corpus = []
+        
+        # Combine all tagged corpora
+        for corpus in tagged_corpora:
+            self.combined_corpus.extend(corpus)
+        print(f"Combined corpus: {len(self.combined_corpus)} sentences, {sum(len(s) for s in self.combined_corpus)} tokens")
+        
+        # Create temporal word map: maps base words to their temporal variants
+        self.temporal_word_map = {}
+        for target in targets:
+            variants = [f"{target}_{label}" for label in labels]
+            self.temporal_word_map[target] = variants
+        
+        # Create reverse mapping: temporal variant -> base word
         self.reverse_temporal_map = {}
         for base_word, variants in self.temporal_word_map.items():
             for variant in variants:
                 self.reverse_temporal_map[variant] = base_word
+        
+        # Initialize parent Word2Vec class with kwargs
+        super().__init__(**kwargs)
+        
+        # Build vocabulary using the combined corpus
+        self.build_vocab(self.combined_corpus)
+        
+        # Initialize weights after building vocabulary
+        self._initialize_weights()
+        
+        # Calculate discard probabilities for subsampling if needed
+        if self.sample > 0:
+            self._calculate_discard_probs()
     
     def build_vocab(self, sentences: List[List[str]]) -> None:
         """
@@ -1301,6 +1399,7 @@ class TemporalWord2Vec(Word2Vec):
         -----------
         sentences: List of tokenized sentences
         """
+        
         # Call parent method to build the basic vocabulary
         super().build_vocab(sentences)
         
@@ -1331,11 +1430,9 @@ class TemporalWord2Vec(Word2Vec):
                 added_base_words += 1
         
         if added_base_words > 0:
-            print(f"Added {added_base_words} base words to vocabulary that weren't in corpus.")
             # Update vocabulary size
             self.vocab_size = len(self.vocab)
             self.corpus_word_count += added_base_words
-            print(f"Updated vocabulary size: {self.vocab_size}")
 
     def generate_skipgram_examples(self, 
                                  sentences: List[List[str]]) -> Generator[Tuple[int, int], None, None]:
@@ -1492,3 +1589,35 @@ class TemporalWord2Vec(Word2Vec):
                 
                 # Yield example (input_indices, output_idx)
                 yield (context_indices, center_idx)
+
+    def train(self, sentences: Optional[List[str]] = None, 
+              epochs: int = 1, 
+              batch_size: int = 32,
+              calculate_loss: bool = False) -> List[float]:
+        """
+        Train the TempRefWord2Vec model using the preprocessed combined corpus.
+        
+        Unlike the parent Word2Vec class, TempRefWord2Vec always uses its internal combined_corpus
+        that was created and preprocessed during initialization. This ensures the training
+        data has the proper temporal references.
+        
+        Parameters:
+        -----------
+        sentences: Ignored in TempRefWord2Vec, will use self.combined_corpus instead
+        epochs: Number of training epochs
+        batch_size: Batch size for training. If None, use self.batch_size. If 1, use example-by-example training.
+        calculate_loss: Whether to calculate and display loss during training with a progress bar
+        
+        Returns:
+        --------
+        List of average losses per epoch
+        """
+        if sentences is not None:
+            print("Warning: TempRefWord2Vec always uses its internal preprocessed corpus for training.")
+            print("The provided 'sentences' argument will be ignored.")
+        # Call the parent's train method with our combined corpus
+        # Always pass the combined_corpus to avoid ValueErrors in the parent class
+        return super().train(sentences=self.combined_corpus, 
+                            epochs=epochs, 
+                            batch_size=batch_size, 
+                            calculate_loss=calculate_loss)

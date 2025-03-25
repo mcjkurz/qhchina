@@ -24,12 +24,13 @@ from .vectors import (
     get_bias_direction,
     calculate_bias,
     most_similar,
+    align_vectors
 )
 
 # Word2Vec operations   
 from .word2vec import (
     Word2Vec, 
-    TemporalWord2Vec
+    TempRefWord2Vec
 )
 
 # BERT modeling and classification
@@ -40,12 +41,7 @@ from .modeling import (
     set_device,
     predict,
     bert_encode,
-    semantic_change,
-    align_vectors,
-    visualize_semantic_trajectory,
-    visualize_semantic_trajectory_full,
     make_datasets,
-    add_corpus_tags,
 )
 
 # Make all functions available at module level
@@ -57,9 +53,8 @@ __all__ = [
     # Vectors
     'project_2d', 'project_bias', 'cosine_similarity', 'get_bias_direction', 'calculate_bias', 'most_similar',
     # Word2Vec
-    'Word2Vec', 'TemporalWord2Vec',
+    'Word2Vec', 'TempRefWord2Vec',
     # Modeling
     'train_bert_classifier', 'evaluate', 'TextDataset', 'set_device', 'predict', 'bert_encode', 
-    'semantic_change', 'align_vectors', 'visualize_semantic_trajectory', 'visualize_semantic_trajectory_full',
-    'make_datasets', 'add_corpus_tags',
+    'align_vectors', 'make_datasets',
 ]

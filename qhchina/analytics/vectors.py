@@ -296,3 +296,34 @@ def most_similar(target_vector, vectors, labels=None, metric='cosine', top_n=Non
     if top_n is not None:
         return sorted_pairs[:top_n]
     return sorted_pairs
+
+def align_vectors(source_vectors, target_vectors):
+    """
+    Align source vectors with target vectors using Procrustes analysis.
+    
+    Args:
+        source_vectors: numpy array of vectors to be aligned
+        target_vectors: numpy array of vectors to align to
+        
+    Returns:
+        Tuple of (aligned_vectors, transformation_matrix)
+        - aligned_vectors: The aligned source vectors
+        - transformation_matrix: The orthogonal transformation matrix that can be used to align other vectors
+    """
+    # Center the vectors
+    source_centered = source_vectors - np.mean(source_vectors, axis=0)
+    target_centered = target_vectors - np.mean(target_vectors, axis=0)
+    
+    # Compute the covariance matrix
+    covariance = np.dot(target_centered.T, source_centered)
+    
+    # Compute SVD
+    U, _, Vt = np.linalg.svd(covariance)
+    
+    # Compute the rotation matrix
+    rotation = np.dot(U, Vt)
+    
+    # Apply the rotation to the source vectors
+    aligned_vectors = np.dot(source_vectors, rotation.T)
+    
+    return aligned_vectors, rotation

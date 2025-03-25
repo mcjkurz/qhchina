@@ -10,7 +10,7 @@ This module provides:
 from .installers import install_package
 
 # Text loading
-from .texts import load_texts, sample_sentences_to_token_count
+from .texts import load_texts, sample_sentences_to_token_count, add_corpus_tags
 
 # Font management
 from .fonts import load_fonts, set_font, current_font
@@ -20,7 +20,7 @@ __all__ = [
     # Installers
     'install_package',
     # Texts
-    'load_texts', 'sample_sentences_to_token_count',
+    'load_texts', 'sample_sentences_to_token_count', 'add_corpus_tags',
     # Fonts
     'load_fonts', 'set_font', 'current_font',
 ]

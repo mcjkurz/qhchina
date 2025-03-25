@@ -8,7 +8,7 @@ For more specialized functions, import from specific modules:
 - qhchina.educational: Educational visualization tools
 """
 
-__version__ = "0.0.30"
+__version__ = "0.0.31"
 
 # Helper functions
 from .helpers import (

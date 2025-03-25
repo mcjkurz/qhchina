@@ -51,3 +51,32 @@ def sample_sentences_to_token_count(corpus, target_tokens):
         if current_tokens >= target_tokens:
             break
     return sampled_sentences
+
+def add_corpus_tags(corpora, labels, target_words):
+    """
+    Add corpus-specific tags to target words in all corpora at once.
+    
+    Args:
+        corpora: List of corpora (each corpus is list of tokenized sentences)
+        labels: List of corpus labels
+        target_words: List of words to tag
+    
+    Returns:
+        List of processed corpora where target words have been tagged with their corpus label
+    """
+    processed_corpora = []
+    target_words_set = set(target_words)
+    
+    for corpus, label in zip(corpora, labels):
+        processed_corpus = []
+        for sentence in corpus:
+            processed_sentence = []
+            for token in sentence:
+                if token in target_words_set:
+                    processed_sentence.append(f"{token}_{label}")
+                else:
+                    processed_sentence.append(token)
+            processed_corpus.append(processed_sentence)
+        processed_corpora.append(processed_corpus)
+    
+    return processed_corpora
