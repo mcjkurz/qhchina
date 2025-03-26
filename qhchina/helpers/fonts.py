@@ -3,8 +3,8 @@ import matplotlib
 import matplotlib.font_manager
 from pathlib import Path
 
-HELPERS_PATH = Path(__file__).parents[0].resolve()
-CJK_FONT_PATH = Path(f'{HELPERS_PATH}/fonts').resolve()
+PACKAGE_PATH = Path(__file__).parents[1].resolve() # qhchina
+CJK_FONT_PATH = Path(f'{PACKAGE_PATH}/data/fonts').resolve()
 MPL_FONT_PATH = Path(f'{matplotlib.get_data_path()}/fonts/ttf').resolve()
 
 def set_font(font='Noto Sans CJK TC') -> None:
@@ -13,7 +13,7 @@ def set_font(font='Noto Sans CJK TC') -> None:
 
 def load_fonts(target_font : str = 'Noto Sans CJK TC', verbose=False) -> None:
     if verbose:
-        print(f"{HELPERS_PATH=}")
+        print(f"{PACKAGE_PATH=}")
         print(f"{CJK_FONT_PATH=}")
         print(f"{MPL_FONT_PATH=}")
     cjk_fonts = [file.name for file in Path(f'{CJK_FONT_PATH}').glob('**/*') if not file.name.startswith(".")]

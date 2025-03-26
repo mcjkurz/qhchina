@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.34"  # Updated version
+version = "0.0.36"  # Updated version
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -14,10 +14,9 @@ description = "A Python package for NLP tasks related to Chinese text."
 readme = "README.md"
 requires-python = ">=3.8"  # Specify the minimum Python version
 keywords = ["digital humanities", "nlp", "Chinese", "text analysis", "corpus linguistics", "topic modeling"]
-license = {file = "LICENSE.txt"}
+license = "MIT"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
@@ -30,10 +29,10 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-exclude = ["data", "tests"]
+exclude = ["tests"]
 
 [tool.setuptools.package-data]
-"qhchina" = ["helpers/fonts/*.otf", "analytics/cython_ext/*.pyx"]
+"qhchina" = ["analytics/cython_ext/*.pyx", "data/**/*"]
 
 [project.urls]
 "Homepage" = "https://github.com/mcjkurz/qhchina"  # Replace with your repo URL

@@ -7,23 +7,26 @@ from libc.math cimport log
 ctypedef np.int32_t INT_t
 ctypedef np.float64_t DOUBLE_t
 
-# Function to sample from a multinomial distribution
-cdef int _sample_multinomial(double[:] p, int length) nogil:
-    """Sample from a discrete probability distribution.
+# Define a global probability buffer to reuse
+cdef:
+    double[:] PROB_BUFFER = np.zeros(100, dtype=np.float64)  # Initial size, will be resized if needed
+
+# Function to sample from a multinomial distribution using linear search
+cdef int _sample_multinomial_linear(double[:] p_cumsum, int length) nogil:
+    """Sample from a discrete probability distribution using linear search.
     
-    This is a fast implementation of multinomial sampling using
-    cumulative probabilities and binary search.
+    This is a simple implementation of multinomial sampling using
+    cumulative probabilities and linear search.
     """
     cdef double r = <double>rand() / RAND_MAX
-    cdef double cumsum = 0
-    cdef int i
+    cdef int k
     
-    for i in range(length):
-        cumsum += p[i]
-        if r < cumsum:
-            return i
+    # Linear search on the cumulative probability array
+    for k in range(length):
+        if r <= p_cumsum[k]:
+            return k
     
-    # In case of numerical issues, return the last index
+    # In case of numerical issues, return the last topic
     return length - 1
 
 def sample_topic(np.ndarray[INT_t, ndim=2] n_wt, 
@@ -32,7 +35,7 @@ def sample_topic(np.ndarray[INT_t, ndim=2] n_wt,
                 np.ndarray[INT_t, ndim=2] z,
                 int d, int i, int w, 
                 double alpha, double beta, 
-                int n_topics, int vocab_size):
+                int n_topics, int vocab_size) nogil:
     """
     Optimized Cython implementation of topic sampling for LDA Gibbs sampler.
     
@@ -52,27 +55,31 @@ def sample_topic(np.ndarray[INT_t, ndim=2] n_wt,
     Returns:
         Sampled topic ID
     """
+    global PROB_BUFFER
+    
     cdef int old_topic = z[d, i]
-    cdef np.ndarray[DOUBLE_t, ndim=1] p = np.zeros(n_topics, dtype=np.float64)
     cdef double p_sum = 0.0
     cdef int k
+    # Precompute vocab_size * beta for efficiency
+    cdef double vocab_size_beta = vocab_size * beta
     
     # Decrease counts for current topic assignment
     n_wt[w, old_topic] -= 1
     n_dt[d, old_topic] -= 1
     n_t[old_topic] -= 1
     
-    # Calculate probability for each topic
+    # Calculate probability for each topic directly into the buffer
     for k in range(n_topics):
-        p[k] = (n_wt[w, k] + beta) / (n_t[k] + vocab_size * beta) * (n_dt[d, k] + alpha)
-        p_sum += p[k]
+        PROB_BUFFER[k] = (n_wt[w, k] + beta) / (n_t[k] + vocab_size_beta) * (n_dt[d, k] + alpha)
+        p_sum += PROB_BUFFER[k]
     
-    # Normalize probabilities
-    for k in range(n_topics):
-        p[k] /= p_sum
+    # Convert to cumulative probabilities for linear search
+    PROB_BUFFER[0] /= p_sum
+    for k in range(1, n_topics):
+        PROB_BUFFER[k] = PROB_BUFFER[k-1] + (PROB_BUFFER[k] / p_sum)
     
-    # Sample new topic
-    cdef int new_topic = _sample_multinomial(p, n_topics)
+    # Sample new topic using linear search (faster for small n_topics)
+    cdef int new_topic = _sample_multinomial_linear(PROB_BUFFER, n_topics)
     
     # Update counts for new topic assignment
     n_wt[w, new_topic] += 1
@@ -94,10 +101,17 @@ def run_iteration(np.ndarray[INT_t, ndim=2] n_wt,
     This is highly optimized by combining the iteration loop with the sampling
     logic in Cython.
     """
-    cdef int d, i, w, doc_len
+    global PROB_BUFFER
+    cdef int d, i, w, doc_len, num_docs
     cdef list doc
     
-    for d in range(len(docs_tokens)):
+    # Ensure buffer is exactly equal to n_topics (the exact size needed)
+    if PROB_BUFFER.shape[0] != n_topics:
+        PROB_BUFFER = np.zeros(n_topics, dtype=np.float64)
+    
+    num_docs = len(docs_tokens)
+    
+    for d in range(num_docs):
         doc = docs_tokens[d]
         doc_len = len(doc)
         
