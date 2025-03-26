@@ -15,30 +15,63 @@ The `LDAGibbsSampler` class provides a simple interface for topic modeling:
 from qhchina.analytics import LDAGibbsSampler
 from qhchina.helpers import load_stopwords
 
-# Example tokenized documents
+# Example tokenized documents after Chinese word segmentation
 documents = [
-    ["中国", "经济", "发展", "增长", "改革"],
-    ["教育", "学生", "大学", "研究", "科学"],
-    ["政治", "政府", "改革", "发展", "政策"],
-    # ... more documents
+    # Technology document
+    ["人工智能", "正在", "改变", "我们", "的", "生活", "方式", "和", "工作", "效率"],
+    
+    # Healthcare document
+    ["医生", "建议", "患者", "多", "喝", "水", "每天", "适当", "运动"],
+    
+    # Cultural document
+    ["中国", "传统", "文化", "源远流长", "需要", "年轻人", "传承"],
+    
+    # Economic document
+    ["经济", "发展", "需要", "创新", "驱动", "和", "人才", "支撑"],
+    
+    # Education document
+    ["在", "大学", "里", "学习", "不仅", "是", "获取", "知识", "更是", "培养", "能力"]
 ]
 
 # Create and fit the model
+# Note: alpha defaults to 50/n_topics as recommended by Griffiths and Steyvers (2004)
 lda = LDAGibbsSampler(
     n_topics=5,
-    alpha=0.1,
-    beta=0.01,
     iterations=1000,
     eval_interval=100
 )
 lda.fit(documents)
 
-# Get top words for each topic
-topics = lda.get_topic_words(n_words=10)
+# Get all topics with their top words
+topics = lda.get_topics(n_words=10)
 for i, topic in enumerate(topics):
     print(f"Topic {i}:")
     for word, prob in topic:
         print(f"  {word}: {prob:.4f}")
+```
+
+## Hyperparameter Selection
+
+### Alpha Parameter
+
+The alpha parameter controls the document-topic prior distribution. By default, the `LDAGibbsSampler` uses the heuristic recommended by Griffiths and Steyvers (2004) of:
+
+```
+alpha = 50 / n_topics
+```
+
+This heuristic has been found to work well in many applications. A higher alpha value makes documents more similar in terms of their topic compositions, while a lower alpha creates more distinct topic mixtures per document.
+
+You can explicitly set alpha if you want to override this default:
+
+```python
+# Override the default alpha
+lda = LDAGibbsSampler(
+    n_topics=5,
+    alpha=0.1,
+    beta=0.01,
+    iterations=1000
+)
 ```
 
 ## Using Stopwords
@@ -52,8 +85,6 @@ stopwords = load_stopwords(language="zh_sim")
 # Create model with stopwords filtering
 lda = LDAGibbsSampler(
     n_topics=5, 
-    alpha=0.1, 
-    beta=0.01,
     iterations=1000,
     stopwords=stopwords
 )
@@ -67,7 +98,7 @@ The `LDAGibbsSampler` provides several methods to analyze topics and documents:
 ```python
 # Get the top words for a specific topic
 topic_id = 0
-top_words = lda.get_top_words(topic_id=topic_id, n_words=10)
+top_words = lda.get_topic_words(topic_id=topic_id, n_words=10)
 print(f"Top words for Topic {topic_id}:")
 for word, prob in top_words:
     print(f"  {word}: {prob:.4f}")
@@ -130,7 +161,7 @@ lda.save("lda_model.npy")
 loaded_lda = LDAGibbsSampler.load("lda_model.npy")
 
 # Use the loaded model
-topics = loaded_lda.get_topic_words(n_words=5)
+topics = loaded_lda.get_topics(n_words=5)
 ```
 
 ## Inference on New Documents
@@ -139,7 +170,7 @@ Infer topic distributions for new documents:
 
 ```python
 # New document
-new_doc = ["中国", "经济", "发展", "改革"]
+new_doc = ["人工智能", "技术", "在", "医疗", "领域", "大有", "可为"]
 
 # Infer topic distribution
 topic_dist = lda.inference(new_doc, inference_iterations=50)
@@ -155,7 +186,7 @@ The `LDAGibbsSampler` offers several parameters for fine-tuning:
 ```python
 lda = LDAGibbsSampler(
     n_topics=10,             # Number of topics
-    alpha=0.1,               # Dirichlet prior for document-topic distributions
+    alpha=None,              # Dirichlet prior for document-topic distributions (default: 50/n_topics)
     beta=0.01,               # Dirichlet prior for topic-word distributions
     iterations=2000,         # Number of Gibbs sampling iterations
     random_state=42,         # Random seed for reproducibility
@@ -191,7 +222,12 @@ import re
 stopwords = load_stopwords("zh_sim")
 
 # Load and preprocess text data
-texts = load_texts(["data/texts/example1.txt", "data/texts/example2.txt"])
+texts = load_texts([
+    "data/texts/新闻报道.txt", 
+    "data/texts/学术论文.txt", 
+    "data/texts/网络评论.txt", 
+    "data/texts/政府公告.txt"
+])
 documents = []
 
 for text in texts:
@@ -201,17 +237,12 @@ for text in texts:
     # Tokenize with jieba
     tokens = jieba.cut(text)
     
-    # Filter tokens
-    filtered_tokens = [t for t in tokens if t not in stopwords and len(t) > 1]
-    
     # Add to documents
-    documents.append(filtered_tokens)
+    documents.append(tokens)
 
-# Train the LDA model
+# Train the LDA model with default alpha=50/n_topics
 lda = LDAGibbsSampler(
     n_topics=5,
-    alpha=0.1,
-    beta=0.01,
     iterations=1000,
     eval_interval=100,
     stopwords=stopwords,
@@ -244,7 +275,7 @@ lda.save("lda_model.npy")
 
 ```python
 class LDAGibbsSampler:
-    def __init__(self, n_topics=10, alpha=0.1, beta=0.01, iterations=1000, 
+    def __init__(self, n_topics=10, alpha=None, beta=0.01, iterations=1000, 
                  random_state=None, eval_interval=None, min_count=1, 
                  max_vocab_size=None, min_length=1, stopwords=None):
         """Initialize the LDA model with Gibbs sampling."""
@@ -252,10 +283,10 @@ class LDAGibbsSampler:
     def fit(self, documents):
         """Fit the LDA model to the given documents."""
         
-    def get_topic_words(self, n_words=10):
+    def get_topics(self, n_words=10):
         """Get the top words for each topic along with their probabilities."""
         
-    def get_top_words(self, topic_id, n_words=10):
+    def get_topic_words(self, topic_id, n_words=10):
         """Get the top n words for a specific topic."""
         
     def get_document_topics(self, doc_id):
@@ -283,4 +314,3 @@ class LDAGibbsSampler:
     @classmethod
     def load(cls, filepath):
         """Load a model from a file."""
-```

@@ -58,8 +58,8 @@ class LDAGibbsSampler:
     def __init__(
         self,
         n_topics: int = 10,
-        alpha: float = 0.1,
-        beta: float = 0.01,
+        alpha: Optional[float] = None,  # Changed to None as default to use 50/n_topics heuristic
+        beta: float = 0.1,
         iterations: int = 1000,
         random_state: Optional[int] = None,
         eval_interval: Optional[int] = None,
@@ -73,7 +73,8 @@ class LDAGibbsSampler:
         
         Args:
             n_topics: Number of topics
-            alpha: Dirichlet prior for document-topic distributions (can be float or array of floats)
+            alpha: Dirichlet prior for document-topic distributions (can be float or array of floats).
+                  If None, uses the heuristic 50/n_topics from Griffiths and Steyvers (2004).
             beta: Dirichlet prior for topic-word distributions (can be float or array of floats)
             iterations: Number of Gibbs sampling iterations
             random_state: Random seed for reproducibility
@@ -84,7 +85,11 @@ class LDAGibbsSampler:
             stopwords: Set of words to exclude from vocabulary
         """
         self.n_topics = n_topics
-        self.alpha = alpha
+        # Use Griffiths and Steyvers (2004) heuristic if alpha is None
+        if alpha is None:
+            self.alpha = 50.0 / n_topics
+        else:
+            self.alpha = alpha
         self.beta = beta
         self.iterations = iterations
         self.random_state = random_state
@@ -394,7 +399,7 @@ class LDAGibbsSampler:
             
         return np.exp(-log_likelihood / token_count)
     
-    def get_topic_words(self, n_words: int = 10) -> List[List[Tuple[str, float]]]:
+    def get_topics(self, n_words: int = 10) -> List[List[Tuple[str, float]]]:
         """
         Get the top words for each topic along with their probabilities.
         
@@ -500,7 +505,7 @@ class LDAGibbsSampler:
             dpi: Resolution of the output image in dots per inch
         """
         # Get top words for each topic
-        topics = self.get_topic_words(n_words)
+        topics = self.get_topics(n_words)
         
         if separate_files:
             # Create separate plots for each topic
@@ -666,7 +671,7 @@ class LDAGibbsSampler:
         # Return the document IDs and probabilities
         return [(int(doc_id), float(topic_probs[doc_id])) for doc_id in top_doc_indices]
     
-    def get_top_words(self, topic_id: int, n_words: int = 10) -> List[Tuple[str, float]]:
+    def get_topic_words(self, topic_id: int, n_words: int = 10) -> List[Tuple[str, float]]:
         """
         Get the top n words for a specific topic.
         
