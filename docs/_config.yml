@@ -1,6 +1,6 @@
 theme: jekyll-theme-cayman
-title: BERT Text Classification
-description: A comprehensive toolkit for fine-tuning BERT models for text classification tasks
+title: qhChina
+description: An NLP toolkit for Chinese humanities humanities
 markdown: kramdown
 kramdown:
   input: GFM
