@@ -1,10 +1,15 @@
 # .gitignore
 
+clean_cython.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.dll
+*.so
+*.c
 
 # Environments
 .env
@@ -12,10 +17,8 @@ venv/
 env/
 
 #tests and data
-tests/
-data/
+tests
 tests/*
-data/*
 
 # Jupyter Notebook
 .ipynb_checkpoints

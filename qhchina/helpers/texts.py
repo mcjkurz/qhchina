@@ -80,3 +80,31 @@ def add_corpus_tags(corpora, labels, target_words):
         processed_corpora.append(processed_corpus)
     
     return processed_corpora
+
+def load_stopwords(language: str = "zh_sim") -> set:
+    """
+    Load stopwords from a file for the specified language.
+    
+    Args:
+        language: Language code (default: "zh_sim" for simplified Chinese)
+    
+    Returns:
+        Set of stopwords
+    """
+    import os
+    
+    # Get the current file's directory (helpers)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Go up one level to the qhchina package root and construct the path to stopwords
+    package_root = os.path.abspath(os.path.join(current_dir, '..'))
+    stopwords_path = os.path.join(package_root, 'data', 'stopwords', f'{language}.txt')
+    
+    # Load stopwords from file
+    try:
+        with open(stopwords_path, 'r', encoding='utf-8') as f:
+            stopwords = {line.strip() for line in f if line.strip()}
+        return stopwords
+    except FileNotFoundError:
+        print(f"Warning: Stopwords file not found for language '{language}' at path {stopwords_path}")
+        return set()

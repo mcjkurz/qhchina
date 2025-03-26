@@ -735,7 +735,7 @@ def make_datasets(
     
     Args:
         data: either a list of tuples where each tuple contains (text, label),
-            or a dictionary with keys 'text' and 'label'
+            or a dictionary with keys 'text' and 'label' or 'texts' and 'labels'
         tokenizer: Tokenizer to use for text encoding
         split: Tuple of proportions for splits, 
             either (train_prop, val_prop) for train/val split,

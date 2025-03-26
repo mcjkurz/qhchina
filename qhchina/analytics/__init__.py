@@ -5,6 +5,7 @@ This module provides tools for:
 - Corpus comparison
 - Vector operations and projections
 - BERT-based modeling and classification
+- Topic modeling
 """
 
 # Collocation analytics
@@ -44,6 +45,16 @@ from .modeling import (
     make_datasets,
 )
 
+# Topic modeling
+from .topicmodels import (
+    LDAGibbsSampler
+)
+
+# Cython extension compilation
+from .compile_extensions import (
+    compile_cython_extensions
+)
+
 # Make all functions available at module level
 __all__ = [
     # Collocations
@@ -57,4 +68,10 @@ __all__ = [
     # Modeling
     'train_bert_classifier', 'evaluate', 'TextDataset', 'get_device', 'predict', 'bert_encode', 
     'align_vectors', 'make_datasets',
+    # Topic modeling
+    'LDAGibbsSampler',
+    # Cython extensions
+    'compile_cython_extensions',
+    # Examples
+    'lda_example', 'load_and_save_example',
 ]
