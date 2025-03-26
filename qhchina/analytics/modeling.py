@@ -712,7 +712,7 @@ def make_datasets(
     
     Args:
         data: either a list of tuples where each tuple contains (text, label),
-            or a dictionary with keys 'texts' and 'labels'
+            or a dictionary with keys 'text' and 'label'
         tokenizer: Tokenizer to use for text encoding
         split: Tuple of proportions for splits, 
             either (train_prop, val_prop) for train/val split,
@@ -738,10 +738,10 @@ def make_datasets(
     
     # Handle dictionary format
     if isinstance(data, dict):
-        if 'texts' not in data or 'labels' not in data:
-            raise ValueError("When data is a dictionary, it must contain 'texts' and 'labels' keys")
-        texts = data['texts']
-        labels = data['labels']
+        if 'text' not in data or 'label' not in data:
+            raise ValueError("When data is a dictionary, it must contain 'text' and 'label' keys")
+        texts = data['text']
+        labels = data['label']
         if len(texts) != len(labels):
             raise ValueError(f"Number of texts ({len(texts)}) must match number of labels ({len(labels)})")
     else:

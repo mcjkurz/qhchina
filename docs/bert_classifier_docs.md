@@ -76,12 +76,12 @@ model = AutoModelForSequenceClassification.from_pretrained(
 
 # Prepare data (using dictionary format)
 data = {
-    'texts': [
+    'text': [
         "这部电影非常精彩！",  # This movie is excellent!
         "我讨厌这部电影。",    # I hate this movie.
         # Add more examples...
     ],
-    'labels': [1, 0]
+    'label': [1, 0]
 }
 
 # Create datasets
@@ -243,7 +243,7 @@ Create train/val/test datasets from input data with stratification.
 **Parameters:**
 - `data` (Union[List[Tuple[str, int]], Dict[str, List]]): Input data in one of these formats:
   - List of tuples where each tuple contains (text, label)
-  - Dictionary with keys 'texts' and 'labels', where each is a list
+  - Dictionary with keys 'text' and 'label', where each is a list
 - `tokenizer` (AutoTokenizer): Tokenizer to use for text encoding
 - `split` (Union[Tuple[float, float], Tuple[float, float, float]]): Tuple of proportions for splits
   - (train_prop, val_prop) for train/val split
@@ -275,12 +275,12 @@ train_dataset, val_dataset = make_datasets(
 **Example using dictionary format:**
 ```python
 data = {
-    'texts': [
+    'text': [
         "这部电影非常精彩！",    # This movie is excellent!
         "演员表演令人印象深刻。",  # The actors' performance was impressive.
         "我讨厌这部电影。"       # I hate this movie.
     ],
-    'labels': [1, 1, 0]
+    'label': [1, 1, 0]
 }
 
 train_dataset, val_dataset = make_datasets(
@@ -466,7 +466,7 @@ import torch
 
 # Prepare data using dictionary format
 data = {
-    'texts': [
+    'text': [
         "这部电影非常精彩！",  # Positive
         "演员的表演很出色。",  # Positive
         "故事情节有趣。",      # Positive
@@ -474,7 +474,7 @@ data = {
         "演技很差劲。",        # Negative
         "浪费时间的电影。",    # Negative
     ],
-    'labels': [1, 1, 1, 0, 0, 0]
+    'label': [1, 1, 1, 0, 0, 0]
 }
 
 # Load model and tokenizer
