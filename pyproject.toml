@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.31"
+version = "0.0.32"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -37,4 +37,5 @@ exclude = ["data", "tests"]
 
 [project.urls]
 "Homepage" = "https://github.com/mcjkurz/qhchina"  # Replace with your repo URL
+"Documentation" = "https://mcjkurz.github.io/qhchina/"
 "Bug Tracker" = "https://github.com/mcjkurz/qhchina/issues"

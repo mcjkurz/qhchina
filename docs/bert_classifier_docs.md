@@ -243,7 +243,7 @@ Create train/val/test datasets from input data with stratification.
 **Parameters:**
 - `data` (Union[List[Tuple[str, int]], Dict[str, List]]): Input data in one of these formats:
   - List of tuples where each tuple contains (text, label)
-  - Dictionary with keys 'text' and 'label', where each is a list
+  - Dictionary with keys 'text' and 'label' or 'texts' and 'labels', where each is a list
 - `tokenizer` (AutoTokenizer): Tokenizer to use for text encoding
 - `split` (Union[Tuple[float, float], Tuple[float, float, float]]): Tuple of proportions for splits
   - (train_prop, val_prop) for train/val split

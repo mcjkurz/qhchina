@@ -197,9 +197,7 @@ def train_bert_classifier(
                 return_tensors='pt',
                 return_token_type_ids=False
             )
-            
-            if 'label' in batch[0]:
-                encodings['labels'] = torch.tensor([item['label'] for item in batch])
+            encodings['labels'] = torch.tensor([item['label'] for item in batch])
             
             return encodings
         
@@ -468,9 +466,7 @@ def evaluate(
                 return_tensors='pt',
                 return_token_type_ids=False
             )
-            
-            if 'label' in batch[0]:
-                encodings['labels'] = torch.tensor([item['label'] for item in batch])
+            encodings['labels'] = torch.tensor([item['label'] for item in batch])
             
             return encodings
         
@@ -738,10 +734,14 @@ def make_datasets(
     
     # Handle dictionary format
     if isinstance(data, dict):
-        if 'text' not in data or 'label' not in data:
-            raise ValueError("When data is a dictionary, it must contain 'text' and 'label' keys")
-        texts = data['text']
-        labels = data['label']
+        if 'text' in data and 'label' in data:
+            texts = data['text']
+            labels = data['label']
+        elif 'texts' in data and 'labels' in data:
+            texts = data['texts']
+            labels = data['labels']
+        else:
+            raise ValueError("When data is a dictionary, it must contain 'text' and 'label' keys or 'texts' and 'labels' keys")
         if len(texts) != len(labels):
             raise ValueError(f"Number of texts ({len(texts)}) must match number of labels ({len(labels)})")
     else:
@@ -790,12 +790,16 @@ def make_datasets(
     # Create datasets
     train_dataset = TextDataset(train_texts, tokenizer, max_length, train_labels)
     val_dataset = TextDataset(val_texts, tokenizer, max_length, val_labels)
-    
+    if len(split) == 3:
+        test_dataset = TextDataset(test_texts, tokenizer, max_length, test_labels)
+
     # Print split sizes and class distributions if verbose
     if verbose:
         print(f"\nTotal samples: {total_size}")
         print(f"Training set size: {len(train_dataset)}")
         print(f"Validation set size: {len(val_dataset)}")
+        if len(split) == 3:
+            print(f"Test set size: {len(test_dataset)}")
         
         print("\nTraining set class distribution:")
         print_class_distribution(train_dataset)
@@ -804,13 +808,8 @@ def make_datasets(
         print_class_distribution(val_dataset)
     
     if len(split) == 3:
-        test_dataset = TextDataset(test_texts, tokenizer, max_length, test_labels)
-        
-        if verbose:
-            print(f"\nTest set size: {len(test_dataset)}")
-            print("\nTest set class distribution:")
-            print_class_distribution(test_dataset)
-        
+        print("\nTest set class distribution:")
+        print_class_distribution(test_dataset)
         return train_dataset, val_dataset, test_dataset
     else:
         return train_dataset, val_dataset
