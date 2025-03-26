@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from tqdm.auto import tqdm
 import numpy as np
-from typing import List, Optional, Union, Dict, Any, Tuple
+from typing import List, Optional, Union, Dict, Any, Tuple, Callable
 from pathlib import Path
 import matplotlib.pyplot as plt
 from torch.optim import AdamW
@@ -42,7 +42,7 @@ def set_device(device: Optional[str] = None) -> str:
 
 class TextDataset(Dataset):
     def __init__(self, texts: List[str], 
-                 tokenizer: AutoTokenizer, 
+                 tokenizer: Optional[AutoTokenizer] = None, 
                  max_length: Optional[int] = None, 
                  labels: Optional[List[int]] = None):
         """
@@ -128,6 +128,7 @@ def train_bert_classifier(
     save_dir: Optional[str] = None,
     plot_interval: int = 100,  # Plot every N batches
     val_interval: Optional[int] = None,  # Validate every N batches
+    collate_fn: Optional[Callable] = None,  # Custom collate function for DataLoader
 ) -> Dict[str, Any]:
     """
     Train a BERT-based classifier with custom training loop.
@@ -146,6 +147,7 @@ def train_bert_classifier(
         save_dir: Directory to save model checkpoints
         plot_interval: Number of batches between plot updates
         val_interval: Number of batches between validation runs. If None, only validate at the end of each epoch.
+        collate_fn: Collation function for DataLoader. If None, a default function will be created using the dataset's tokenizer.
     
     Returns:
         Dictionary containing training history and final model
@@ -162,8 +164,28 @@ def train_bert_classifier(
     # Move model to device
     model = model.to(device)
     
+    # Create default collate_fn if not provided
+    if collate_fn is None and hasattr(train_dataset, 'tokenizer') and train_dataset.tokenizer is not None:
+        def default_collate_fn(batch):
+            texts = [item['text'] for item in batch]
+            encodings = train_dataset.tokenizer(
+                texts,
+                truncation=True,
+                padding=True,
+                max_length=train_dataset.max_length,
+                return_tensors='pt',
+                return_token_type_ids=False
+            )
+            
+            if 'label' in batch[0]:
+                encodings['labels'] = torch.tensor([item['label'] for item in batch])
+            
+            return encodings
+        
+        collate_fn = default_collate_fn
+    
     # Create dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     
     # Initialize optimizer
     optimizer = AdamW(model.parameters(), lr=learning_rate)
@@ -235,23 +257,9 @@ def train_bert_classifier(
             if max_train_batches is not None and batch_idx >= max_train_batches:
                 finished_training = True
                 break
-                
-            # Tokenize the batch
-            texts = batch['text']
-            encodings = train_dataset.tokenizer(
-                texts,
-                truncation=True,
-                padding=True,
-                max_length=train_dataset.max_length,
-                return_tensors='pt',
-                return_token_type_ids=False
-            )
             
-            if 'label' in batch:
-                encodings['labels'] = batch['label']
-            
-            # Move batch to device
-            encodings = {k: v.to(device) for k, v in encodings.items()}
+            # Move batch to device - no need to check if collate_fn is None, as batch is already processed
+            encodings = {k: v.to(device) for k, v in batch.items()}
             
             # Forward pass
             outputs = model(**encodings)
@@ -303,7 +311,7 @@ def train_bert_classifier(
             # Run validation if interval is specified and it's time
             if val_dataset is not None and val_interval is not None and total_batches_processed % val_interval == 0:
                 model.eval()
-                val_results = evaluate(model, val_dataset, batch_size, device)
+                val_results = evaluate(model, val_dataset, batch_size, device, collate_fn)
                 if history['val_metrics'] is None:
                     history['val_metrics'] = []
                 val_results['batch'] = total_batches_processed
@@ -324,7 +332,7 @@ def train_bert_classifier(
         # Run validation at the end of each epoch
         if val_dataset is not None:
             model.eval()
-            val_results = evaluate(model, val_dataset, batch_size, device)
+            val_results = evaluate(model, val_dataset, batch_size, device, collate_fn)
             if history['val_metrics'] is None:
                 history['val_metrics'] = []
             val_results['batch'] = total_batches_processed
@@ -364,6 +372,7 @@ def evaluate(
     dataset: Dataset,
     batch_size: int = 32,
     device: Optional[str] = None,
+    collate_fn: Optional[Callable] = None,  # Custom collate function for DataLoader
 ) -> Dict[str, Any]:
     """
     Evaluate a BERT-based classifier on a dataset.
@@ -373,6 +382,7 @@ def evaluate(
         dataset: PyTorch Dataset to evaluate
         batch_size: Batch size for evaluation
         device: Device to evaluate on ('cuda', 'mps', or 'cpu')
+        collate_fn: Collation function for DataLoader. If None, a default function will be created using the dataset's tokenizer.
     
     Returns:
         Dictionary containing evaluation metrics and statistics, including average loss
@@ -388,19 +398,10 @@ def evaluate(
     model = model.to(device)
     model.eval()
     
-    # Create dataloader
-    dataloader = DataLoader(dataset, batch_size=batch_size)
-    
-    # Process batches
-    all_labels = []
-    all_predictions = []
-    total_loss = 0
-    num_batches = 0
-    
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Evaluating"):
-            # Tokenize the batch
-            texts = batch['text']
+    # Create default collate_fn if not provided
+    if collate_fn is None and hasattr(dataset, 'tokenizer') and dataset.tokenizer is not None:
+        def default_collate_fn(batch):
+            texts = [item['text'] for item in batch]
             encodings = dataset.tokenizer(
                 texts,
                 truncation=True,
@@ -410,13 +411,30 @@ def evaluate(
                 return_token_type_ids=False
             )
             
-            if 'label' in batch:
-                labels = batch['label'].numpy()
-                all_labels.extend(labels)
-                encodings['labels'] = batch['label']
+            if 'label' in batch[0]:
+                encodings['labels'] = torch.tensor([item['label'] for item in batch])
             
-            # Move batch to device
-            encodings = {k: v.to(device) for k, v in encodings.items()}
+            return encodings
+        
+        collate_fn = default_collate_fn
+    
+    # Create dataloader
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
+    
+    # Process batches
+    all_labels = []
+    all_predictions = []
+    total_loss = 0
+    num_batches = 0
+    
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Evaluating"):
+            # Move batch to device - no need to check if collate_fn is None
+            encodings = {k: v.to(device) for k, v in batch.items()}
+            
+            # If labels are present, extract them for metrics computation
+            if 'labels' in encodings:
+                all_labels.extend(encodings['labels'].cpu().numpy())
             
             # Forward pass
             outputs = model(**encodings)
@@ -508,6 +526,7 @@ def predict(
     batch_size: int = 32,
     device: Optional[str] = None,
     return_probs: bool = False,
+    collate_fn: Optional[Callable] = None,  # Custom collate function for DataLoader
 ) -> Union[List[int], Dict[str, Any]]:
     """
     Make predictions on new texts using a trained BERT classifier.
@@ -520,6 +539,7 @@ def predict(
         batch_size: Batch size for inference
         device: Device to run inference on ('cuda', 'mps', or 'cpu')
         return_probs: Whether to return prediction probabilities
+        collate_fn: Collation function for DataLoader. If None, a default function will be created using the dataset's tokenizer.
     
     Returns:
         If return_probs is False:
@@ -544,22 +564,15 @@ def predict(
     model = model.to(device)
     model.eval()
     
-    # Create dataloader
+    # Create dataset if needed
     if texts is not None:
         # Create dataset from texts
         dataset = TextDataset(texts, tokenizer)
     
-    dataloader = DataLoader(dataset, batch_size=batch_size)
-    
-    # Initialize results
-    all_predictions = []
-    all_probabilities = [] if return_probs else None
-    
-    # Inference loop
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Classifying"):
-            # Tokenize the batch
-            texts = batch['text']
+    # Create default collate_fn if not provided
+    if collate_fn is None and hasattr(dataset, 'tokenizer') and dataset.tokenizer is not None:
+        def default_collate_fn(batch):
+            texts = [item['text'] for item in batch]
             encodings = dataset.tokenizer(
                 texts,
                 truncation=True,
@@ -568,9 +581,22 @@ def predict(
                 return_tensors='pt',
                 return_token_type_ids=False
             )
-            
-            # Move batch to device
-            encodings = {k: v.to(device) for k, v in encodings.items()}
+            return encodings
+        
+        collate_fn = default_collate_fn
+    
+    # Create dataloader
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
+    
+    # Initialize results
+    all_predictions = []
+    all_probabilities = [] if return_probs else None
+    
+    # Inference loop
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Classifying"):
+            # Move batch to device - no need to check if collate_fn is None
+            encodings = {k: v.to(device) for k, v in batch.items()}
             
             # Forward pass
             outputs = model(**encodings)
@@ -707,6 +733,7 @@ def bert_encode(
     max_length: Optional[int] = None,
     pooling_strategy: str = 'cls',
     device: Optional[str] = None,
+    collate_fn: Optional[Callable] = None,  # Custom collate function for DataLoader
 ) -> List[np.ndarray]:
     """
     Extract embeddings from a transformer model for given text(s).
@@ -719,6 +746,7 @@ def bert_encode(
         max_length: Maximum sequence length for tokenization
         pooling_strategy: Strategy for pooling embeddings ('cls' or 'mean')
         device: Device to run inference on ('cuda', 'mps', or 'cpu')
+        collate_fn: Collation function for DataLoader. If None, a default function will be created using the tokenizer.
     
     Returns:
         List of numpy arrays, each of shape (hidden_size,)
@@ -789,7 +817,24 @@ def bert_encode(
     else:
         # Process in batches
         dataset = TextDataset(texts, tokenizer, max_length)
-        dataloader = DataLoader(dataset, batch_size=batch_size)
+        
+        # Create default collate_fn if not provided
+        if collate_fn is None:
+            def default_collate_fn(batch):
+                texts = [item['text'] for item in batch]
+                encodings = tokenizer(
+                    texts,
+                    truncation=True,
+                    padding=True,
+                    max_length=max_length,
+                    return_tensors='pt',
+                    return_token_type_ids=False
+                )
+                return encodings
+            
+            collate_fn = default_collate_fn
+        
+        dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
         
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Processing batches"):

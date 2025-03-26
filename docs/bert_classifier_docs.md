@@ -192,7 +192,8 @@ train_bert_classifier(
     logging_dir=None,
     save_dir=None,
     plot_interval=100,
-    val_interval=None
+    val_interval=None,
+    collate_fn=None
 )
 ```
 
@@ -212,6 +213,7 @@ Train a BERT-based classifier with custom training loop.
 - `save_dir` (Optional[str]): Directory to save model checkpoints
 - `plot_interval` (int): Number of batches between plot updates
 - `val_interval` (Optional[int]): Number of batches between validation runs
+- `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 
 **Returns:**
 - `dict`: Dictionary containing:
@@ -223,7 +225,7 @@ Train a BERT-based classifier with custom training loop.
 ### evaluate()
 
 ```python
-evaluate(model, test_dataset, batch_size=16, device=None)
+evaluate(model, test_dataset, batch_size=16, device=None, collate_fn=None)
 ```
 
 Evaluate a trained model on a test dataset.
@@ -233,6 +235,7 @@ Evaluate a trained model on a test dataset.
 - `test_dataset` (Dataset): PyTorch Dataset for testing
 - `batch_size` (int): Batch size for evaluation
 - `device` (Optional[str]): Device to use for evaluation
+- `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 
 **Returns:**
 - `dict`: Dictionary containing evaluation metrics (accuracy, precision, recall, F1, confusion matrix)
@@ -240,7 +243,7 @@ Evaluate a trained model on a test dataset.
 ### predict()
 
 ```python
-predict(model, texts, tokenizer, max_length=128, batch_size=16, device=None, return_probs=False)
+predict(model, texts, tokenizer, max_length=128, batch_size=16, device=None, return_probs=False, collate_fn=None)
 ```
 
 Make predictions with a trained model on new texts.
@@ -253,6 +256,7 @@ Make predictions with a trained model on new texts.
 - `batch_size` (int): Batch size for prediction
 - `device` (Optional[str]): Device to use for prediction
 - `return_probs` (bool): Whether to return probability distributions
+- `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 
 **Returns:**
 - If `return_probs=True`: List of tuples (probabilities, predicted_class)
@@ -261,7 +265,7 @@ Make predictions with a trained model on new texts.
 ### bert_encode()
 
 ```python
-bert_encode(texts, model, tokenizer, pooling="cls", max_length=128, batch_size=16, device=None)
+bert_encode(texts, model, tokenizer, pooling="cls", max_length=128, batch_size=16, device=None, collate_fn=None)
 ```
 
 Encode texts into BERT embeddings.
@@ -274,6 +278,7 @@ Encode texts into BERT embeddings.
 - `max_length` (int): Maximum sequence length for tokenization
 - `batch_size` (int): Batch size for encoding
 - `device` (Optional[str]): Device to use for encoding
+- `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 
 **Returns:**
 - `numpy.ndarray`: Array of shape (len(texts), embedding_dim) with text embeddings
@@ -299,6 +304,7 @@ Determine the appropriate device for computation.
 ```python
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from qhchina.analytics import make_datasets, train_bert_classifier, evaluate, predict
+import torch
 
 # Prepare data: (text, label) pairs
 data = [
@@ -325,6 +331,20 @@ train_dataset, val_dataset = make_datasets(
     max_length=128
 )
 
+# Optional: Define a custom collate function
+def custom_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    encodings = tokenizer(
+        texts,
+        truncation=True,
+        padding=True,
+        max_length=128,
+        return_tensors='pt'
+    )
+    if 'label' in batch[0]:
+        encodings['labels'] = torch.tensor([item['label'] for item in batch])
+    return encodings
+
 # Train model
 results = train_bert_classifier(
     model=model,
@@ -332,7 +352,8 @@ results = train_bert_classifier(
     val_dataset=val_dataset,
     batch_size=2,
     learning_rate=2e-5,
-    num_epochs=3
+    num_epochs=3,
+    collate_fn=custom_collate_fn  # Optional: Use custom collate function
 )
 
 # Make predictions
@@ -340,7 +361,8 @@ new_texts = ["这是一部非常好看的电影", "这个故事很无聊"]
 predictions = predict(
     model=results["model"],
     texts=new_texts,
-    tokenizer=tokenizer
+    tokenizer=tokenizer,
+    collate_fn=custom_collate_fn  # Optional: Use same custom collate function
 )
 print(f"Predicted classes: {predictions}")
 ```
@@ -381,6 +403,7 @@ results = train_bert_classifier(
     train_dataset=train_dataset,
     val_dataset=val_dataset,
     num_epochs=5
+    # If collate_fn is not provided, a default one will be created using the dataset's tokenizer
 )
 ```
 
@@ -389,6 +412,7 @@ results = train_bert_classifier(
 ```python
 from transformers import AutoModel, AutoTokenizer
 from qhchina.analytics import bert_encode
+import torch
 
 # Load base model (not classification model)
 model_name = "bert-base-chinese"
@@ -401,15 +425,61 @@ texts = [
     "北京是中国的首都。"
 ]
 
-# Encode texts (get BERT embeddings)
+# Optional: Define a custom collate function for batch processing
+def custom_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    return tokenizer(
+        texts,
+        truncation=True,
+        padding=True,
+        max_length=128,
+        return_tensors='pt'
+    )
+
+# Encode texts (get BERT embeddings) with batch processing
 embeddings = bert_encode(
     texts=texts,
     model=model,
     tokenizer=tokenizer,
-    pooling="cls"  # Use CLS token embedding
+    pooling="cls",  # Use CLS token embedding
+    batch_size=16,
+    collate_fn=custom_collate_fn  # Optional: Use custom collate function
 )
 
-print(f"Embedding shape: {embeddings.shape}")  # (2, 768) for bert-base
+print(f"Embedding shape: ({len(embeddings)}, {embeddings[0].shape[0]})")  # (2, 768) for bert-base
+```
+
+### Evaluation with Custom Collate Function
+
+```python
+from qhchina.analytics import evaluate
+import torch
+
+# Define a custom collate function
+def custom_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    encodings = tokenizer(
+        texts,
+        truncation=True,
+        padding=True,
+        max_length=128,
+        return_tensors='pt'
+    )
+    if 'label' in batch[0]:
+        encodings['labels'] = torch.tensor([item['label'] for item in batch])
+    return encodings
+
+# Evaluate model
+eval_results = evaluate(
+    model=model,
+    dataset=val_dataset,
+    batch_size=16,
+    device="cuda",  # Use GPU if available
+    collate_fn=custom_collate_fn  # Use custom collate function
+)
+
+print(f"Accuracy: {eval_results['accuracy']:.4f}")
+print(f"F1 Score (Weighted): {eval_results['weighted_avg']['f1']:.4f}")
 ```
 
 ## Visualizations
