@@ -25,10 +25,15 @@ A comprehensive toolkit for fine-tuning BERT models for text classification task
   - [evaluate()](#evaluate)
   - [predict()](#predict)
   - [bert_encode()](#bert_encode)
-  - [set_device()](#set_device)
+  - [get_device()](#get_device)
 - [Examples](#examples)
 - [Visualizations](#visualizations)
 - [Performance Tips](#performance-tips)
+- [How Tokenization and Batching Works](#how-tokenization-and-batching-works)
+  - [Default Collate Function Behavior](#default-collate-function-behavior)
+  - [How max_length is Determined](#how-max_length-is-determined)
+  - [Tokenizer Sourcing](#tokenizer-sourcing)
+  - [Custom Collate Functions](#custom-collate-functions)
 
 ## Overview
 
@@ -194,7 +199,8 @@ train_bert_classifier(
     plot_interval=100,
     val_interval=None,
     collate_fn=None,
-    tokenizer=None
+    tokenizer=None,
+    max_length=None
 )
 ```
 
@@ -214,31 +220,49 @@ Train a BERT-based classifier with custom training loop.
 - `save_dir` (Optional[str]): Directory to save model checkpoints
 - `plot_interval` (int): Number of batches between plot updates
 - `val_interval` (Optional[int]): Number of batches between validation runs
-- `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
+- `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created using the tokenizer.
 - `tokenizer` (Optional[AutoTokenizer]): Tokenizer to use for encoding texts. If None, the train_dataset's tokenizer will be used.
+- `max_length` (Optional[int]): Maximum sequence length for tokenization. If None, will try to get from train_dataset.
+
+**Default Collate Function Behavior:**
+If `collate_fn` is not provided, a default function is created that:
+- Uses the provided `tokenizer` (or from dataset)
+- Sets `truncation=True` to handle texts longer than the maximum length
+- Sets `padding=True` to pad batches to the same length
+- Uses the provided `max_length` (or from dataset, if available)
+- Returns tensors with labels if present in the batch
 
 **Returns:**
 - `dict`: Dictionary containing:
   - `model`: Fine-tuned model
   - `history`: Training history (loss, metrics)
-  - `metrics`: Final validation metrics
-  - `device`: Device used for training
+  - `train_size`: Size of the training dataset
+  - `val_size`: Size of the validation dataset (if provided)
 
 ### evaluate()
 
 ```python
-evaluate(model, test_dataset, batch_size=16, device=None, collate_fn=None, tokenizer=None)
+evaluate(model, dataset, batch_size=16, device=None, collate_fn=None, tokenizer=None, max_length=None)
 ```
 
 Evaluate a trained model on a test dataset.
 
 **Parameters:**
 - `model` (AutoModelForSequenceClassification): Trained model
-- `test_dataset` (Dataset): PyTorch Dataset for testing
+- `dataset` (Dataset): PyTorch Dataset for testing
 - `batch_size` (int): Batch size for evaluation
 - `device` (Optional[str]): Device to use for evaluation
 - `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 - `tokenizer` (Optional[AutoTokenizer]): Tokenizer to use for encoding texts. If None, the dataset's tokenizer will be used.
+- `max_length` (Optional[int]): Maximum sequence length for tokenization. If None, will try to get from dataset.
+
+**Default Collate Function Behavior:**
+If `collate_fn` is not provided, a default function is created that:
+- Uses the provided `tokenizer` (or from dataset)
+- Sets `truncation=True` to handle texts longer than the maximum length
+- Sets `padding=True` to pad batches to the same length
+- Uses the provided `max_length` (or from dataset, if available)
+- Returns tensors with labels if present in the batch
 
 **Returns:**
 - `dict`: Dictionary containing evaluation metrics (accuracy, precision, recall, F1, confusion matrix)
@@ -246,7 +270,7 @@ Evaluate a trained model on a test dataset.
 ### predict()
 
 ```python
-predict(model, texts=None, dataset=None, tokenizer=None, max_length=128, batch_size=16, device=None, return_probs=False, collate_fn=None)
+predict(model, texts=None, dataset=None, tokenizer=None, batch_size=16, device=None, return_probs=False, collate_fn=None, max_length=None)
 ```
 
 Make predictions with a trained model on new texts.
@@ -258,11 +282,19 @@ Make predictions with a trained model on new texts.
 - `tokenizer` (Optional[AutoTokenizer]): Tokenizer for encoding texts
   - Required if texts is provided and no collate_fn is provided
   - If dataset is provided and has a tokenizer attribute, that tokenizer will be used if this is None
-- `max_length` (Optional[int]): Maximum sequence length for tokenization
 - `batch_size` (int): Batch size for prediction
 - `device` (Optional[str]): Device to use for prediction
 - `return_probs` (bool): Whether to return probability distributions
 - `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
+- `max_length` (Optional[int]): Maximum sequence length for tokenization. If None, will try to get from dataset.
+
+**Default Collate Function Behavior:**
+If `collate_fn` is not provided, a default function is created that:
+- Uses the provided `tokenizer` (or from dataset)
+- Sets `truncation=True` to handle texts longer than the maximum length
+- Sets `padding=True` to pad batches to the same length
+- Uses the provided `max_length` (or from dataset, if available)
+- Returns tensors with labels if present in the batch
 
 **Returns:**
 - If `return_probs=False`: List of predicted labels
@@ -283,18 +315,26 @@ Encode texts into BERT embeddings.
 - `texts` (List[str]): List of texts to encode
 - `tokenizer` (Optional[AutoTokenizer]): Tokenizer to use for encoding texts. If None, must provide a collate_fn
 - `batch_size` (Optional[int]): Batch size for encoding. If None, process texts individually.
-- `max_length` (Optional[int]): Maximum sequence length for tokenization
+- `max_length` (Optional[int]): Maximum sequence length for tokenization. If None, will first try to get from dataset, then from model config.
 - `pooling_strategy` (str): Pooling strategy ('cls' for CLS token, 'mean' for mean pooling)
 - `device` (Optional[str]): Device to use for encoding
 - `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 
+**Default Collate Function Behavior:**
+If `collate_fn` is not provided, a default function is created that:
+- Uses the provided `tokenizer` (required for this function)
+- Sets `truncation=True` to handle texts longer than the maximum length
+- Sets `padding=True` to pad batches to the same length
+- Uses the provided `max_length` (or model's max position embeddings if not provided)
+- Returns tensors ready for embedding extraction
+
 **Returns:**
 - List of numpy arrays, each of shape (embedding_dim)
 
-### set_device()
+### get_device()
 
 ```python
-set_device(device=None)
+get_device(device=None)
 ```
 
 Determine the appropriate device for computation.
@@ -642,6 +682,60 @@ embeddings = bert_encode(
 print(f"Embedding shape: ({len(embeddings)}, {embeddings[0].shape[0]})")  # (2, 768) for bert-base
 ```
 
+### Binary Classification with Custom Max Length
+
+```python
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from qhchina.analytics import make_datasets, train_bert_classifier, evaluate, predict
+import torch
+
+# Prepare data: (text, label) pairs
+data = [
+    ("这部电影非常精彩！", 1),  # Positive
+    ("演员的表演很出色。", 1),  # Positive
+    ("故事情节有趣。", 1),      # Positive
+    ("我讨厌这部电影。", 0),    # Negative
+    ("演技很差劲。", 0),        # Negative
+    ("浪费时间的电影。", 0),    # Negative
+]
+
+# Load model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
+model = AutoModelForSequenceClassification.from_pretrained(
+    "bert-base-chinese", 
+    num_labels=2
+)
+
+# Create datasets with stratification
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    split=(0.8, 0.2),
+    max_length=64  # Explicitly set maximum sequence length to 64 tokens
+)
+
+# Train model with explicit max_length
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    val_dataset=val_dataset,
+    batch_size=2,
+    learning_rate=2e-5,
+    num_epochs=3,
+    max_length=64  # Explicitly provide max_length for tokenization in default collate_fn
+)
+
+# Make predictions with explicit max_length
+new_texts = ["这是一部非常好看的电影", "这个故事很无聊"]
+predictions = predict(
+    model=results["model"],
+    texts=new_texts,
+    tokenizer=tokenizer,
+    max_length=64  # Explicitly provide max_length for consistent tokenization
+)
+print(f"Predicted classes: {predictions}")
+```
+
 ## Visualizations
 
 The `train_bert_classifier()` function automatically generates training visualizations:
@@ -663,21 +757,85 @@ Choose an appropriate batch size based on your hardware:
 
 ### Sequence Length
 
-Limit sequence length based on your data needs:
+Limit sequence length based on your data needs using the `max_length` parameter:
 
 ```python
 # For efficiency with short texts
 train_dataset, val_dataset = make_datasets(
     data=data,
     tokenizer=tokenizer,
-    max_length=64  # Shorter sequences
+    max_length=64  # Shorter sequences save memory and compute time
 )
 
 # For long documents that need more context
 train_dataset, val_dataset = make_datasets(
     data=data,
     tokenizer=tokenizer,
-    max_length=256  # Longer sequences
+    max_length=256  # Longer sequences preserve more context
+)
+```
+
+You can pass the same `max_length` value to the training, evaluation, and prediction functions to ensure consistent tokenization:
+
+```python
+# Train with consistent max_length across all operations
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    val_dataset=val_dataset,
+    max_length=128  # Uses this value in default collate_fn
+)
+
+# Evaluate with the same max_length
+eval_results = evaluate(
+    model=results["model"],
+    dataset=test_dataset,
+    max_length=128  # Keep consistent with training
+)
+
+# Predict with the same max_length
+predictions = predict(
+    model=results["model"],
+    texts=new_texts,
+    tokenizer=tokenizer,
+    max_length=128  # Keep consistent with training and evaluation
+)
+```
+
+**Note**: If you don't provide `max_length`, the system will:
+1. Try to get it from the dataset's `max_length` attribute
+2. For `bert_encode`, if still not found, fall back to the model's configuration (`max_position_embeddings`)
+3. Default to using the tokenizer's default behavior if no value is found
+
+### Custom Collation Functions
+
+For advanced use cases, you can provide your own `collate_fn` to control exactly how batches are created:
+
+```python
+def my_custom_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    
+    # Custom preprocessing can be done here
+    
+    encodings = tokenizer(
+        texts,
+        truncation=True,
+        padding='max_length',  # Always pad to max_length instead of longest in batch
+        max_length=128,
+        return_tensors='pt',
+        return_token_type_ids=True  # Include token_type_ids
+    )
+    
+    if 'label' in batch[0]:
+        encodings['labels'] = torch.tensor([item['label'] for item in batch])
+    
+    return encodings
+
+# Use custom collate function
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    collate_fn=my_custom_collate_fn
 )
 ```
 
@@ -718,4 +876,106 @@ results = train_bert_classifier(
     train_dataset=train_dataset,
     warmup_steps=100  # Gradual learning rate warmup
 )
+```
+
+## How Tokenization and Batching Works
+
+### Default Collate Function Behavior
+
+When using the `train_bert_classifier()`, `evaluate()`, `predict()`, or `bert_encode()` functions without providing a custom `collate_fn`, a default collate function is automatically created. This function handles the conversion of raw text to tokenized tensors needed by the BERT model.
+
+The default collate function:
+
+1. **Extracts text from batch**: Gathers all text items from the current batch
+2. **Tokenizes with specific settings**:
+   - Always applies `truncation=True` to handle texts longer than the maximum length
+   - Always applies `padding=True` to pad all texts in a batch to the same length
+   - Uses the `max_length` parameter if provided (see next section for details)
+   - Returns tensors in PyTorch format with `return_tensors='pt'`
+   - Excludes token type IDs with `return_token_type_ids=False`
+3. **Adds labels if present**: If the batch contains labels, they are added to the tokenized output
+
+Here's how the default collate function is created in all functions:
+
+```python
+def default_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    encodings = tokenizer(
+        texts,
+        truncation=True,
+        padding=True,
+        max_length=max_length,
+        return_tensors='pt',
+        return_token_type_ids=False
+    )
+    
+    if 'label' in batch[0]:
+        encodings['labels'] = torch.tensor([item['label'] for item in batch])
+    
+    return encodings
+```
+
+### How max_length is Determined
+
+The `max_length` parameter determines the maximum sequence length for tokenization. This is important as it affects both memory usage and model performance. All functions follow a consistent approach to determining the `max_length`:
+
+1. **Explicitly provided value**: If you set `max_length` when calling the function, this value is used
+2. **Dataset attribute**: If `max_length` is not provided but the dataset has a `max_length` attribute, that value is used
+3. **Model configuration**: For `bert_encode()`, if neither of the above are available, it falls back to the model's `max_position_embeddings` (typically 512 for BERT)
+4. **Tokenizer default**: If none of the above are available, the tokenizer's default behavior is used
+
+Example processing flow:
+
+```python
+# Explicit value takes precedence
+if max_length is provided:
+    use the provided max_length
+# Otherwise, try the dataset
+elif hasattr(dataset, 'max_length'):
+    max_length = dataset.max_length
+# For bert_encode, also try the model config
+elif function is bert_encode:
+    max_length = getattr(model.config, 'max_position_embeddings', 512)
+# Otherwise, rely on tokenizer defaults
+```
+
+### Tokenizer Sourcing
+
+Similarly, a tokenizer is necessary for the default collate function. The functions look for a tokenizer in the following order:
+
+1. **Explicitly provided tokenizer**: If you pass a `tokenizer` parameter to the function
+2. **Dataset attribute**: If the dataset has a `tokenizer` attribute (e.g., when created with `make_datasets()`)
+
+If neither source is available and no custom `collate_fn` is provided, the functions will raise a `ValueError` with a clear message.
+
+### Custom Collate Functions
+
+You can override the default behavior by providing your own `collate_fn`. This gives you complete control over how batches are processed. Your custom function should:
+
+1. Accept a batch of data items from the dataset
+2. Convert the texts to a format suitable for the model
+3. Return a dictionary with the appropriate tensors
+
+Here's a custom collate function example with different tokenization settings:
+
+```python
+def my_custom_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    
+    # Custom preprocessing can be done here
+    processed_texts = [text.lower() for text in texts]  # Example: lowercase all texts
+    
+    encodings = tokenizer(
+        processed_texts,
+        truncation=True,
+        padding='max_length',  # Always pad to max_length instead of longest in batch
+        max_length=128,        # Hard-coded max length
+        return_tensors='pt',
+        return_token_type_ids=True  # Include token_type_ids
+    )
+    
+    if 'label' in batch[0]:
+        encodings['labels'] = torch.tensor([item['label'] for item in batch])
+    
+    return encodings
 ``` 

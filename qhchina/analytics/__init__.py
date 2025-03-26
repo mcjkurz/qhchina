@@ -38,7 +38,7 @@ from .modeling import (
     train_bert_classifier,
     evaluate,
     TextDataset,
-    set_device,
+    get_device,
     predict,
     bert_encode,
     make_datasets,
@@ -55,6 +55,6 @@ __all__ = [
     # Word2Vec
     'Word2Vec', 'TempRefWord2Vec',
     # Modeling
-    'train_bert_classifier', 'evaluate', 'TextDataset', 'set_device', 'predict', 'bert_encode', 
+    'train_bert_classifier', 'evaluate', 'TextDataset', 'get_device', 'predict', 'bert_encode', 
     'align_vectors', 'make_datasets',
 ]

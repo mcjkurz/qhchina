@@ -12,7 +12,7 @@ import json
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 
-def set_device(device: Optional[str] = None) -> str:
+def get_device(device: Optional[str] = None) -> str:
     """
     Determine the appropriate device for computation.
     
@@ -24,7 +24,7 @@ def set_device(device: Optional[str] = None) -> str:
         str: The selected device ('cuda', 'mps', or 'cpu')
     """
     if device is not None:
-        device = device.lower()
+        device = device.lower().strip()
 
     if device == "cuda":
         if torch.cuda.is_available():
@@ -130,6 +130,7 @@ def train_bert_classifier(
     val_interval: Optional[int] = None,  # Validate every N batches
     collate_fn: Optional[Callable] = None,  # Custom collate function for DataLoader
     tokenizer: Optional[AutoTokenizer] = None,  # Tokenizer to use for encoding texts
+    max_length: Optional[int] = None,  # Maximum sequence length for tokenization
 ) -> Dict[str, Any]:
     """
     Train a BERT-based classifier with custom training loop.
@@ -148,8 +149,15 @@ def train_bert_classifier(
         save_dir: Directory to save model checkpoints
         plot_interval: Number of batches between plot updates
         val_interval: Number of batches between validation runs. If None, only validate at the end of each epoch.
-        collate_fn: Collation function for DataLoader. If None, a default function will be created using the dataset's tokenizer.
-        tokenizer: Tokenizer to use for encoding texts. If None, the train_dataset's tokenizer will be used.
+        collate_fn: Collation function for DataLoader. If None, a default function will be created using the 
+                   provided tokenizer (or train_dataset.tokenizer). The default function applies truncation=True
+                   and padding=True during tokenization.
+        tokenizer: Tokenizer to use for encoding texts. If None, will attempt to use train_dataset.tokenizer.
+                  Required if collate_fn is None and train_dataset has no tokenizer.
+        max_length: Maximum sequence length for tokenization. Processing order:
+                   1. Use this value if provided
+                   2. Otherwise, try to get from train_dataset.max_length
+                   3. If neither is available, the tokenizer's default behavior is used
     
     Returns:
         Dictionary containing training history and final model
@@ -161,7 +169,7 @@ def train_bert_classifier(
         raise ValueError("val_dataset must be provided if val_interval is not None")
     
     # Set device
-    device = set_device(device)
+    device = get_device(device)
     
     # Move model to device
     model = model.to(device)
@@ -170,6 +178,10 @@ def train_bert_classifier(
     if tokenizer is None and hasattr(train_dataset, 'tokenizer'):
         tokenizer = train_dataset.tokenizer
     
+    # Get max_length from dataset if not provided
+    if max_length is None and hasattr(train_dataset, 'max_length'):
+        max_length = train_dataset.max_length
+    
     # Create default collate_fn if not provided
     if collate_fn is None:
         if tokenizer is None:
@@ -177,7 +189,6 @@ def train_bert_classifier(
         
         def default_collate_fn(batch):
             texts = [item['text'] for item in batch]
-            max_length = getattr(train_dataset, 'max_length', None)
             encodings = tokenizer(
                 texts,
                 truncation=True,
@@ -327,7 +338,8 @@ def train_bert_classifier(
                     batch_size=batch_size, 
                     device=device, 
                     collate_fn=collate_fn,
-                    tokenizer=tokenizer
+                    tokenizer=tokenizer,
+                    max_length=max_length
                 )
                 if history['val_metrics'] is None:
                     history['val_metrics'] = []
@@ -355,7 +367,8 @@ def train_bert_classifier(
                 batch_size=batch_size, 
                 device=device, 
                 collate_fn=collate_fn,
-                tokenizer=tokenizer
+                tokenizer=tokenizer,
+                max_length=max_length
             )
             if history['val_metrics'] is None:
                 history['val_metrics'] = []
@@ -398,6 +411,7 @@ def evaluate(
     device: Optional[str] = None,
     collate_fn: Optional[Callable] = None,  # Custom collate function for DataLoader
     tokenizer: Optional[AutoTokenizer] = None,  # Tokenizer to use for encoding texts
+    max_length: Optional[int] = None,  # Maximum sequence length for tokenization
 ) -> Dict[str, Any]:
     """
     Evaluate a BERT-based classifier on a dataset.
@@ -407,8 +421,15 @@ def evaluate(
         dataset: PyTorch Dataset to evaluate
         batch_size: Batch size for evaluation
         device: Device to evaluate on ('cuda', 'mps', or 'cpu')
-        collate_fn: Collation function for DataLoader. If None, a default function will be created using the dataset's tokenizer.
-        tokenizer: Tokenizer to use for encoding texts. If None, the dataset's tokenizer will be used.
+        collate_fn: Collation function for DataLoader. If None, a default function will be created using the 
+                   provided tokenizer (or dataset.tokenizer). The default function applies truncation=True
+                   and padding=True during tokenization.
+        tokenizer: Tokenizer to use for encoding texts. If None, will attempt to use dataset.tokenizer.
+                  Required if collate_fn is None and dataset has no tokenizer.
+        max_length: Maximum sequence length for tokenization. Processing order:
+                   1. Use this value if provided
+                   2. Otherwise, try to get from dataset.max_length
+                   3. If neither is available, the tokenizer's default behavior is used
     
     Returns:
         Dictionary containing evaluation metrics and statistics, including average loss
@@ -418,7 +439,7 @@ def evaluate(
         raise ValueError("Dataset is empty")
     
     # Set device
-    device = set_device(device)
+    device = get_device(device)
     
     # Move model to device
     model = model.to(device)
@@ -428,6 +449,10 @@ def evaluate(
     if tokenizer is None and hasattr(dataset, 'tokenizer'):
         tokenizer = dataset.tokenizer
     
+    # Get max_length from dataset if not provided
+    if max_length is None and hasattr(dataset, 'max_length'):
+        max_length = dataset.max_length
+    
     # Create default collate_fn if not provided
     if collate_fn is None:
         if tokenizer is None:
@@ -435,7 +460,6 @@ def evaluate(
         
         def default_collate_fn(batch):
             texts = [item['text'] for item in batch]
-            max_length = getattr(dataset, 'max_length', None)
             encodings = tokenizer(
                 texts,
                 truncation=True,
@@ -576,15 +600,20 @@ def predict(
         batch_size: Batch size for inference
         device: Device to run inference on ('cuda', 'mps', or 'cpu')
         return_probs: Whether to return prediction probabilities
-        collate_fn: Collation function for DataLoader. If None, a default function will be created.
-        max_length: Maximum sequence length for tokenization (used when creating a dataset from texts)
+        collate_fn: Collation function for DataLoader. If None, a default function will be created using the 
+                   tokenizer (or dataset.tokenizer). The default function applies truncation=True and
+                   padding=True during tokenization.
+        max_length: Maximum sequence length for tokenization. Processing order:
+                   1. Use this value if provided
+                   2. Otherwise, try to get from dataset.max_length
+                   3. If neither is available, the tokenizer's default behavior is used
     
     Returns:
         If return_probs is False:
             List of predicted labels
         Otherwise:
             Dictionary containing:
-                - 'labels': List of predicted labels
+                - 'predictions': List of predicted labels
                 - 'probabilities': List of probability distributions
     """
     # Validate input arguments
@@ -594,7 +623,7 @@ def predict(
         raise ValueError("Cannot provide both texts and dataset")
     
     # Set device
-    device = set_device(device)
+    device = get_device(device)
     
     # Move model to device and set to eval mode
     model = model.to(device)
@@ -609,6 +638,10 @@ def predict(
     if tokenizer is None and hasattr(dataset, 'tokenizer'):
         tokenizer = dataset.tokenizer
     
+    # Get max_length from dataset if not provided
+    if max_length is None and hasattr(dataset, 'max_length'):
+        max_length = dataset.max_length
+    
     # Create default collate_fn if not provided
     if collate_fn is None:
         if tokenizer is None:
@@ -616,7 +649,6 @@ def predict(
         
         def default_collate_fn(batch):
             texts = [item['text'] for item in batch]
-            max_length = getattr(dataset, 'max_length', None)
             encodings = tokenizer(
                 texts,
                 truncation=True,
@@ -787,10 +819,14 @@ def bert_encode(
         texts: List of texts to encode
         tokenizer: Tokenizer to use for encoding texts. If None, must provide a collate_fn
         batch_size: If None, process texts individually. If provided, process in batches
-        max_length: Maximum sequence length for tokenization
+        max_length: Maximum sequence length for tokenization. Processing order:
+                   1. Use this value if provided
+                   2. Otherwise, try to get from dataset.max_length
+                   3. Finally, fall back to the model's max_position_embeddings (typically 512)
         pooling_strategy: Strategy for pooling embeddings ('cls' or 'mean')
         device: Device to run inference on ('cuda', 'mps', or 'cpu')
         collate_fn: Collation function for DataLoader. If None, a default function will be created using the tokenizer.
+                   The default function applies truncation=True and padding=True during tokenization.
     
     Returns:
         List of numpy arrays, each of shape (hidden_size,)
@@ -805,7 +841,7 @@ def bert_encode(
         raise ValueError("pooling_strategy must be either 'cls' or 'mean'")
     
     # Set device
-    device = set_device(device)
+    device = get_device(device)
     
     # Move model to device and set to eval mode
     model = model.to(device)
@@ -864,6 +900,10 @@ def bert_encode(
     else:
         # Process in batches
         dataset = TextDataset(texts, tokenizer, max_length)
+        
+        # Get max_length from dataset if not already set
+        if max_length is None and hasattr(dataset, 'max_length'):
+            max_length = dataset.max_length
         
         # Create default collate_fn if not provided
         if collate_fn is None:
