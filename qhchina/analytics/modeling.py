@@ -188,7 +188,15 @@ def train_bert_classifier(
             raise ValueError("Either collate_fn must be provided or train_dataset.tokenizer/tokenizer must be defined")
         
         def default_collate_fn(batch):
-            texts = [item['text'] for item in batch]
+            # Handle different input formats (dict or tuple)
+            if isinstance(batch[0], dict):
+                texts = [item['text'] for item in batch]
+                labels = [item['label'] for item in batch]
+            else:  # Assuming tuple format (text, label)
+                texts = [item[0] for item in batch]
+                labels = [item[1] for item in batch]
+            
+            # Tokenize texts
             encodings = tokenizer(
                 texts,
                 truncation=True,
@@ -197,7 +205,7 @@ def train_bert_classifier(
                 return_tensors='pt',
                 return_token_type_ids=False
             )
-            encodings['labels'] = torch.tensor([item['label'] for item in batch])
+            encodings['labels'] = torch.tensor(labels)
             
             return encodings
         
@@ -436,6 +444,11 @@ def evaluate(
     if len(dataset) == 0:
         raise ValueError("Dataset is empty")
     
+    # ensure the provided dataset has labels as attribute (hasattribute), if not raise an error
+    if not hasattr(dataset, 'labels'):
+        raise ValueError("Dataset must have a 'labels' attribute for evaluation")
+
+
     # Set device
     device = get_device(device)
     
@@ -457,7 +470,15 @@ def evaluate(
             raise ValueError("Either collate_fn must be provided or dataset.tokenizer/tokenizer must be defined")
         
         def default_collate_fn(batch):
-            texts = [item['text'] for item in batch]
+            # Handle different input formats (dict or tuple)
+            if isinstance(batch[0], dict):
+                texts = [item['text'] for item in batch]
+                labels = [item['label'] for item in batch]
+            else:  # Assuming tuple format (text, label)
+                texts = [item[0] for item in batch]
+                labels = [item[1] for item in batch]
+            
+            # Tokenize texts
             encodings = tokenizer(
                 texts,
                 truncation=True,
@@ -466,7 +487,7 @@ def evaluate(
                 return_tensors='pt',
                 return_token_type_ids=False
             )
-            encodings['labels'] = torch.tensor([item['label'] for item in batch])
+            encodings['labels'] = torch.tensor(labels)
             
             return encodings
         
@@ -644,7 +665,13 @@ def predict(
             raise ValueError("Either collate_fn must be provided or dataset.tokenizer/tokenizer must be defined")
         
         def default_collate_fn(batch):
-            texts = [item['text'] for item in batch]
+            # Handle different input formats (dict or tuple)
+            if isinstance(batch[0], dict):
+                texts = [item['text'] for item in batch]
+            else:  # Assuming it is a list of texts
+                texts = batch
+            
+            # Tokenize texts
             encodings = tokenizer(
                 texts,
                 truncation=True,
@@ -924,7 +951,13 @@ def bert_encode(
                 raise ValueError("Either collate_fn must be provided or tokenizer must be defined")
             
             def default_collate_fn(batch):
-                texts = [item['text'] for item in batch]
+                # Handle different input formats (dict or tuple)
+                if isinstance(batch[0], dict):
+                    texts = [item['text'] for item in batch]
+                else:  # Assuming batch is a list of texts
+                    texts = batch
+                
+                # Tokenize texts
                 encodings = tokenizer(
                     texts,
                     truncation=True,

@@ -13,16 +13,25 @@ def project_2d(vectors,
                fontsize=12, 
                perplexity=None,
                filename=None,
-               adjust_text_labels=False):
+               adjust_text_labels=False,
+               n_neighbors=15,
+               min_dist=0.1):
     """
-    Projects high-dimensional vectors into 2D using PCA or t-SNE and visualizes them.
+    Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
     Parameters:
     vectors (list of lists or dict {label: vector}): Vectors to project.
     labels (list of str, optional): List of labels for the vectors. Defaults to None.
-    method (str, optional): Method to use for projection ('pca' or 'tsne'). Defaults to 'pca'.
+    method (str, optional): Method to use for projection ('pca', 'tsne', or 'umap'). Defaults to 'pca'.
     title (str, optional): Title of the plot. Defaults to None.
     color (list of str or str, optional): List of colors for the vectors or a single color. Defaults to None.
+    figsize (tuple, optional): Figure size as (width, height). Defaults to (8, 8).
+    fontsize (int, optional): Font size for labels. Defaults to 12.
+    perplexity (float, optional): Perplexity parameter for t-SNE. Required if method is 'tsne'.
+    filename (str, optional): Path to save the figure. Defaults to None.
+    adjust_text_labels (bool, optional): Whether to adjust text labels to avoid overlap. Defaults to False.
+    n_neighbors (int, optional): Number of neighbors for UMAP. Defaults to 15.
+    min_dist (float, optional): Minimum distance between points for UMAP. Defaults to 0.1.
     """
     # Ensure labels match the number of vectors if provided
     if labels is not None:
@@ -48,8 +57,18 @@ def project_2d(vectors,
         projected_vectors = projector.fit_transform(vectors)
         x_label = "Dimension 1"
         y_label = "Dimension 2"
+    elif method == 'umap':
+        try:
+            import umap
+        except ImportError:
+            raise ImportError("Please install umap-learn package: pip install umap-learn")
+        
+        projector = umap.UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=min_dist)
+        projected_vectors = projector.fit_transform(vectors)
+        x_label = "UMAP Dimension 1"
+        y_label = "UMAP Dimension 2"
     else:
-        raise ValueError("Method must be 'pca' or 'tsne'")
+        raise ValueError("Method must be 'pca', 'tsne', or 'umap'")
 
     if isinstance(color, str):
         color = [color] * len(projected_vectors)
