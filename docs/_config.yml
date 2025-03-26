@@ -1,6 +1,6 @@
 theme: jekyll-theme-cayman
 title: qhChina
-description: An NLP toolkit for Chinese humanities humanities
+description: An NLP toolkit for Chinese humanities
 markdown: kramdown
 kramdown:
   input: GFM
