@@ -700,23 +700,26 @@ def predict(
         return all_predictions
 
 def make_datasets(
-    data: List[Tuple[str, int]],
+    data: Union[List[Tuple[str, int]], Dict[str, List]],
     tokenizer: AutoTokenizer,
     split: Union[Tuple[float, float], Tuple[float, float, float]],
     max_length: Optional[int] = None,
     random_seed: int = None,
+    verbose: bool = True,
 ) -> Union[Tuple[Dataset, Dataset], Tuple[Dataset, Dataset, Dataset]]:
     """
-    Create train/val/test datasets from a list of (text, label) tuples with stratification.
+    Create train/val/test datasets from a list of (text, label) tuples or a dictionary with stratification.
     
     Args:
-        data: List of tuples where each tuple contains (text, label)
+        data: either a list of tuples where each tuple contains (text, label),
+            or a dictionary with keys 'texts' and 'labels'
         tokenizer: Tokenizer to use for text encoding
-        split: Tuple of proportions for splits:
-            - (train_prop, val_prop) for train/val split
-            - (train_prop, val_prop, test_prop) for train/val/test split
+        split: Tuple of proportions for splits, 
+            either (train_prop, val_prop) for train/val split,
+            or (train_prop, val_prop, test_prop) for train/val/test split
         max_length: Maximum sequence length for tokenization
         random_seed: Random seed for reproducible splits
+        verbose: Whether to print dataset statistics and distributions
     
     Returns:
         If split has length 2:
@@ -733,15 +736,25 @@ def make_datasets(
     if abs(sum(split) - 1.0) > 1e-6:
         raise ValueError("Proportions must sum to 1.0")
     
-    # Unzip the data into texts and labels
-    texts, labels = zip(*data)
+    # Handle dictionary format
+    if isinstance(data, dict):
+        if 'texts' not in data or 'labels' not in data:
+            raise ValueError("When data is a dictionary, it must contain 'texts' and 'labels' keys")
+        texts = data['texts']
+        labels = data['labels']
+        if len(texts) != len(labels):
+            raise ValueError(f"Number of texts ({len(texts)}) must match number of labels ({len(labels)})")
+    else:
+        # Unzip the data into texts and labels
+        texts, labels = zip(*data)
     
     # Print class distribution in original data
-    print("\nOriginal dataset class distribution:")
-    unique_labels, counts = np.unique(labels, return_counts=True)
-    total = len(labels)
-    for label, count in zip(unique_labels, counts):
-        print(f"Class {label}: {count} examples ({count/total:.2%})")
+    if verbose:
+        print("\nOriginal dataset class distribution:")
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        total = len(labels)
+        for label, count in zip(unique_labels, counts):
+            print(f"Class {label}: {count} examples ({count/total:.2%})")
     
     # Calculate split sizes
     total_size = len(texts)
@@ -778,24 +791,25 @@ def make_datasets(
     train_dataset = TextDataset(train_texts, tokenizer, max_length, train_labels)
     val_dataset = TextDataset(val_texts, tokenizer, max_length, val_labels)
     
-    # Print split sizes
-    print(f"\nTotal samples: {total_size}")
-    print(f"Training set size: {len(train_dataset)}")
-    print(f"Validation set size: {len(val_dataset)}")
-    
-    # Print class distribution for each split
-    print("\nTraining set class distribution:")
-    print_class_distribution(train_dataset)
-    
-    print("\nValidation set class distribution:")
-    print_class_distribution(val_dataset)
+    # Print split sizes and class distributions if verbose
+    if verbose:
+        print(f"\nTotal samples: {total_size}")
+        print(f"Training set size: {len(train_dataset)}")
+        print(f"Validation set size: {len(val_dataset)}")
+        
+        print("\nTraining set class distribution:")
+        print_class_distribution(train_dataset)
+        
+        print("\nValidation set class distribution:")
+        print_class_distribution(val_dataset)
     
     if len(split) == 3:
         test_dataset = TextDataset(test_texts, tokenizer, max_length, test_labels)
-        print(f"\nTest set size: {len(test_dataset)}")
         
-        print("\nTest set class distribution:")
-        print_class_distribution(test_dataset)
+        if verbose:
+            print(f"\nTest set size: {len(test_dataset)}")
+            print("\nTest set class distribution:")
+            print_class_distribution(test_dataset)
         
         return train_dataset, val_dataset, test_dataset
     else:

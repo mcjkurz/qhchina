@@ -74,19 +74,23 @@ model = AutoModelForSequenceClassification.from_pretrained(
     num_labels=2
 )
 
-# Prepare data
-data = [
-    ("这部电影非常精彩！", 1),  # This movie is excellent!
-    ("我讨厌这部电影。", 0),    # I hate this movie.
-    # Add more examples...
-]
+# Prepare data (using dictionary format)
+data = {
+    'texts': [
+        "这部电影非常精彩！",  # This movie is excellent!
+        "我讨厌这部电影。",    # I hate this movie.
+        # Add more examples...
+    ],
+    'labels': [1, 0]
+}
 
 # Create datasets
 train_dataset, val_dataset = make_datasets(
     data=data,
     tokenizer=tokenizer,
     split=(0.8, 0.2),
-    max_length=128
+    max_length=128,
+    verbose=True  # Print dataset statistics (default behavior)
 )
 
 # Train model
@@ -163,23 +167,57 @@ A PyTorch Dataset for text classification tasks.
 ### make_datasets()
 
 ```python
-make_datasets(data, tokenizer, split, max_length=None, random_seed=None)
+make_datasets(data, tokenizer, split, max_length=None, random_seed=None, verbose=True)
 ```
 
-Create train/val/test datasets from a list of (text, label) tuples with stratification.
+Create train/val/test datasets from input data with stratification.
 
 **Parameters:**
-- `data` (List[Tuple[str, int]]): List of tuples where each tuple contains (text, label)
+- `data` (Union[List[Tuple[str, int]], Dict[str, List]]): Input data in one of these formats:
+  - List of tuples where each tuple contains (text, label)
+  - Dictionary with keys 'texts' and 'labels', where each is a list
 - `tokenizer` (AutoTokenizer): Tokenizer to use for text encoding
 - `split` (Union[Tuple[float, float], Tuple[float, float, float]]): Tuple of proportions for splits
   - (train_prop, val_prop) for train/val split
   - (train_prop, val_prop, test_prop) for train/val/test split
 - `max_length` (Optional[int]): Maximum sequence length for tokenization
 - `random_seed` (Optional[int]): Random seed for reproducible splits
+- `verbose` (bool): Whether to print dataset statistics and class distributions (default: True)
 
 **Returns:**
 - If split has length 2: Tuple of (train_dataset, val_dataset)
 - If split has length 3: Tuple of (train_dataset, val_dataset, test_dataset)
+
+**Example using list of tuples:**
+```python
+data = [
+    ("这部电影非常精彩！", 1),  # This movie is excellent!
+    ("我讨厌这部电影。", 0),    # I hate this movie.
+    # Add more examples...
+]
+
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    split=(0.8, 0.2),
+    verbose=True
+)
+```
+
+**Example using dictionary format:**
+```python
+data = {
+    'texts': ["这部电影非常精彩！", "我讨厌这部电影。"],
+    'labels': [1, 0]
+}
+
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    split=(0.8, 0.2),
+    verbose=False  # Suppress printing of statistics
+)
+```
 
 ### train_bert_classifier()
 
@@ -354,15 +392,18 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from qhchina.analytics import make_datasets, train_bert_classifier, evaluate, predict
 import torch
 
-# Prepare data: (text, label) pairs
-data = [
-    ("这部电影非常精彩！", 1),  # Positive
-    ("演员的表演很出色。", 1),  # Positive
-    ("故事情节有趣。", 1),      # Positive
-    ("我讨厌这部电影。", 0),    # Negative
-    ("演技很差劲。", 0),        # Negative
-    ("浪费时间的电影。", 0),    # Negative
-]
+# Prepare data using dictionary format
+data = {
+    'texts': [
+        "这部电影非常精彩！",  # Positive
+        "演员的表演很出色。",  # Positive
+        "故事情节有趣。",      # Positive
+        "我讨厌这部电影。",    # Negative
+        "演技很差劲。",        # Negative
+        "浪费时间的电影。",    # Negative
+    ],
+    'labels': [1, 1, 1, 0, 0, 0]
+}
 
 # Load model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
@@ -376,7 +417,8 @@ train_dataset, val_dataset = make_datasets(
     data=data,
     tokenizer=tokenizer,
     split=(0.8, 0.2),
-    max_length=128
+    max_length=128,
+    verbose=True  # Print statistics (default)
 )
 
 # Optional: Define a custom collate function
