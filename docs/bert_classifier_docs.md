@@ -193,7 +193,8 @@ train_bert_classifier(
     save_dir=None,
     plot_interval=100,
     val_interval=None,
-    collate_fn=None
+    collate_fn=None,
+    tokenizer=None
 )
 ```
 
@@ -214,6 +215,7 @@ Train a BERT-based classifier with custom training loop.
 - `plot_interval` (int): Number of batches between plot updates
 - `val_interval` (Optional[int]): Number of batches between validation runs
 - `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
+- `tokenizer` (Optional[AutoTokenizer]): Tokenizer to use for encoding texts. If None, the train_dataset's tokenizer will be used.
 
 **Returns:**
 - `dict`: Dictionary containing:
@@ -225,7 +227,7 @@ Train a BERT-based classifier with custom training loop.
 ### evaluate()
 
 ```python
-evaluate(model, test_dataset, batch_size=16, device=None, collate_fn=None)
+evaluate(model, test_dataset, batch_size=16, device=None, collate_fn=None, tokenizer=None)
 ```
 
 Evaluate a trained model on a test dataset.
@@ -236,6 +238,7 @@ Evaluate a trained model on a test dataset.
 - `batch_size` (int): Batch size for evaluation
 - `device` (Optional[str]): Device to use for evaluation
 - `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
+- `tokenizer` (Optional[AutoTokenizer]): Tokenizer to use for encoding texts. If None, the dataset's tokenizer will be used.
 
 **Returns:**
 - `dict`: Dictionary containing evaluation metrics (accuracy, precision, recall, F1, confusion matrix)
@@ -243,45 +246,50 @@ Evaluate a trained model on a test dataset.
 ### predict()
 
 ```python
-predict(model, texts, tokenizer, max_length=128, batch_size=16, device=None, return_probs=False, collate_fn=None)
+predict(model, texts=None, dataset=None, tokenizer=None, max_length=128, batch_size=16, device=None, return_probs=False, collate_fn=None)
 ```
 
 Make predictions with a trained model on new texts.
 
 **Parameters:**
 - `model` (AutoModelForSequenceClassification): Trained model
-- `texts` (List[str]): List of texts to classify
-- `tokenizer` (AutoTokenizer): Tokenizer corresponding to the model
-- `max_length` (int): Maximum sequence length for tokenization
+- `texts` (Optional[List[str]]): List of texts to classify (required if dataset is None)
+- `dataset` (Optional[Dataset]): PyTorch Dataset for inference (required if texts is None)
+- `tokenizer` (Optional[AutoTokenizer]): Tokenizer for encoding texts
+  - Required if texts is provided and no collate_fn is provided
+  - If dataset is provided and has a tokenizer attribute, that tokenizer will be used if this is None
+- `max_length` (Optional[int]): Maximum sequence length for tokenization
 - `batch_size` (int): Batch size for prediction
 - `device` (Optional[str]): Device to use for prediction
 - `return_probs` (bool): Whether to return probability distributions
 - `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 
 **Returns:**
-- If `return_probs=True`: List of tuples (probabilities, predicted_class)
-- If `return_probs=False`: List of predicted classes
+- If `return_probs=False`: List of predicted labels
+- If `return_probs=True`: Dictionary containing:
+  - 'predictions': List of predicted labels
+  - 'probabilities': List of probability distributions
 
 ### bert_encode()
 
 ```python
-bert_encode(texts, model, tokenizer, pooling="cls", max_length=128, batch_size=16, device=None, collate_fn=None)
+bert_encode(model, texts, tokenizer=None, batch_size=None, max_length=None, pooling_strategy="cls", device=None, collate_fn=None)
 ```
 
 Encode texts into BERT embeddings.
 
 **Parameters:**
-- `texts` (List[str]): List of texts to encode
 - `model`: BERT model (can be a standard BERT model or a classification model)
-- `tokenizer` (AutoTokenizer): Tokenizer corresponding to the model
-- `pooling` (str): Pooling strategy ('cls' for CLS token, 'mean' for mean pooling)
-- `max_length` (int): Maximum sequence length for tokenization
-- `batch_size` (int): Batch size for encoding
+- `texts` (List[str]): List of texts to encode
+- `tokenizer` (Optional[AutoTokenizer]): Tokenizer to use for encoding texts. If None, must provide a collate_fn
+- `batch_size` (Optional[int]): Batch size for encoding. If None, process texts individually.
+- `max_length` (Optional[int]): Maximum sequence length for tokenization
+- `pooling_strategy` (str): Pooling strategy ('cls' for CLS token, 'mean' for mean pooling)
 - `device` (Optional[str]): Device to use for encoding
 - `collate_fn` (Optional[Callable]): Custom collation function for DataLoader. If None, a default function will be created.
 
 **Returns:**
-- `numpy.ndarray`: Array of shape (len(texts), embedding_dim) with text embeddings
+- List of numpy arrays, each of shape (embedding_dim)
 
 ### set_device()
 
@@ -480,6 +488,158 @@ eval_results = evaluate(
 
 print(f"Accuracy: {eval_results['accuracy']:.4f}")
 print(f"F1 Score (Weighted): {eval_results['weighted_avg']['f1']:.4f}")
+```
+
+### Binary Classification with External Tokenizer
+
+```python
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from qhchina.analytics import make_datasets, train_bert_classifier, evaluate, predict
+import torch
+
+# Prepare data: (text, label) pairs
+data = [
+    ("这部电影非常精彩！", 1),  # Positive
+    ("演员的表演很出色。", 1),  # Positive
+    ("故事情节有趣。", 1),      # Positive
+    ("我讨厌这部电影。", 0),    # Negative
+    ("演技很差劲。", 0),        # Negative
+    ("浪费时间的电影。", 0),    # Negative
+]
+
+# Load model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
+model = AutoModelForSequenceClassification.from_pretrained(
+    "bert-base-chinese", 
+    num_labels=2
+)
+
+# Create datasets without specifying tokenizer in the datasets
+train_texts, train_labels = zip(*data[:4])
+val_texts, val_labels = zip(*data[4:])
+
+# Create TextDataset without tokenizer
+from qhchina.analytics import TextDataset
+train_dataset = TextDataset(train_texts, labels=train_labels)
+val_dataset = TextDataset(val_texts, labels=val_labels)
+
+# Train model with explicitly provided tokenizer
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    val_dataset=val_dataset,
+    batch_size=2,
+    learning_rate=2e-5,
+    num_epochs=3,
+    tokenizer=tokenizer  # Explicitly provide tokenizer
+)
+
+# Make predictions with external tokenizer
+new_texts = ["这是一部非常好看的电影", "这个故事很无聊"]
+predictions = predict(
+    model=results["model"],
+    texts=new_texts,
+    tokenizer=tokenizer  # Explicitly provide tokenizer
+)
+
+print(f"Predicted classes: {predictions}")
+```
+
+### Custom Collate Function with External Tokenizer
+
+```python
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from qhchina.analytics import TextDataset, train_bert_classifier
+
+# Load model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
+model = AutoModelForSequenceClassification.from_pretrained(
+    "bert-base-chinese", 
+    num_labels=2
+)
+
+# Create a dataset without tokenizer
+train_texts = ["这部电影很好看", "这个故事很无趣", "演员表演出色"]
+train_labels = [1, 0, 1]
+train_dataset = TextDataset(train_texts, labels=train_labels)
+
+# Define a custom collate function that uses the tokenizer
+def custom_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    # Add special tokens and other custom processing
+    encodings = tokenizer(
+        texts,
+        truncation=True,
+        padding=True,
+        max_length=128,
+        return_tensors='pt',
+        add_special_tokens=True
+    )
+    
+    # Add labels
+    if 'label' in batch[0]:
+        encodings['labels'] = torch.tensor([item['label'] for item in batch])
+    
+    return encodings
+
+# Train the model with custom collate function
+results = train_bert_classifier(
+    model=model,
+    train_dataset=train_dataset,
+    batch_size=2,
+    num_epochs=2,
+    collate_fn=custom_collate_fn,  # Use custom collate function
+    tokenizer=tokenizer  # Also provide tokenizer for evaluation
+)
+```
+
+### Text Encoding with Explicit Tokenizer
+
+```python
+from transformers import AutoModel, AutoTokenizer
+from qhchina.analytics import bert_encode
+import torch
+
+# Load base model (not classification model)
+model_name = "bert-base-chinese"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+
+# Texts to encode
+texts = [
+    "中国经济持续发展。",
+    "北京是中国的首都。"
+]
+
+# Option 1: Use tokenizer explicitly
+embeddings = bert_encode(
+    model=model,
+    texts=texts,
+    tokenizer=tokenizer,  # Explicitly provide tokenizer
+    pooling_strategy="cls",
+    batch_size=16
+)
+
+# Option 2: Use custom collate function
+def custom_embedding_collate_fn(batch):
+    texts = [item['text'] for item in batch]
+    return tokenizer(
+        texts,
+        truncation=True,
+        padding=True,
+        max_length=128,
+        return_tensors='pt'
+    )
+
+embeddings = bert_encode(
+    model=model,
+    texts=texts,
+    batch_size=16,
+    collate_fn=custom_embedding_collate_fn  # Use custom collate function
+)
+
+print(f"Embedding shape: ({len(embeddings)}, {embeddings[0].shape[0]})")  # (2, 768) for bert-base
 ```
 
 ## Visualizations
