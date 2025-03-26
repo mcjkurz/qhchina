@@ -106,7 +106,11 @@ results = train_bert_classifier(
 )
 
 # Make predictions
-new_texts = ["一部精彩的影片！", "演技很差劲。"]  # A fantastic film!, Terrible acting.
+new_texts = [
+    "一部精彩的影片！",   # A fantastic film!
+    "演技很差劲。",      # Terrible acting.
+    "情节发展太慢了。"    # The plot develops too slowly.
+]
 predictions = predict(
     model=results["model"],
     texts=new_texts,
@@ -133,20 +137,23 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
 bert_model = AutoModelForSequenceClassification.from_pretrained("bert-base-chinese", num_labels=2)
 
-# Example comments data
+# Example comments data with 1-5 star ratings
 comments = [
-    {"Comment": "这部电影非常精彩！", "Label": 5},  # Positive comment
-    {"Comment": "演员的表演很出色。", "Label": 5},   # Positive comment
-    {"Comment": "我讨厌这部电影。", "Label": 1},     # Negative comment
-    {"Comment": "演技很差劲。", "Label": 1},        # Negative comment
+    {"Comment": "这部电影非常精彩！", "Label": 5},  # Excellent movie! (5 stars)
+    {"Comment": "演员的表演很出色。", "Label": 5},   # The actors' performances were outstanding. (5 stars)
+    {"Comment": "剧情还不错，但有些地方可以改进。", "Label": 4},  # The plot is good, but some parts could be improved. (4 stars)
+    {"Comment": "整体表现一般，不算特别出彩。", "Label": 3},  # Overall performance is average, not particularly impressive. (3 stars)
+    {"Comment": "有些无聊，故事发展太慢。", "Label": 2},  # A bit boring, story develops too slowly. (2 stars)
+    {"Comment": "我讨厌这部电影。", "Label": 1},     # I hate this movie. (1 star)
+    {"Comment": "演技很差劲。", "Label": 1},        # The acting is terrible. (1 star)
     # ... more examples
 ]
 
-# Filter and transform data
-filtered_comments = [elem for elem in comments if elem['Label'] in [1, 5]]
+# For binary sentiment analysis, we'll focus on clearly positive (5) vs clearly negative (1) ratings
+# One-step filtering and transformation to create dictionary for Dataset
 filtered_comments_dict = {
-    "text": [elem["Comment"] for elem in filtered_comments],
-    "label": [0 if elem["Label"] == 1 else 1 for elem in filtered_comments]  # Convert to binary labels
+    "text": [elem["Comment"] for elem in comments if elem["Label"] in [1, 5]],
+    "label": [1 if elem["Label"] == 5 else 0 for elem in comments if elem["Label"] in [1, 5]]
 }
 
 # Create Huggingface Dataset
@@ -268,8 +275,12 @@ train_dataset, val_dataset = make_datasets(
 **Example using dictionary format:**
 ```python
 data = {
-    'texts': ["这部电影非常精彩！", "我讨厌这部电影。"],
-    'labels': [1, 0]
+    'texts': [
+        "这部电影非常精彩！",    # This movie is excellent!
+        "演员表演令人印象深刻。",  # The actors' performance was impressive.
+        "我讨厌这部电影。"       # I hate this movie.
+    ],
+    'labels': [1, 1, 0]
 }
 
 train_dataset, val_dataset = make_datasets(
@@ -508,7 +519,11 @@ results = train_bert_classifier(
 )
 
 # Make predictions
-new_texts = ["这是一部非常好看的电影", "这个故事很无聊"]
+new_texts = [
+    "这是一部非常好看的电影",    # This is a very good movie
+    "这个故事很无聊",          # This story is boring
+    "画面很美，但剧情一般"      # Beautiful visuals, but average plot
+]
 predictions = predict(
     model=results["model"],
     texts=new_texts,
@@ -678,7 +693,11 @@ results = train_bert_classifier(
 )
 
 # Make predictions with external tokenizer
-new_texts = ["这是一部非常好看的电影", "这个故事很无聊"]
+new_texts = [
+    "这是一部非常好看的电影",    # This is a very good movie
+    "这个故事很无聊",          # This story is boring
+    "画面很美，但剧情一般"      # Beautiful visuals, but average plot
+]
 predictions = predict(
     model=results["model"],
     texts=new_texts,
@@ -829,7 +848,11 @@ results = train_bert_classifier(
 )
 
 # Make predictions with explicit max_length
-new_texts = ["这是一部非常好看的电影", "这个故事很无聊"]
+new_texts = [
+    "这是一部非常好看的电影",    # This is a very good movie
+    "这个故事很无聊",          # This story is boring
+    "画面很美，但剧情一般"      # Beautiful visuals, but average plot
+]
 predictions = predict(
     model=results["model"],
     texts=new_texts,

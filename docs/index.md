@@ -14,6 +14,16 @@ A comprehensive toolkit for Chinese NLP research and educational purposes, devel
 
 qhChina is a Python package designed to facilitate Chinese text analysis through a range of NLP techniques, from basic corpus analysis to advanced deep learning methods. The package is particularly suited for research in humanities and social sciences, offering tools that balance technical capabilities with ease of use.
 
+## Documentation
+
+Detailed documentation for each component:
+
+- [BERT Classification Documentation](bert_classifier_docs.html)
+- [Word Embeddings Documentation](word_embeddings_docs.html)
+- [Corpus Analysis Documentation](corpora_docs.html)
+- [Collocation Analysis Documentation](collocations_docs.html)
+- [Topic Modeling Documentation](topic_modeling_docs.html)
+
 ## Core Components
 
 ### 🔍 Corpus Analysis
@@ -100,15 +110,6 @@ results = train_bert_classifier(model, train_dataset, val_dataset)
 - Text preprocessing utilities
 - Font management for Chinese text visualization
 - Helper functions for data manipulation
-
-## Documentation
-
-Detailed documentation for each component:
-
-- [BERT Classification Documentation](bert_classifier_docs.html)
-- [Word Embeddings Documentation](word_embeddings_docs.html)
-- [Corpus Analysis Documentation](corpora_docs.html)
-- [Collocation Analysis Documentation](collocations_docs.html)
 
 ## Installation
 
