@@ -121,6 +121,67 @@ predictions = predict(
 
 The package includes a `TextDataset` class that inherits from PyTorch's `Dataset` class, making it compatible with PyTorch's `DataLoader`. The `make_datasets()` function creates stratified train/validation/test splits from raw text data.
 
+#### Alternative: Using Huggingface's Dataset Methods
+
+While `make_datasets()` provides stratified splitting by default, you can also use Huggingface's `datasets` library methods for dataset creation and splitting:
+
+```python
+from datasets import Dataset
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+# Load model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
+bert_model = AutoModelForSequenceClassification.from_pretrained("bert-base-chinese", num_labels=2)
+
+# Example comments data
+comments = [
+    {"Comment": "这部电影非常精彩！", "Label": 5},  # Positive comment
+    {"Comment": "演员的表演很出色。", "Label": 5},   # Positive comment
+    {"Comment": "我讨厌这部电影。", "Label": 1},     # Negative comment
+    {"Comment": "演技很差劲。", "Label": 1},        # Negative comment
+    # ... more examples
+]
+
+# Filter and transform data
+filtered_comments = [elem for elem in comments if elem['Label'] in [1, 5]]
+filtered_comments_dict = {
+    "text": [elem["Comment"] for elem in filtered_comments],
+    "label": [0 if elem["Label"] == 1 else 1 for elem in filtered_comments]  # Convert to binary labels
+}
+
+# Create Huggingface Dataset
+full_dataset = Dataset.from_dict(filtered_comments_dict)
+
+# Split using Huggingface's train_test_split method (non-stratified)
+split_dataset = full_dataset.train_test_split(test_size=0.2)
+train_dataset = split_dataset["train"]
+val_dataset = split_dataset["test"]
+
+# Train model using qhChina's train_bert_classifier
+from qhchina.analytics import train_bert_classifier
+
+results = train_bert_classifier(
+    model=bert_model,
+    train_dataset=train_dataset,
+    val_dataset=val_dataset,
+    batch_size=4,
+    device="mps",  # or "cuda" or "cpu"
+    num_epochs=1,
+    tokenizer=tokenizer,  # Need to provide tokenizer explicitly
+    max_length=128
+)
+```
+
+**Key Differences from `make_datasets()`:**
+
+1. **Stratification**: Huggingface's `train_test_split()` does not provide stratification by default, while `make_datasets()` does. This is important for imbalanced datasets.
+
+2. **Tokenizer Integration**: When using Huggingface's Dataset directly, you need to provide the tokenizer explicitly to `train_bert_classifier()`, as the dataset object doesn't have a tokenizer attribute.
+
+3. **Convenience**: `make_datasets()` handles the creation of `TextDataset` objects with appropriate attributes for you, while with Huggingface's approach you need to handle more details explicitly.
+
+Choose the approach that best suits your workflow and requirements.
+
 ### Model Training
 
 The `train_bert_classifier()` function provides a customizable training loop with:
@@ -872,6 +933,7 @@ def my_custom_collate_fn(batch):
         encodings['labels'] = torch.tensor([item['label'] for item in batch])
     
     return encodings
+}
 
 # Use custom collate function
 results = train_bert_classifier(
