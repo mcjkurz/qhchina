@@ -4,11 +4,12 @@ title: Word Embeddings - qhChina Documentation
 ---
 
 <div class="navigation">
-  <a href="index.html">Home</a> | 
-  <a href="bert_classifier_docs.html">BERT Classification</a> | 
-  <a href="word_embeddings_docs.html">Word Embeddings</a> | 
-  <a href="corpora_docs.html">Corpus Analysis</a> | 
-  <a href="collocations_docs.html">Collocation Analysis</a> | 
+  <strong>Navigation:</strong>
+  <a href="index.html">Home</a> |
+  <a href="bert_classifier_docs.html">BERT Classification</a> |
+  <a href="word_embeddings_docs.html">Word Embeddings</a> |
+  <a href="corpora_docs.html">Corpus Analysis</a> |
+  <a href="collocations_docs.html">Collocation Analysis</a> |
   <a href="topic_modeling_docs.html">Topic Modeling</a>
 </div>
 
@@ -332,4 +333,65 @@ vector2 = model2.get_vector("电影")
 
 ### Analyzing Conceptual Change
 
+```python
+# Initialize model with specific parameters for historical analysis
+model = Word2Vec(
+    vector_size=200,
+    window=10,
+    min_count=10,
+    sg=1,
+    negative=10
+)
+
+# Train on early period corpus
+model.build_vocab(early_period_texts)
+model.train(early_period_texts, epochs=5)
+early_model = model.copy()
+
+# Update model with later period corpus
+model.build_vocab(later_period_texts, update=True)
+model.train(later_period_texts, epochs=5)
+
+# Compare semantic neighborhoods
+early_neighbors = early_model.most_similar("革命", topn=20)
+modern_neighbors = model.most_similar("革命", topn=20)
 ```
+
+### Creating Semantic Fields
+
+```python
+# Get all words similar to a concept
+economy_terms = model.most_similar("经济", topn=50)
+
+# Find clusters within a semantic field
+from sklearn.cluster import KMeans
+from qhchina.analytics import cosine_similarity
+
+# Get vectors for economy-related terms
+vectors = [model.get_vector(word) for word, _ in economy_terms]
+
+# Cluster vectors
+kmeans = KMeans(n_clusters=5)
+clusters = kmeans.fit_predict(vectors)
+
+# Group words by cluster
+semantic_fields = {}
+for i, (word, _) in enumerate(economy_terms):
+    cluster = clusters[i]
+    if cluster not in semantic_fields:
+        semantic_fields[cluster] = []
+    semantic_fields[cluster].append(word)
+```
+
+## Performance Considerations
+
+- For large corpora, increase `max_vocab_size` to limit memory usage
+- Use `sample` parameter to downsample frequent words for better results
+- For very large vocabularies, consider filtering words before training
+- Set `shrink_windows=True` for more diverse contexts during training
+
+## References
+
+1. Mikolov, T., Chen, K., Corrado, G., & Dean, J. (2013). Efficient estimation of word representations in vector space. arXiv preprint arXiv:1301.3781.
+2. Mikolov, T., Sutskever, I., Chen, K., Corrado, G. S., & Dean, J. (2013). Distributed representations of words and phrases and their compositionality. Advances in neural information processing systems, 26. 
+3. Hamilton, W. L., Leskovec, J., & Jurafsky, D. (2016). Diachronic word embeddings reveal statistical laws of semantic change. arXiv preprint arXiv:1605.09096. 
