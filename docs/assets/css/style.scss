@@ -12,6 +12,65 @@
   overflow: auto;
 }
 
+// Fix for double borders in code blocks
+pre.highlight {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+// Remove borders from nested elements
+.highlight pre, .highlight code {
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+}
+
+// Language-specific styling (for triple backtick code blocks)
+pre.language-python, pre.language-bash, pre.language-javascript, pre.language-html, pre.language-css {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+// Handle language tags
+div.language-python, div.language-bash, div.language-javascript, div.language-html, div.language-css {
+  pre.highlight {
+    background: transparent;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+// Specific fix for Python code blocks which seem to have the most issues
+div.language-python {
+  background: transparent;
+  border: none;
+  
+  .highlight {
+    // Only one border should be visible - the outer container one
+    border: 1px solid #e8e8e8;
+    background: #f8f8f8;
+  }
+}
+
+// Generic code blocks without language tag
+div.highlighter-rouge {
+  pre.highlight {
+    background: transparent;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .highlight {
+    // Ensure consistent styling
+    border: 1px solid #e8e8e8;
+    background: #f8f8f8;
+  }
+}
+
 // Syntax highlighting styles
 .highlight .c { color: #998; font-style: italic; }
 .highlight .err { color: #a61717; background-color: #e3d2d2; }
