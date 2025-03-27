@@ -1,0 +1,46 @@
+theme: minima
+title: QHChina Lab
+description: Quantitative Humanities Lab for Chinese Studies
+baseurl: ""
+url: ""
+
+# Build settings
+markdown: kramdown
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+# Navigation
+header_pages:
+  - about.md
+  - projects.md
+  - resources.md
+  - docs/index.md
+
+# Collections
+collections:
+  posts:
+    output: true
+    permalink: /:collection/:year/:month/:day/:title/
+  projects:
+    output: true
+    permalink: /:collection/:name/
+
+# Defaults
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"
+  - scope:
+      path: "_posts"
+    values:
+      layout: "post"
+
+# GitHub metadata
+github_username: mcjkurz
+repository: mcjkurz/qhchina
+
+# Custom variables
+show_downloads: true
+logo: /assets/img/logo.png 

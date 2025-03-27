@@ -1,8 +1,15 @@
-# QHChina
+# QHChina Lab
 
-**Quantitative Humanities China Lab** - A Python package for NLP tasks related to Chinese text analysis.
+**Quantitative Humanities China Lab** - A research lab and Python package for NLP tasks related to Chinese text analysis.
 
-## Features
+## Repository Structure
+
+This repository contains:
+
+1. **Python Package**: The `qhchina` package for Chinese text analysis in humanities research
+2. **Lab Website**: The QHChina Lab website with information about our research, projects, resources, and documentation
+
+## Python Package Features
 
 - **Collocation Analysis**: Find significant word co-occurrences in text
 - **Corpus Comparison**: Statistically compare different corpora
@@ -43,6 +50,24 @@ for i, topic in enumerate(lda.get_topic_words(10)):
 ```
 
 For more examples, see the module documentation.
+
+## Website
+
+The lab website is built with Jekyll and includes:
+
+- Information about the QHChina Lab and our research
+- Project descriptions and updates
+- Resources for Chinese humanities research
+- Comprehensive documentation for the qhchina package
+- Blog with updates and announcements
+
+To run the website locally:
+
+```bash
+cd website
+bundle install
+bundle exec jekyll serve
+```
 
 ## Documentation
 
