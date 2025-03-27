@@ -12,9 +12,9 @@ plugins:
 
 # Navigation
 header_pages:
-  - about.md
-  - projects.md
-  - resources.md
+  - about/index.md
+  - projects/index.md
+  - resources/index.md
   - qhchina_docs/index.md
 
 # Collections
