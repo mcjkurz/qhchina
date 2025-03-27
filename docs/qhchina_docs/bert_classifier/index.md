@@ -79,10 +79,15 @@ model = AutoModelForSequenceClassification.from_pretrained(
 data = {
     'text': [
         "这部电影非常精彩！",  # This movie is excellent!
+        "剧情太无聊了。",      # The plot is too boring.
+        "演员的表演很出色。",  # The actors' performances were outstanding.
+        "故事情节很有趣。",    # The storyline is interesting.
+        "导演的处理手法很棒。", # The director's approach is great.
         "我讨厌这部电影。",    # I hate this movie.
+        "演技非常差。",        # The acting is very poor.
         # Add more examples...
     ],
-    'label': [1, 0]
+    'label': [1, 0, 1, 1, 1, 0, 0]
 }
 
 # Create datasets
@@ -103,7 +108,6 @@ results = train_bert_classifier(
     learning_rate=2e-5,
     num_epochs=3,
     device="cuda",  # or "cpu" or "mps"
-    logging_dir="./logs"
 )
 
 # Make predictions
@@ -125,6 +129,45 @@ predictions = predict(
 ### Dataset Creation
 
 The package includes a `TextDataset` class that inherits from PyTorch's `Dataset` class, making it compatible with PyTorch's `DataLoader`. The `make_datasets()` function creates stratified train/validation/test splits from raw text data.
+
+**Returns:**
+- If split has length 2: Tuple of (train_dataset, val_dataset)
+- If split has length 3: Tuple of (train_dataset, val_dataset, test_dataset)
+
+**Example using list of tuples:**
+```python
+data = [
+    ("这部电影非常精彩！", 1),  # This movie is excellent!
+    ("我讨厌这部电影。", 0),    # I hate this movie.
+    # Add more examples...
+]
+
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    split=(0.8, 0.2),
+    verbose=True
+)
+```
+
+**Example using dictionary format:**
+```python
+data = {
+    'text': [
+        "这部电影非常精彩！",    # This movie is excellent!
+        "演员表演令人印象深刻。",  # The actors' performance was impressive.
+        "我讨厌这部电影。"       # I hate this movie.
+    ],
+    'label': [1, 1, 0]
+}
+
+train_dataset, val_dataset = make_datasets(
+    data=data,
+    tokenizer=tokenizer,
+    split=(0.8, 0.2),
+    verbose=False  # Suppress printing of statistics
+)
+```
 
 #### Alternative: Using Huggingface's Dataset Methods
 
@@ -151,16 +194,19 @@ comments = [
 ]
 
 # For binary sentiment analysis, we'll focus on clearly positive (5) vs clearly negative (1) ratings
-# One-step filtering and transformation to create dictionary for Dataset
+# Step 1: Filter to keep only the 5-star (positive) and 1-star (negative) reviews
+filtered_comments = [comment for comment in comments if comment["Label"] in [1, 5]]
+
+# Step 2: Transform the data into the format required by Dataset, converting 5-star to 1 (positive) and 1-star to 0 (negative)
 filtered_comments_dict = {
-    "text": [elem["Comment"] for elem in comments if elem["Label"] in [1, 5]],
-    "label": [1 if elem["Label"] == 5 else 0 for elem in comments if elem["Label"] in [1, 5]]
+    "text": [comment["Comment"] for comment in filtered_comments],
+    "label": [1 if comment["Label"] == 5 else 0 for comment in filtered_comments]
 }
 
 # Create Huggingface Dataset
 full_dataset = Dataset.from_dict(filtered_comments_dict)
 
-# Split using Huggingface's train_test_split method (non-stratified)
+# Split using Huggingface's train_test_split method (non-stratified, might result in unbalanced classes)
 split_dataset = full_dataset.train_test_split(test_size=0.2)
 train_dataset = split_dataset["train"]
 val_dataset = split_dataset["test"]
