@@ -51,7 +51,7 @@ repository: mcjkurz/qhchina
 
 # Custom variables
 show_downloads: true
-logo: /assets/img/logo.png
+logo: assets/img/logo.png
 
 # Google Analytics (replace with your ID if needed)
 # google_analytics: UA-XXXXXXXXX-X
