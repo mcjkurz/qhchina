@@ -12,6 +12,7 @@ kramdown:
 plugins:
   - jekyll-feed
   - jekyll-seo-tag
+  - jekyll-include-cache
 
 # SASS settings
 sass:
@@ -58,4 +59,7 @@ logo: assets/img/logo.png
 
 # Social media links
 # github_username: mcjkurz
-# repository: mcjkurz/qhchina 
+# repository: mcjkurz/qhchina
+
+# GitHub Pages compatibility
+github: [metadata]
