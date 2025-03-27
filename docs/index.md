@@ -3,16 +3,27 @@ layout: default
 title: qhChina - Quantitative Humanities China Lab
 ---
 
-# qhChina
+# Overview
 
-A comprehensive toolkit for Chinese NLP research and educational purposes, developed by the Quantitative Humanities China Lab.
+A comprehensive toolkit for Chinese NLP research and educational purposes, developed by the Quantitative Humanities China Lab. The package is particularly suited for research in humanities and social sciences, offering tools that balance technical capabilities with ease of use.
 
 [![GitHub stars](https://img.shields.io/github/stars/mcjkurz/qhchina.svg?style=social&label=Star)](https://github.com/mcjkurz/qhchina)
 [![GitHub forks](https://img.shields.io/github/forks/mcjkurz/qhchina.svg?style=social&label=Fork)](https://github.com/mcjkurz/qhchina/fork)
 
-## Overview
 
-qhChina is a Python package designed to facilitate Chinese text analysis through a range of NLP techniques, from basic corpus analysis to advanced deep learning methods. The package is particularly suited for research in humanities and social sciences, offering tools that balance technical capabilities with ease of use.
+## Installation
+
+```bash
+pip install qhchina
+```
+
+Or install from source:
+
+```bash
+git clone https://github.com/mcjkurz/qhchina.git
+cd qhchina
+pip install -e .
+```
 
 ## Documentation
 
@@ -110,20 +121,6 @@ results = train_bert_classifier(model, train_dataset, val_dataset)
 - Text preprocessing utilities
 - Font management for Chinese text visualization
 - Helper functions for data manipulation
-
-## Installation
-
-```bash
-pip install qhchina
-```
-
-Or install from source:
-
-```bash
-git clone https://github.com/mcjkurz/qhchina.git
-cd qhchina
-pip install -e .
-```
 
 ## Dependencies
 
