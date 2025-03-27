@@ -6,7 +6,7 @@ import warnings
 import os
 from collections import defaultdict, Counter
 import matplotlib.pyplot as plt
-
+from tqdm.auto import trange
 # Try to import Cython module, with auto-compilation if needed
 try:
     from .cython_ext import lda_sampler
@@ -128,9 +128,6 @@ class LDAGibbsSampler:
         self.theta = None  # Document-topic distributions
         self.phi = None    # Topic-word distributions
         
-        # Tracking convergence
-        self.perplexity_history = []
-        
     def preprocess(self, documents: List[List[str]]) -> Tuple[List[List[int]], Dict[str, int], Dict[int, str]]:
         """
         Convert token documents to word IDs and build vocabulary.
@@ -233,7 +230,8 @@ class LDAGibbsSampler:
             print(f"Running Gibbs sampling for {self.iterations} iterations with Cython.")
         else:
             print(f"Running Gibbs sampling for {self.iterations} iterations (no Cython available).")
-
+        
+        progress_bar = trange(self.iterations)
         for it in range(self.iterations):
             start_time = time.time()
             
@@ -253,14 +251,14 @@ class LDAGibbsSampler:
                         # Sample a new topic
                         self.z[d, i] = self._sample_topic(d, i, w)
             
+            progress_bar.update(1)
             # Calculate perplexity every eval iterations
-            if self.eval_interval and it % self.eval_interval == 0:
+            if it > 0 and self.eval_interval and it % self.eval_interval == 0:
+                elapsed = time.time() - start_time
                 self._update_distributions()
                 perplexity = self.perplexity()
-                self.perplexity_history.append(perplexity)
-                elapsed = time.time() - start_time
                 tokens_per_sec = sum(len(doc) for doc in self.docs_tokens) / elapsed
-                print(f"Iteration {it}: Perplexity = {perplexity:.2f}, Time = {elapsed:.2f}s, Tokens/sec = {tokens_per_sec:.1f}")
+                print(f"Iteration {it}: Perplexity = {perplexity:.2f}, Tokens/sec = {tokens_per_sec:.1f}")
     
     def _sample_topic(self, d: int, i: int, w: int) -> int:
         """
@@ -276,13 +274,7 @@ class LDAGibbsSampler:
         Returns:
             Sampled topic ID
         """
-        if CYTHON_AVAILABLE:
-            return lda_sampler.sample_topic(
-                self.n_wt, self.n_dt, self.n_t, self.z,
-                d, i, w, self.alpha, self.beta,
-                self.n_topics, self.vocabulary_size
-            )
-        
+
         # Decrease counts for current topic assignment
         old_topic = self.z[d, i]
         self.n_wt[w, old_topic] -= 1
@@ -516,7 +508,7 @@ class LDAGibbsSampler:
                 fig, ax = plt.subplots(figsize=figsize)
                 ax.bar(x_pos, probs, align='center')
                 ax.set_xticks(x_pos)
-                ax.set_xticklabels(words, fontsize=fontsize, rotation=45, ha='right')
+                ax.set_xticklabels(words, fontsize=fontsize)
                 ax.set_ylabel('Probability', fontsize=fontsize)
                 ax.set_title(f'Topic {k}', fontsize=fontsize + 2)
                 plt.tight_layout(pad=2.0)
@@ -541,7 +533,7 @@ class LDAGibbsSampler:
                 
                 ax.bar(x_pos, probs, align='center')
                 ax.set_xticks(x_pos)
-                ax.set_xticklabels(words, fontsize=fontsize, rotation=45, ha='right')
+                ax.set_xticklabels(words, fontsize=fontsize)
                 ax.set_ylabel('Probability', fontsize=fontsize)
                 ax.set_title(f'Topic {k}', fontsize=fontsize + 2)
             
@@ -549,31 +541,6 @@ class LDAGibbsSampler:
             if filename:
                 plt.savefig(filename, dpi=dpi, bbox_inches='tight')
             plt.show()
-    
-    def plot_convergence(self, figsize: Tuple[int, int] = (10, 6), 
-                         filename: Optional[str] = None) -> None:
-        """
-        Plot the convergence of the model using perplexity history.
-        
-        Args:
-            figsize: Figure size as (width, height)
-            filename: If provided, save the plot to this file
-        """
-        if not self.perplexity_history:
-            return
-        
-        iterations = np.arange(0, self.iterations, 10)[:len(self.perplexity_history)]
-        
-        plt.figure(figsize=figsize)
-        plt.plot(iterations, self.perplexity_history)
-        plt.xlabel('Iteration')
-        plt.ylabel('Perplexity')
-        plt.title('LDA Model Convergence')
-        plt.grid(True)
-        
-        if filename:
-            plt.savefig(filename, bbox_inches='tight')
-        plt.show()
     
     def save(self, filepath: str) -> None:
         """
