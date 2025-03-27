@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Documentation
-permalink: /docs/
+permalink: /qhchina_docs/
 ---
 
 # QHChina Package Documentation
@@ -12,11 +12,11 @@ Welcome to the documentation for the QHChina Python package, a toolkit designed 
 
 Our package includes several modules, each focusing on specific computational approaches to Chinese text analysis:
 
-- [Word Embeddings](/docs/word_embeddings/) - Tools for creating and analyzing word embeddings for Chinese texts
-- [Topic Modeling](/docs/topic_modeling/) - Methods for topic modeling with Chinese-specific preprocessing
-- [BERT Classifier](/docs/bert_classifier/) - BERT-based text classification for Chinese documents
-- [Collocations](/docs/collocations/) - Analysis of word collocations in Chinese texts
-- [Corpora](/docs/corpora/) - Tools for managing and processing Chinese text corpora
+- [Word Embeddings](/qhchina_docs/word_embeddings/) - Tools for creating and analyzing word embeddings for Chinese texts
+- [Topic Modeling](/qhchina_docs/topic_modeling/) - Methods for topic modeling with Chinese-specific preprocessing
+- [BERT Classifier](/qhchina_docs/bert_classifier/) - BERT-based text classification for Chinese documents
+- [Collocations](/qhchina_docs/collocations/) - Analysis of word collocations in Chinese texts
+- [Corpora](/qhchina_docs/corpora/) - Tools for managing and processing Chinese text corpora
 
 ## Getting Started
 

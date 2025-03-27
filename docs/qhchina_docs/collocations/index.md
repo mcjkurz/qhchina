@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Collocation Analysis
-permalink: /docs/collocations/
+permalink: /qhchina_docs/collocations/
 ---
 
 # Collocation Analysis with qhChina
@@ -58,4 +58,4 @@ analyzer.visualize_network("经济", min_edge_weight=3.0)
 - Temporal collocation comparison
 - Collocation significance testing
 
-[Full Documentation](/docs/collocations/full) 
+[Full Documentation](/qhchina_docs/collocations/full) 

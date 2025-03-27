@@ -20,7 +20,7 @@ The qhchina package is our flagship computational toolkit designed specifically 
 - Collocation analysis for Chinese texts
 - Specialized corpus management for Chinese texts
 
-[Learn more in our documentation](/docs/)
+[Learn more in our documentation](/qhchina_docs/)
 
 ### Additional Projects
 

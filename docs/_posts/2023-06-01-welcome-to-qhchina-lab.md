@@ -26,7 +26,7 @@ The `qhchina` Python package is our flagship project, providing specialized tool
 - Collocation analysis for Chinese texts
 - Corpus management tools
 
-You can find comprehensive documentation in our [Docs](/docs/) section.
+You can find comprehensive documentation in our [Docs](/qhchina_docs/) section.
 
 ## Upcoming Projects
 

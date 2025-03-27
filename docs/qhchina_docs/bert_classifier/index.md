@@ -1,7 +1,7 @@
 ---
 layout: default
 title: BERT Classification
-permalink: /docs/bert_classifier/
+permalink: /qhchina_docs/bert_classifier/
 ---
 
 # BERT Text Classification with qhChina
@@ -76,4 +76,4 @@ predictions = predict(
 )
 ```
 
-[Full Documentation](/docs/bert_classifier/full) 
+[Full Documentation](/qhchina_docs/bert_classifier/full) 

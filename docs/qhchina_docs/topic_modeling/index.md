@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Topic Modeling
-permalink: /docs/topic_modeling/
+permalink: /qhchina_docs/topic_modeling/
 ---
 
 # Topic Modeling with qhChina
@@ -60,4 +60,4 @@ model.visualize_topics()
 - Topic similarity analysis
 - Custom preprocessing options for Classical and Modern Chinese
 
-[Full Documentation](/docs/topic_modeling/full) 
+[Full Documentation](/qhchina_docs/topic_modeling/full) 

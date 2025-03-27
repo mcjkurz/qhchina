@@ -15,7 +15,7 @@ This page provides a collection of resources for researchers working in Chinese 
 ## Tools and Libraries
 
 ### qhchina Package
-Our primary toolkit for Chinese humanities research. [Learn more in our documentation](/docs/).
+Our primary toolkit for Chinese humanities research. [Learn more in our documentation](/qhchina_docs/).
 
 ### Other Useful Tools
 - [pkuseg](https://github.com/lancopku/pkuseg-python) - Chinese word segmentation toolkit

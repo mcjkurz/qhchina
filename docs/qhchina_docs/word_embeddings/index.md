@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Word Embeddings
-permalink: /docs/word_embeddings/
+permalink: /qhchina_docs/word_embeddings/
 ---
 
 # Word Embeddings in qhChina
@@ -80,4 +80,4 @@ reform_2010s = model.get_vector("改革_2010")
 similar_to_reform_1980s = model.most_similar("改革_1980", topn=10)
 ```
 
-[Full Documentation](/docs/word_embeddings/full) 
+[Full Documentation](/qhchina_docs/word_embeddings/full) 

@@ -32,7 +32,7 @@ pip install git+https://github.com/mcjkurz/qhchina.git
 
 ## Getting Started
 
-Check out our [documentation](/docs/) for detailed guides on getting started with qhchina. We've included comprehensive examples for each module to help you integrate these tools into your research workflow.
+Check out our [documentation](/qhchina_docs/) for detailed guides on getting started with qhchina. We've included comprehensive examples for each module to help you integrate these tools into your research workflow.
 
 ## Feedback and Contributions
 

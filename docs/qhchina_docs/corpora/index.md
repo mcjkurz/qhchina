@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Corpus Analysis
-permalink: /docs/corpora/
+permalink: /qhchina_docs/corpora/
 ---
 
 # Corpus Analysis with qhChina
@@ -62,4 +62,4 @@ for result in kwic_results:
 - Time-based corpus analysis
 - Support for different Chinese text segmentation methods
 
-[Full Documentation](/docs/corpora/full) 
+[Full Documentation](/qhchina_docs/corpora/full) 
