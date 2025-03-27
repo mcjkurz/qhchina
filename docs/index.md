@@ -3,9 +3,9 @@ layout: default
 title: Home
 ---
 
-# Welcome to QHChina Lab
+# Welcome to qhChina Lab
 
-QHChina Lab is dedicated to quantitative research in Chinese humanities, providing computational tools and resources for researchers in the field.
+qhChina is dedicated to quantitative research in Chinese humanities, providing computational tools and resources for researchers in the field.
 
 ## Latest News and Updates
 
