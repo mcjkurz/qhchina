@@ -4,7 +4,6 @@ title: BERT Classification - qhChina Documentation
 ---
 
 <div class="navigation">
-  <strong>Navigation:</strong>
   <a href="index.html">Home</a> |
   <a href="bert_classifier_docs.html">BERT Classification</a> |
   <a href="word_embeddings_docs.html">Word Embeddings</a> |
