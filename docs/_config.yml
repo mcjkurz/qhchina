@@ -1,14 +1,19 @@
 theme: minima
 title: QHChina Lab
 description: Quantitative Humanities Lab for Chinese Studies
-baseurl: ""
-url: ""
+baseurl: "/qhchina"
+url: "https://mcjkurz.github.io"
 
 # Build settings
 markdown: kramdown
 plugins:
   - jekyll-feed
   - jekyll-seo-tag
+
+# SASS settings
+sass:
+  sass_dir: _sass
+  style: compressed
 
 # Navigation
 header_pages:
