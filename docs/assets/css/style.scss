@@ -6,68 +6,27 @@
 .highlight {
   background: #f8f8f8;
   border-radius: 3px;
-  border: 1px solid #e8e8e8;
+  border: none; // Remove all borders
   padding: 10px;
   margin-bottom: 15px;
   overflow: auto;
 }
 
-// Fix for double borders in code blocks
-pre.highlight {
-  border: none;
-  padding: 0;
-  margin: 0;
+.highlighter-rouge,
+.highlight pre,
+.highlight code,
+pre.highlight,
+div[class^="language-"] {
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
 }
 
-// Remove borders from nested elements
-.highlight pre, .highlight code {
-  border: none;
-  padding: 0;
-  margin: 0;
-  background: transparent;
-}
-
-// Language-specific styling (for triple backtick code blocks)
-pre.language-python, pre.language-bash, pre.language-javascript, pre.language-html, pre.language-css {
-  background: transparent;
-  border: none;
-  padding: 0;
-  margin: 0;
-}
-
-// Handle language tags
-div.language-python, div.language-bash, div.language-javascript, div.language-html, div.language-css {
-  pre.highlight {
-    background: transparent;
-    margin: 0;
-    padding: 0;
-  }
-}
-
-// Specific fix for Python code blocks which seem to have the most issues
-div.language-python {
-  background: transparent;
-  border: none;
-  
+// Language-specific containers
+div[class^="language-"] {
   .highlight {
-    // Only one border should be visible - the outer container one
-    border: none;
-    background: #f8f8f8;
-  }
-}
-
-// Generic code blocks without language tag
-div.highlighter-rouge {
-  pre.highlight {
-    background: transparent;
-    margin: 0;
-    padding: 0;
-  }
-  
-  .highlight {
-    // Ensure consistent styling
-    border: 1px solid #e8e8e8;
-    background: #f8f8f8;
+    background: #f8f8f8; // Ensure background is maintained
   }
 }
 
