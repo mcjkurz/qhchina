@@ -51,8 +51,8 @@ results_df = results_df.sort_values("p_value")
 The function returns a list of dictionaries (or a DataFrame), with each entry containing:
 
 - `word`: The word being compared
-- `freqA`: Absolute frequency in corpus A
-- `freqB`: Absolute frequency in corpus B
+- `abs_freqA`: Absolute frequency in corpus A
+- `abs_freqB`: Absolute frequency in corpus B
 - `rel_freqA`: Relative frequency in corpus A
 - `rel_freqB`: Relative frequency in corpus B
 - `rel_ratio`: Ratio of relative frequencies (A:B)

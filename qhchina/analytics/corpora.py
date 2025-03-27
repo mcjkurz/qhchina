@@ -23,18 +23,18 @@ def compare_corpora(corpusA : List[str],
                   the p-value, and the ratio of relative frequencies.
     """
     # Count word frequencies in each corpus
-    freqA = Counter(corpusA)
-    freqB = Counter(corpusB)
-    totalA = sum(freqA.values())
-    totalB = sum(freqB.values())
+    abs_freqA = Counter(corpusA)
+    abs_freqB = Counter(corpusB)
+    totalA = sum(abs_freqA.values())
+    totalB = sum(abs_freqB.values())
     
     # Create a union of all words
-    all_words = set(freqA.keys()).union(freqB.keys())
+    all_words = set(abs_freqA.keys()).union(abs_freqB.keys())
     results = []
     
     for word in all_words:
-        a = freqA.get(word, 0)  # Count in Corpus A
-        b = freqB.get(word, 0)  # Count in Corpus B
+        a = abs_freqA.get(word, 0)  # Count in Corpus A
+        b = abs_freqB.get(word, 0)  # Count in Corpus B
         c = totalA - a          # Other words in Corpus A
         d = totalB - b          # Other words in Corpus B
         
@@ -53,16 +53,16 @@ def compare_corpora(corpusA : List[str],
             raise ValueError("Invalid method specified. Use 'fisher' or 'chi2'")
         
         # Calculate the relative frequency ratio (avoiding division by zero)
-        rel_freq_A = a / totalA if totalA > 0 else 0
-        rel_freq_B = b / totalB if totalB > 0 else 0
-        ratio = (rel_freq_A / rel_freq_B) if rel_freq_B > 0 else np.inf
+        rel_freqA = a / totalA if totalA > 0 else 0
+        rel_freqB = b / totalB if totalB > 0 else 0
+        ratio = (rel_freqA / rel_freqB) if rel_freqB > 0 else np.inf
         
         results.append({
             "word": word,
-            "freqA": a,
-            "freqB": b,
-            "rel_freqA": rel_freq_A,
-            "rel_freqB": rel_freq_B,
+            "abs_freqA": a,
+            "abs_freqB": b,
+            "rel_freqA": rel_freqA,
+            "rel_freqB": rel_freqB,
             "rel_ratio": ratio,
             "p_value": p_value,
         })

@@ -49,7 +49,7 @@ collocates_df = collocates_df.sort_values("p_value")
 | `target_words` | List of target words (or a single word) to find collocates for |
 | `method` | Method to use: 'window' (default) or 'sentence' |
 | `horizon` | Context window size (only used with `method='window'`) |
-| `stopwords` | Optional list of stopwords to exclude from analysis |
+| `stopwords` | Optional list of stopwords to exclude from the final results (only filtered out at the end) |
 | `as_dataframe` | Whether to return results as a pandas DataFrame |
 
 ### Results Interpretation
@@ -129,13 +129,13 @@ china_collocates = china_collocates[china_collocates["target"] == "中国"]
 
 ### Removing Stopwords
 
-You can exclude common stopwords from your analysis:
+You can exclude common stopwords from the final result:
 
 ```python
 # Define Chinese stopwords
 stopwords = ["的", "了", "在", "是", "和", "有", "被", "与", "等", "及"]
 
-# Find collocates excluding stopwords
+# Find collocates excluding stopwords from the final list
 filtered_collocates = find_collocates(
     sentences=sentences,
     target_words=["经济"],
@@ -291,7 +291,6 @@ collocate_tracking = pd.DataFrame(presence_matrix, index=periods).T
 - For large corpora, consider processing sentences in batches
 - When analyzing multiple target words, the computation time increases linearly with the number of targets
 - The sentence-based method is generally faster than the window-based method
-- Excluding stopwords can significantly reduce processing time and improve the relevance of results
 
 ## References
 
