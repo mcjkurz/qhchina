@@ -12,6 +12,10 @@ plugins:
 header_pages:
   - bert_classifier_docs.md
 
+# Custom styles
+style: 
+  layout: style.css
+
 # Google Analytics (replace with your ID if needed)
 # google_analytics: UA-XXXXXXXXX-X
 

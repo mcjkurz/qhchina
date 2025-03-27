@@ -1,0 +1,23 @@
+/* Custom styles for qhChina documentation */
+
+.navigation {
+  background-color: #f8f9fa;
+  padding: 15px;
+  margin-bottom: 20px;
+  border-radius: 5px;
+  text-align: center;
+  border: 1px solid #e9ecef;
+}
+
+.navigation a {
+  color: #0366d6;
+  text-decoration: none;
+  padding: 5px 10px;
+  font-weight: 500;
+}
+
+.navigation a:hover {
+  text-decoration: underline;
+  background-color: #e9ecef;
+  border-radius: 3px;
+} 

@@ -3,6 +3,15 @@ layout: default
 title: Collocation Analysis - qhChina Documentation
 ---
 
+<div class="navigation">
+  <a href="index.html">Home</a> | 
+  <a href="bert_classifier_docs.html">BERT Classification</a> | 
+  <a href="word_embeddings_docs.html">Word Embeddings</a> | 
+  <a href="corpora_docs.html">Corpus Analysis</a> | 
+  <a href="collocations_docs.html">Collocation Analysis</a> | 
+  <a href="topic_modeling_docs.html">Topic Modeling</a>
+</div>
+
 # Collocation Analysis in qhChina
 
 This page documents the collocation analysis functionality in the qhChina package, which allows you to identify and analyze words that frequently occur together in text.

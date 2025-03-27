@@ -3,6 +3,15 @@ layout: default
 title: qhChina - Quantitative Humanities China Lab
 ---
 
+<div class="navigation">
+  <a href="index.html">Home</a> | 
+  <a href="bert_classifier_docs.html">BERT Classification</a> | 
+  <a href="word_embeddings_docs.html">Word Embeddings</a> | 
+  <a href="corpora_docs.html">Corpus Analysis</a> | 
+  <a href="collocations_docs.html">Collocation Analysis</a> | 
+  <a href="topic_modeling_docs.html">Topic Modeling</a>
+</div>
+
 # Overview
 
 A comprehensive toolkit for Chinese NLP research and educational purposes, developed by the Quantitative Humanities China Lab. The package is particularly suited for research in humanities and social sciences, offering tools that balance technical capabilities with ease of use.
