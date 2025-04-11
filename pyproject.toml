@@ -2,23 +2,23 @@
 
 [build-system]
 requires = [
-    "setuptools>=61.0",
+    "setuptools",
     "wheel",
     "Cython>=0.29.24",
-    "numpy==2.0.2",
-    "scipy>=1.5.0"
+    "numpy",
+    "scipy"
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.42"
+version = "0.0.43"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
 description = "A Python package for NLP tasks related to Chinese text."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["digital humanities", "nlp", "Chinese", "text analysis", "corpus linguistics", "topic modeling"]
 license = {file = "LICENSE"}
 classifiers = [
@@ -27,13 +27,11 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy>=2.0.2",
-    "scipy>=1.5.0",
+    "numpy",
+    "scipy",
     "matplotlib",
-    "pandas",
     "scikit-learn",
     "tqdm",
-    "setuptools"
 ]
 
 [tool.setuptools.packages.find]
