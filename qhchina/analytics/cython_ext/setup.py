@@ -4,6 +4,7 @@ Setup script for compiling Cython extensions for LDA.
 from setuptools import setup, Extension
 import sys
 import platform
+import os
 
 try:
     from Cython.Build import cythonize
@@ -12,6 +13,16 @@ except ImportError as e:
     print(f"Error: Required package not found: {e}")
     print("Please install the required packages: pip install cython numpy")
     sys.exit(1)
+
+# Parse extensions to compile
+extensions_to_compile = None
+for arg in sys.argv:
+    if arg.startswith("--extensions="):
+        # Parse the extensions argument and remove it from sys.argv
+        _, extensions_str = arg.split("=", 1)
+        extensions_to_compile = [ext.strip() for ext in extensions_str.split(",") if ext.strip()]
+        sys.argv.remove(arg)
+        break
 
 # Determine platform-specific compiler arguments
 extra_compile_args = []
@@ -32,26 +43,52 @@ else:
         extra_compile_args.append("-march=native")
         sys.argv.remove("--use-native")
 
-extensions = [
-    Extension(
+# Get the directory of this script to determine relative paths
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+extensions = []
+
+# Define all available extensions
+available_extensions = {
+    "lda_sampler": Extension(
         "lda_sampler",
-        ["lda_sampler.pyx"],
+        sources=[os.path.join(SCRIPT_DIR, "lda_sampler.pyx")],
         include_dirs=[np.get_include()],
         language="c",
-        extra_compile_args=extra_compile_args
+        extra_compile_args=extra_compile_args,
+    ),
+    "word2vec": Extension(
+        "word2vec",
+        sources=[os.path.join(SCRIPT_DIR, "word2vec.pyx")],
+        include_dirs=[np.get_include()],
+        language="c",
+        extra_compile_args=extra_compile_args,
     )
-]
+}
+
+# Add extensions based on filter
+if extensions_to_compile:
+    # Add only the specified extensions that exist
+    for ext_name in extensions_to_compile:
+        if ext_name in available_extensions:
+            extensions.append(available_extensions[ext_name])
+        else:
+            print(f"Warning: Extension '{ext_name}' is not defined in setup.py")
+else:
+    # Add all extensions if no filter is provided
+    extensions = list(available_extensions.values())
 
 setup(
-    name="lda_cython_extensions",
+    name="cython_extensions",
     ext_modules=cythonize(
         extensions,
         compiler_directives={
-            'language_level': 3,
-            'boundscheck': False,
-            'wraparound': False,
-            'initializedcheck': False,
-        }
+            "language_level": 3,
+            "boundscheck": False,
+            "wraparound": False,
+            "initializedcheck": False,
+            "cdivision": True,
+        },
     ),
     include_dirs=[np.get_include()]
 ) 

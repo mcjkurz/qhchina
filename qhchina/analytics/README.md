@@ -13,7 +13,7 @@ This module provides utilities for text analytics and topic modeling.
 ## Installation
 
 ```bash
-pip install qhchina
+ install qhchina
 ```
 
 For maximum performance with topic modeling, also install Cython:

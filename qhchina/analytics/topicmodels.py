@@ -7,33 +7,6 @@ import os
 from collections import defaultdict, Counter
 import matplotlib.pyplot as plt
 from tqdm.auto import trange
-# Try to import Cython module, with auto-compilation if needed
-try:
-    from .cython_ext import lda_sampler
-    CYTHON_AVAILABLE = True
-except ImportError:
-    # First attempt to compile the extensions
-    try:
-        from .compile_extensions import compile_cython_extensions
-        if compile_cython_extensions(verbose=False):
-            # If compilation succeeded, try importing again
-            try:
-                from .cython_ext import lda_sampler
-                CYTHON_AVAILABLE = True
-            except ImportError:
-                CYTHON_AVAILABLE = False
-        else:
-            CYTHON_AVAILABLE = False
-    except ImportError:
-        CYTHON_AVAILABLE = False
-
-# Issue a warning only once at import time if Cython is not available
-if not CYTHON_AVAILABLE:
-    warnings.warn(
-        "Using pure Python LDA implementation (Cython extensions not available). "
-        "This will be significantly slower than the optimized version. ",
-        RuntimeWarning
-    )
 
 class LDAGibbsSampler:
     """
@@ -53,6 +26,7 @@ class LDAGibbsSampler:
         max_vocab_size (int): Maximum vocabulary size to keep
         min_length (int): Minimum length of word to be included in vocabulary
         stopwords (set): Set of words to exclude from vocabulary
+        use_cython (bool): Whether to use Cython acceleration if available
     """
     
     def __init__(
@@ -66,7 +40,8 @@ class LDAGibbsSampler:
         min_count: int = 1,
         max_vocab_size: Optional[int] = None,
         min_length: int = 1,
-        stopwords: Optional[set] = None
+        stopwords: Optional[set] = None,
+        use_cython: bool = True  # Added use_cython parameter with default True
     ):
         """
         Initialize the LDA model with Gibbs sampling.
@@ -83,6 +58,7 @@ class LDAGibbsSampler:
             max_vocab_size: Maximum vocabulary size to keep
             min_length: Minimum length of word to be included in vocabulary
             stopwords: Set of words to exclude from vocabulary
+            use_cython: Whether to use Cython acceleration if available (default: True)
         """
         self.n_topics = n_topics
         # Use Griffiths and Steyvers (2004) heuristic if alpha is None
@@ -98,6 +74,14 @@ class LDAGibbsSampler:
         self.max_vocab_size = max_vocab_size
         self.min_length = min_length
         self.stopwords = set() if stopwords is None else set(stopwords)
+        
+        # Initialize Cython-related attributes
+        self.use_cython = False  # Default to False until successful import
+        self.lda_sampler = None  # Will hold the Cython module if imported
+        
+        # Try to import Cython extension if requested
+        if use_cython:
+            self._attempt_cython_import()
         
         # Set random seed if provided
         if random_state is not None:
@@ -127,6 +111,49 @@ class LDAGibbsSampler:
         # Results
         self.theta = None  # Document-topic distributions
         self.phi = None    # Topic-word distributions
+    
+    def _attempt_cython_import(self) -> bool:
+        """
+        Attempt to import the Cython-optimized module.
+        
+        Returns:
+            bool: True if import was successful, False otherwise
+        """
+        try:
+            # Attempt to import the Cython module
+            from .cython_ext import lda_sampler
+            self.lda_sampler = lda_sampler
+            self.use_cython = True
+            print("Successfully imported Cython acceleration for LDA.")
+            return True
+        except ImportError:
+            # First attempt to compile the extensions if compilation module exists
+            try:
+                from .compile_extensions import compile_extensions
+                # print a warning that it might take a while
+                print("Trying to compile Cython extensions...")
+                # Call compile_extensions() to build the extension
+                compile_extensions(["lda_sampler"]) 
+                
+                # If compilation succeeded, try importing again
+                try:
+                    from .cython_ext import lda_sampler
+                    self.lda_sampler = lda_sampler
+                    self.use_cython = True
+                    print("Successfully compiled and imported Cython acceleration for LDA.")
+                    return True
+                except ImportError:
+                    pass
+            except ImportError:
+                pass
+                
+            self.use_cython = False
+            warnings.warn(
+                "Cython acceleration for LDA was requested but the extension "
+                "is not available in the current environment. Falling back to Python implementation, "
+                "which will be significantly slower."
+            )
+            return False
         
     def preprocess(self, documents: List[List[str]]) -> Tuple[List[List[int]], Dict[str, int], Dict[int, str]]:
         """
@@ -222,22 +249,21 @@ class LDAGibbsSampler:
         """
         Run Gibbs sampling for the specified number of iterations. 
         
-        Uses Cython if available.
+        Uses Cython if available and enabled.
         """
         n_docs = len(self.docs_tokens)
         
-        if CYTHON_AVAILABLE:
+        if self.use_cython:
             print(f"Running Gibbs sampling for {self.iterations} iterations with Cython.")
         else:
-            print(f"Running Gibbs sampling for {self.iterations} iterations (no Cython available).")
+            print(f"Running Gibbs sampling for {self.iterations} iterations (Python implementation).")
         
-        progress_bar = trange(self.iterations)
         for it in range(self.iterations):
             start_time = time.time()
             
-            if CYTHON_AVAILABLE:
+            if self.use_cython:
                 # Use the optimized Cython implementation
-                self.z = lda_sampler.run_iteration(
+                self.z = self.lda_sampler.run_iteration(
                     self.n_wt, self.n_dt, self.n_t, self.z, 
                     self.docs_tokens, self.alpha, self.beta,
                     self.n_topics, self.vocabulary_size
@@ -251,7 +277,6 @@ class LDAGibbsSampler:
                         # Sample a new topic
                         self.z[d, i] = self._sample_topic(d, i, w)
             
-            progress_bar.update(1)
             # Calculate perplexity every eval iterations
             if it > 0 and self.eval_interval and it % self.eval_interval == 0:
                 elapsed = time.time() - start_time
@@ -263,8 +288,6 @@ class LDAGibbsSampler:
     def _sample_topic(self, d: int, i: int, w: int) -> int:
         """
         Sample a new topic for word w in document d at position i.
-        
-        Uses Cython if available.
         
         Args:
             d: Document ID
@@ -362,6 +385,13 @@ class LDAGibbsSampler:
         Returns:
             Perplexity value (lower is better)
         """
+        # If Cython is available and enabled, use the optimized implementation
+        if self.use_cython:
+            return self.lda_sampler.calculate_perplexity(
+                self.phi, self.theta, self.docs_tokens
+            )
+        
+        # Otherwise, fall back to the Python implementation
         log_likelihood = 0
         token_count = 0
         
@@ -457,6 +487,13 @@ class LDAGibbsSampler:
         # Initialize document-topic counts
         n_dt_doc = np.zeros(self.n_topics, dtype=np.int32)
         np.add.at(n_dt_doc, z_doc, 1)  # Vectorized count update
+        
+        # Note: Currently there's no Cython implementation for inference,
+        # so we always use the Python implementation regardless of use_cython flag
+        if self.use_cython and hasattr(self.lda_sampler, 'run_inference'):
+            # If a future Cython implementation becomes available
+            # Replace this comment with call to self.lda_sampler.run_inference
+            pass
         
         # Run Gibbs sampling
         for _ in range(inference_iterations):
@@ -566,6 +603,7 @@ class LDAGibbsSampler:
             'z': self.z.tolist() if self.z is not None else None,
             'z_shape': self.z_shape,
             'doc_lengths': self.doc_lengths.tolist() if self.doc_lengths is not None else None,
+            'use_cython': self.use_cython  # Save whether Cython was used
         }
         
         np.save(filepath, model_data)
@@ -583,12 +621,16 @@ class LDAGibbsSampler:
         """
         model_data = np.load(filepath, allow_pickle=True).item()
         
+        # Get use_cython value from the saved model, default to True if not present
+        use_cython = model_data.get('use_cython', True)
+        
         model = cls(
             n_topics=model_data['n_topics'],
             alpha=model_data['alpha'],
             beta=model_data['beta'],
             min_length=model_data.get('min_length', 1),  # Default to 1 for backward compatibility
-            stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None
+            stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None,
+            use_cython=use_cython  # Pass the use_cython parameter from saved model
         )
         
         model.vocabulary = model_data['vocabulary']
@@ -611,6 +653,18 @@ class LDAGibbsSampler:
         model.z_shape = model_data.get('z_shape')
         if model_data.get('doc_lengths') is not None:
             model.doc_lengths = np.array(model_data['doc_lengths'])
+        
+        # If Cython is enabled in the loaded model but not available, try to re-import
+        if model.use_cython and model.lda_sampler is None:
+            try:
+                from .cython_ext import lda_sampler
+                model.lda_sampler = lda_sampler
+            except ImportError:
+                model.use_cython = False
+                warnings.warn(
+                    "The loaded model was trained with Cython acceleration, but the Cython extension " 
+                    "is not available in the current environment. Falling back to Python implementation."
+                )
         
         return model
     
@@ -661,6 +715,3 @@ class LDAGibbsSampler:
         
         # Return the words and probabilities
         return [(self.id_to_word[i], float(topic_word_probs[i])) for i in top_word_indices]
-
-# Add export of the class
-__all__ = ['LDAGibbsSampler']

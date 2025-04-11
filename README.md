@@ -77,3 +77,33 @@ https://mcjkurz.github.io/qhchina/
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## For Developers
+
+### Building Wheels with Cython Extensions
+
+The package includes Cython extensions for performance-critical components. When installed from PyPI, precompiled wheels should be available for common platforms.
+
+To build wheels locally:
+
+```bash
+# Install build dependencies
+pip install build wheel setuptools cython numpy
+
+# Build the wheel
+python -m build --wheel
+```
+
+The precompiled wheels are built using GitHub Actions and support:
+- Linux (for Google Colab and other Linux environments)
+- Windows 10/11
+
+If you need to clean up before building:
+
+```bash
+# Clean while preserving .c files (for wheel building)
+python clean_cython.py
+
+# Clean everything including .c files
+python clean_cython.py --all
+```

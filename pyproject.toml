@@ -1,12 +1,12 @@
 # pyproject.toml
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]  # Use setuptools as the build backend
+requires = ["setuptools>=61.0", "wheel", "Cython>=0.29.24", "numpy>=1.19.0", "scipy>=1.5.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.38"  # Updated version
+version = "0.0.42"  # Updated version
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -25,14 +25,23 @@ dependencies = [
     "numpy",
     "matplotlib",
     "pandas",
-    "scikit-learn"
+    "scikit-learn",
+    "tqdm",
+    "setuptools"
 ]
 
 [tool.setuptools.packages.find]
 exclude = ["tests"]
 
+[tool.setuptools]
+include-package-data = true
+zip-safe = false
+
 [tool.setuptools.package-data]
 "qhchina" = ["analytics/cython_ext/*.pyx", "data/**/*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*.c", "*.so", "*.pyd"]
 
 [project.urls]
 "Homepage" = "https://github.com/mcjkurz/qhchina"  # Replace with your repo URL

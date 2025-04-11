@@ -10,7 +10,8 @@ def predict_next_token(
     tokenizer, 
     k: int = 10, 
     device: str = 'cpu',
-    result: Optional[str] = "df"
+    result: Optional[str] = "df",
+    replace_special_chars: bool = True
 ) -> Union[List[Tuple[str, float]], Optional[pd.DataFrame], None]:
     """
     Predicts the next token probabilities for a given input text.
@@ -27,6 +28,7 @@ def predict_next_token(
                 - "text": print tokens nicely formatted, return None
                 - "horizontal": show horizontal bar chart, return None
                 - "vertical": show vertical bar chart, return None
+        replace_special_chars: Whether to replace special characters (such as Ġ or _) with spaces (default is True)
         
     Returns:
         If result="list" or None: List of tuples containing (token_str, probability)
@@ -39,7 +41,7 @@ def predict_next_token(
     
     # Ensure model is in evaluation mode
     model.eval()
-    
+
     # Encode the input text and move to device
     input_ids = tokenizer.encode(input_text, return_tensors='pt').to(device)
     
@@ -54,14 +56,14 @@ def predict_next_token(
     top_k = torch.topk(probs, k=k)
     
     # Convert token IDs to tokens and clean up the output
+    special_chars = ['▁', 'Ġ']
     top_tokens = []
     for token_id, prob in zip(top_k.indices[0], top_k.values[0]):
         token_str = tokenizer.decode(token_id, clean_up_tokenization_spaces=True)
-        # Handle special tokens and partial words
-        if '▁' in token_str:  # For models like Llama
-            token_str = token_str.replace('▁', ' ').strip()
-        elif 'Ġ' in token_str:  # For GPT-2
-            token_str = token_str.replace('Ġ', ' ').strip()
+        if replace_special_chars:
+            for char in special_chars:
+                if char in token_str:
+                    token_str = token_str.replace(char, ' ').strip()
         top_tokens.append((token_str, prob.item()))
     
     # Handle the result parameter

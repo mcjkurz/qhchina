@@ -21,14 +21,17 @@ Features:
 - Properly managed learning rate decay
 - Sigmoid precomputation for faster training
 - Vocabulary size restriction with max_vocab_size parameter
+- Optional Cython acceleration for faster training
 """
 
 import numpy as np
 from collections import defaultdict, Counter
-from typing import List, Dict, Tuple, Set, Optional, Union, Iterator, Generator, Any
+from typing import List, Dict, Tuple, Set, Optional, Union, Iterator, Generator, Any, Callable
 import random
 import math
 from tqdm.auto import tqdm
+import warnings
+import time
 
 
 class Word2Vec:
@@ -52,6 +55,12 @@ class Word2Vec:
     - Properly managed learning rate decay
     - Sigmoid precomputation for faster training
     - Vocabulary size restriction with max_vocab_size parameter
+    - Optional double precision for numerical stability
+    - Optional Cython acceleration for significantly faster training
+    
+    Performance options:
+    - Use double precision (use_double_precision=True) for better numerical stability (slightly slower)
+    - Use Cython acceleration (use_cython=True) for much faster training (requires Cython extension)
     """
     
     def __init__(
@@ -62,15 +71,18 @@ class Word2Vec:
         negative: int = 5,
         ns_exponent: float = 0.75,
         cbow_mean: bool = True,
-        sg: int = 0,  # 0 for CBOW, 1 for Skip-gram
+        sg: int = 0,
         seed: int = 1,
         alpha: float = 0.025,
-        min_alpha: float = 0.0001,
-        sample: float = 1e-3,  # Threshold for subsampling frequent words
-        shrink_windows: bool = True,  # Whether to use dynamic window size
-        exp_table_size: int = 1000,  # Size of sigmoid lookup table
-        max_exp: float = 6.0,  # Range of sigmoid precomputation [-max_exp, max_exp]
-        max_vocab_size: Optional[int] = None,  # Maximum vocabulary size, None for no limit
+        min_alpha: Optional[float] = None,
+        sample: float = 1e-3,
+        shrink_windows: bool = True,
+        exp_table_size: int = 1000,
+        max_exp: float = 6.0,
+        max_vocab_size: Optional[int] = None,
+        use_double_precision: bool = False,
+        use_cython: bool = False,
+        gradient_clip: float = 1.0,
     ):
         """
         Initialize the Word2Vec model.
@@ -86,7 +98,7 @@ class Word2Vec:
         sg: Training algorithm: 1 for skip-gram; 0 for CBOW
         seed: Seed for random number generator
         alpha: Initial learning rate
-        min_alpha: Minimum learning rate
+        min_alpha: Minimum learning rate. If None, learning rate remains constant at alpha.
         sample: Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
         shrink_windows: If True, the effective window size is uniformly sampled from [1, window] 
                         for each target word during training. If False, always use the full window.
@@ -94,6 +106,9 @@ class Word2Vec:
         max_exp: Range of values for sigmoid precomputation [-max_exp, max_exp]
         max_vocab_size: Maximum vocabulary size to keep, keeping the most frequent words.
                         None means no limit (keep all words above min_count).
+        use_double_precision: Whether to use float64 precision for better stability. Default is False.
+        use_cython: Whether to use Cython acceleration if available. Default is True.
+        gradient_clip: Maximum absolute value for gradients when using Cython. Default is 1.0.
         """
         self.vector_size = vector_size
         self.window = window
@@ -108,29 +123,35 @@ class Word2Vec:
         self.sample = sample  # Threshold for subsampling
         self.shrink_windows = shrink_windows  # Dynamic window size
         self.max_vocab_size = max_vocab_size  # Maximum vocabulary size
+        self.use_double_precision = use_double_precision  # Whether to use double precision
+        self.gradient_clip = gradient_clip  # For gradient clipping in Cython
+        
+        # Initialize use_cython to False by default
+        self.word2vec_c = None
+        self.use_cython = use_cython  # Save use_cython parameter as an attribute
+
+        # Try to import Cython extension if requested
+        if use_cython:
+            self._attempt_cython_import()
+        
+        # Set the dtype based on precision choice
+        self.dtype = np.float64 if self.use_double_precision else np.float32
         
         # Parameters for sigmoid precomputation
         self.exp_table_size = exp_table_size
         self.max_exp = max_exp
         
         # Precompute the sigmoid table and log sigmoid table
-        self.sigmoid_table = np.zeros(exp_table_size, dtype=np.float32)
-        self.log_sigmoid_table = np.zeros(exp_table_size, dtype=np.float32)
         self._precompute_sigmoid()
-        
-        # Precompute constants for faster sigmoid lookup
-        # Scale and offset for direct mapping from x to table indices
-        self.sigmoid_scale = self.exp_table_size / (2 * self.max_exp)  # Scale factor
-        self.sigmoid_offset = self.exp_table_size // 2                # Half the table size (integer division)
         
         # Set random seed for reproducibility
         np.random.seed(seed)
         random.seed(seed)
         
-        # These will be initialized in build_vocab
-        self.vocab = {}  # word -> (index, count)
-        self.index2word = []
-        self.word_counts = Counter()
+        # Initialize vocabulary structures
+        self.vocab = {}  # word -> index (direct mapping)
+        self.index2word = []  # index -> word
+        self.word_counts = Counter()  # word -> count
         self.corpus_word_count = 0
         self.discard_probs = {}  # For subsampling frequent words
         
@@ -143,6 +164,46 @@ class Word2Vec:
         self.epoch_losses = []
         self.total_examples = 0
 
+    def _attempt_cython_import(self) -> bool:
+        """
+        Attempt to import the Cython-optimized module.
+        
+        Returns:
+        --------
+        bool: True if import was successful, False otherwise
+        """
+        try:
+            # Attempt to import the Cython module
+            from .cython_ext import word2vec
+            self.word2vec_c = word2vec
+            self.use_cython = True
+            return True
+        except ImportError:
+            # First attempt to compile the extensions if compilation module exists
+            try:
+                from .compile_extensions import compile_extensions
+                # Call compile_extensions() to build the extension
+                compile_extensions(["word2vec"]) 
+                
+                # If compilation succeeded, try importing again
+                try:
+                    from .cython_ext import word2vec
+                    self.word2vec_c = word2vec
+                    self.use_cython = True
+                    return True
+                except ImportError:
+                    pass
+            except ImportError:
+                pass
+                
+            self.use_cython = False
+            warnings.warn(
+                "Cython acceleration for Word2Vec was requested but the extension "
+                "is not available in the current environment. Falling back to Python implementation, "
+                "which will be significantly slower."
+            )
+            return False
+        
     def _precompute_sigmoid(self) -> None:
         """
         Precompute sigmoid values for faster training.
@@ -150,6 +211,9 @@ class Word2Vec:
         This method creates a lookup table for sigmoid(x) and log(sigmoid(x))
         for x values from -max_exp to +max_exp, discretized into exp_table_size bins.
         """
+        self.sigmoid_table = np.zeros(self.exp_table_size, dtype=self.dtype)
+        self.log_sigmoid_table = np.zeros(self.exp_table_size, dtype=self.dtype)
+
         for i in range(self.exp_table_size):
             # Calculate x value in range [-max_exp, max_exp]
             x = (i / self.exp_table_size * 2 - 1) * self.max_exp
@@ -157,6 +221,9 @@ class Word2Vec:
             self.sigmoid_table[i] = 1.0 / (1.0 + np.exp(-x))
             # Compute log(sigmoid(x))
             self.log_sigmoid_table[i] = np.log(self.sigmoid_table[i])
+        
+        self.sigmoid_scale = self.exp_table_size / (2 * self.max_exp)  # Scale factor
+        self.sigmoid_offset = self.exp_table_size // 2     
     
     def _sigmoid(self, x: np.ndarray) -> np.ndarray:
         """
@@ -214,7 +281,6 @@ class Word2Vec:
         --------
         None
         """
-        print("Building vocabulary...")
         
         # Count word occurrences
         for sentence in sentences:
@@ -229,17 +295,16 @@ class Word2Vec:
             top_words = [word for word, _ in self.word_counts.most_common(self.max_vocab_size)]
             # Intersect with words that meet min_count criteria
             retained_words = {word for word in top_words if word in retained_words}
-            print(f"Vocabulary limited to {len(retained_words)} most frequent words due to max_vocab_size={self.max_vocab_size}")
-        
+            
         # Create mappings
         self.index2word = []
-        for word, count in self.word_counts.most_common():
+        for word, _ in self.word_counts.most_common():
             if word in retained_words:
                 word_id = len(self.index2word)
-                self.vocab[word] = (word_id, count)
+                self.vocab[word] = word_id # word2index
                 self.index2word.append(word)
         
-        self.corpus_word_count = sum(self.vocab[word][1] for word in self.vocab)
+        self.corpus_word_count = sum(self.word_counts[word] for word in self.vocab)
         self.vocab_size = len(self.vocab)
         print(f"Vocabulary size: {self.vocab_size} words")
 
@@ -253,14 +318,13 @@ class Word2Vec:
         
         A word will be discarded with probability P(w_i).
         """
-        print("Calculating discard probabilities for subsampling...")
         
         self.discard_probs = {}
         total_words = self.corpus_word_count
         
-        for word, (word_id, count) in self.vocab.items():
+        for word in self.vocab:
             # Calculate normalized word frequency
-            word_freq = count / total_words
+            word_freq = self.word_counts[word] / total_words
             # Calculate probability of discarding the word
             # Using the formula from the original word2vec paper
             discard_prob = 1.0 - np.sqrt(self.sample / word_freq)
@@ -268,9 +332,9 @@ class Word2Vec:
             discard_prob = max(0, min(1, discard_prob))
             self.discard_probs[word] = discard_prob
 
-    def _initialize_weights(self) -> None:
+    def _initialize_vectors(self) -> None:
         """
-        Initialize word vectors and prepare noise distribution for negative sampling.
+        Initialize word vectors
         """
         vocab_size = len(self.vocab)
         
@@ -282,7 +346,7 @@ class Word2Vec:
             low=-bound, 
             high=bound, 
             size=(vocab_size, self.vector_size)
-        ).astype(np.float32)
+        ).astype(self.dtype)
         
         # Initialize W_prime with small random values like W instead of zeros
         # This helps improve convergence during training
@@ -290,10 +354,7 @@ class Word2Vec:
             low=-bound, 
             high=bound, 
             size=(vocab_size, self.vector_size)
-        ).astype(np.float32)
-        
-        # Prepare noise distribution for negative sampling
-        self._prepare_noise_distribution()
+        ).astype(self.dtype)
 
     def _prepare_noise_distribution(self) -> None:
         """
@@ -302,16 +363,60 @@ class Word2Vec:
         Applies subsampling with the ns_exponent parameter to prevent 
         extremely common words from dominating.
         """
-        print("Preparing noise distribution for negative sampling...")
         
         # Get counts of each word in the vocabulary
-        word_counts = np.array([self.vocab[word][1] for word in self.index2word])
+        word_counts = np.array([self.word_counts[word] for word in self.vocab])
         
         # Apply the exponent to smooth the distribution
         noise_dist = word_counts ** self.ns_exponent
         
         # Normalize to get a probability distribution
         self.noise_distribution = noise_dist / np.sum(noise_dist)
+        
+    def _initialize_cython_globals(self) -> None:
+        
+        if not self.use_cython:
+            return
+
+        # Validate arrays exist and are contiguous
+        for name, arr in [
+            ('sigmoid_table', self.sigmoid_table),
+            ('log_sigmoid_table', self.log_sigmoid_table),
+            ('noise_distribution', self.noise_distribution)
+        ]:
+            if not isinstance(arr, np.ndarray):
+                raise ValueError(f"{name} must be a numpy array")
+            if not arr.flags['C_CONTIGUOUS']:
+                arr = np.ascontiguousarray(arr)  # Force C-contiguous
+        
+        # Initialize Cython globals
+        try:
+            self.word2vec_c.init_globals(
+                sigmoid_table=self.sigmoid_table,
+                log_sigmoid_table=self.log_sigmoid_table,
+                max_exp=self.max_exp,
+                noise_distribution=self.noise_distribution,
+                vector_size=self.vector_size,
+                gradient_clip=self.gradient_clip,
+                negative=self.negative,
+                learning_rate=self.alpha,
+                cbow_mean=int(self.cbow_mean),
+            )
+        except Exception as e:
+            self.use_cython = False
+            raise RuntimeError(f"Cython initialization failed: {e}") from e
+        
+    def _update_learning_rate(self, alpha: float) -> None:
+        """
+        Update the learning rate in the Cython extension when using Cython acceleration.
+        
+        Parameters:
+        -----------
+        alpha: New learning rate value
+        """
+        if self.use_cython:
+            self.word2vec_c.update_learning_rate(alpha)
+        self.alpha = alpha
 
     def generate_skipgram_examples(self, 
                                  sentences: List[List[str]]) -> Generator[Tuple[int, int], None, None]:
@@ -346,7 +451,7 @@ class Word2Vec:
                 kept_words = [word for word in sentence if word in self.vocab]
             
             # Convert words to indices
-            indices = [self.vocab[word][0] for word in kept_words]
+            indices = [self.vocab[word] for word in kept_words]
             
             sentence_len = len(indices)
             if sentence_len == 0:
@@ -412,7 +517,7 @@ class Word2Vec:
                 kept_words = [word for word in sentence if word in self.vocab]
             
             # Convert words to indices
-            indices = [self.vocab[word][0] for word in kept_words]
+            indices = [self.vocab[word] for word in kept_words]
             
             sentence_len = len(indices)
             if sentence_len == 0:
@@ -447,9 +552,9 @@ class Word2Vec:
                 # For CBOW: inputs are context words, output is center
                 yield (context_indices, center_idx)
 
-    def _train_skipgram_example(self, input_idx: int, output_idx: int, learning_rate: float) -> float:
+    def _train_skipgram_example_python(self, input_idx: int, output_idx: int, learning_rate: float) -> float:
         """
-        Train the model on a single Skip-gram example.
+        Train the model on a single Skip-gram example using pure Python implementation.
         
         Parameters:
         -----------
@@ -538,9 +643,9 @@ class Word2Vec:
         
         return total_loss
 
-    def _train_cbow_example(self, input_indices: List[int], output_idx: int, learning_rate: float) -> float:
+    def _train_cbow_example_python(self, input_indices: List[int], output_idx: int, learning_rate: float) -> float:
         """
-        Train the model on a single CBOW example.
+        Train the model on a single CBOW example using pure Python implementation.
         
         Parameters:
         -----------
@@ -647,9 +752,9 @@ class Word2Vec:
         
         return total_loss
 
-    def _train_batch(self, samples: List[Tuple], learning_rate: float) -> float:
+    def _train_batch_python(self, samples: List[Tuple], learning_rate: float) -> float:
         """
-        Train the model on a batch of samples in a fully vectorized manner.
+        Train the model on a batch of samples in a fully vectorized manner using pure Python.
         
         Parameters:
         -----------
@@ -904,219 +1009,472 @@ class Word2Vec:
         
         return total_loss
 
-    def train(self, sentences: List[str], 
-              epochs: int = 1, 
-              batch_size: int = 32,
-              calculate_loss: bool = False) -> List[float]:
+    def _train_skipgram_example(self, input_idx: int, output_idx: int, learning_rate: float) -> float:
         """
-        Train the Word2Vec model.
+        Train the model on a single Skip-gram example, using either Cython or Python implementation.
         
         Parameters:
         -----------
-        sentences: List of tokenized sentences to train on. Required for training.
-        epochs: Number of training epochs.
-        batch_size: Batch size for training. If 1, use example-by-example training.
-        calculate_loss: Whether to calculate and display loss during training.
+        input_idx: Index of the input word (center word)
+        output_idx: Index of the output word (context word)
+        learning_rate: Current learning rate
         
         Returns:
         --------
-        List of average losses per epoch
-        """ 
-        # Build vocabulary if it doesn't exist yet
-        if not self.vocab:
-            self.build_vocab(sentences)
-            self._initialize_weights()
-            if self.sample > 0:
-                self._calculate_discard_probs()
+        Loss for this training example
+        """
+        if self.use_cython:
+            # Call the Cython single example implementation directly
+            return self.word2vec_c.train_skipgram_single(
+                self.W,
+                self.W_prime,
+                input_idx,
+                output_idx
+            )
+        else:
+            # Use the Python implementation
+            return self._train_skipgram_example_python(input_idx, output_idx, learning_rate)
+    
+    def _train_cbow_example(self, input_indices: List[int], output_idx: int, learning_rate: float) -> float:
+        """
+        Train a single CBOW example with negative sampling.
         
-        # Calculate linear decay of learning rate
-        alpha_delta = (self.alpha - self.min_alpha) / max(1, epochs - 1)
+        Parameters:
+        -----------
+        input_indices: List of context word indices
+        output_idx: Index of center word
+        learning_rate: Current learning rate
         
-        # Track losses
-        epoch_losses = []
-
-        total_words = sum(len(sentence) for sentence in sentences)
-        print(f"Training on {len(sentences)} sentences with {total_words} words...")
-
-        # Training loop
-        for epoch in range(epochs):
-            random.shuffle(sentences)
-            current_alpha = self.alpha - alpha_delta * epoch
-            print(f"Epoch {epoch+1}/{epochs} - Learning rate: {current_alpha}")
-            total_loss = 0
-            example_count = 0
-            batch_count = 0
-
-            # For tracking moving average loss
-            recent_losses = []
+        Returns:
+        --------
+        Loss for this training example
+        """
+        if self.use_cython:     
+            # Convert input_indices to a numpy array for Cython
+            context_indices = np.array(input_indices, dtype=np.int32)
             
-            # Show progress bar only if calculating loss
+            # Call the Cython single example implementation
+            return self.word2vec_c.train_cbow_single(
+                self.W,
+                self.W_prime,
+                context_indices,
+                output_idx
+            )
+        else:
+            # Use the Python implementation
+            return self._train_cbow_example_python(input_indices, output_idx, learning_rate)
+    
+    def _train_batch(self, samples: List[Tuple], learning_rate: float) -> float:
+        """
+        Train the model on a batch of samples, using either Cython or Python implementation.
+        
+        Parameters:
+        -----------
+        samples: List of training samples:
+                - for Skip-gram: list of (input_idx, output_idx) tuples
+                - for CBOW: list of (input_indices, output_idx) tuples
+        learning_rate: Current learning rate
+        
+        Returns:
+        --------
+        Total loss for the batch
+        """
+        if self.use_cython:
+            # Process the batch differently based on the model type
+            if self.sg:  # Skip-gram model
+                # Extract input and output indices
+                input_indices = np.array([sample[0] for sample in samples], dtype=np.int32)
+                output_indices = np.array([sample[1] for sample in samples], dtype=np.int32)
+                
+                # Call the Cython implementation
+                return self.word2vec_c.train_skipgram_batch(
+                    self.W,
+                    self.W_prime,
+                    input_indices,
+                    output_indices
+                )
+            else:  # CBOW model
+                # Extract context indices and center indices
+                context_indices_list = [sample[0] for sample in samples]
+                center_indices = np.array([sample[1] for sample in samples], dtype=np.int32)
+                
+                # Call the Cython implementation
+                return self.word2vec_c.train_cbow_batch(
+                    self.W,
+                    self.W_prime,
+                    context_indices_list,
+                    center_indices
+                )
+        else:
+            # Use the Python implementation
+            return self._train_batch_python(samples, learning_rate)
+
+    def train(self, sentences: List[str], 
+              epochs: int = 1, 
+              alpha: Optional[float] = None,
+              min_alpha: Optional[float] = None,
+              batch_size: int = 0, 
+              callbacks: List[Callable] = None,
+              calculate_loss: bool = True) -> Optional[float]:
+        """
+        Train word2vec model on given sentences.
+        
+        Parameters:
+        -----------
+        sentences: List of tokenized sentences (lists of words)
+        epochs: Number of training iterations over the corpus
+        alpha: Initial learning rate
+        min_alpha: Minimum allowed learning rate
+        batch_size: Batch size for training; if 0, no batching is used
+        callbacks: List of callback functions to call after each epoch
+        calculate_loss: Whether to calculate and return the final loss
+        
+        Returns:
+        --------
+        Final loss value if calculate_loss is True, None otherwise
+        """
+        self.epochs = epochs
+        self.batch_size = batch_size
+        if alpha:
+            self.alpha = alpha
+        if min_alpha:
+            self.min_alpha = min_alpha
+        if not self.alpha:
+            print("Warning: No initial learning rate (alpha) provided. Using default value of 0.025 with no decay.")
+            self.alpha = 0.025
+            self.min_alpha = None
+
+        # Determine if we should decay the learning rate based on min_alpha
+        decay_alpha = self.min_alpha is not None
+
+        if not self.vocab: 
+            self.build_vocab(sentences)
+        if self.W is None or self.W_prime is None:
+            self._initialize_vectors()
+        if self.noise_distribution is None:
+            self._prepare_noise_distribution()
+        if self.sample > 0 and not self.discard_probs:
+            self._calculate_discard_probs()
+        
+        if self.use_cython:
+            self._initialize_cython_globals()
+        
+        # Setup for loss calculation if needed
+        total_loss = 0.0
+        total_examples = 0
+        total_example_count = 0
+        
+        # For tracking moving average loss
+        recent_losses = []
+        
+        # Count total examples for progress bar and learning rate decay
+        if decay_alpha or calculate_loss:
+            print(f"Counting total examples ({decay_alpha=}, {calculate_loss=})...")
+            total_example_count = 0
+        
+            # Calculate total example count
+            if self.sg:
+                for _ in self.generate_skipgram_examples(sentences):
+                    total_example_count += 1
+            else:
+                for _ in self.generate_cbow_examples(sentences):
+                    total_example_count += 1
+
+        # Create counter for total examples processed across all epochs
+        total_examples_processed = 0
+
+        # Initialize learning rate
+        current_alpha = start_alpha = self.alpha
+        self._update_learning_rate(current_alpha)
+
+        if self.use_cython:
+            print("Training started. Using Cython implementation")
+        else:
+            print("Training started. Using Python implementation")
+        # Training loop for each epoch
+        for epoch in range(epochs):
+            # shuffle sentences each epoch
+            random.shuffle(sentences)
+                    
+            examples_processed_in_epoch = 0
+            batch_count = 0
+            
+            # Reset epoch loss if we're calculating it
+            epoch_loss = 0.0
+            
+            # Create a progress bar if calculating loss
             if calculate_loss:
-                # Create a tqdm progress bar that doesn't show progress percentage
+                # Show a progress bar for this epoch
                 progress_bar = tqdm(
                     desc=f"Epoch {epoch+1}/{epochs}",
-                    bar_format='{desc}{postfix}',
-                    position=0,
-                    leave=True
+                    total=total_example_count if total_example_count else None,
+                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]',
+                    unit="ex",
+                    mininterval=0.5  # Update twice per second
                 )
             
-            # Single example training mode (batch_size = 1)
-            if batch_size <= 1:
-                # Skip-gram training
+            # If we're using batching and it's enabled (batch_size > 0)
+            if batch_size > 0:
+                batch_samples = []
+                
+                # For skip-gram, each sample is (input_word_idx, output_word_idx)
                 if self.sg:
-                    for input_idx, output_idx in self.generate_skipgram_examples(sentences):
-                        # Train on this skipgram example
-                        loss = self._train_skipgram_example(input_idx, output_idx, current_alpha)
-                        
-                        # Accumulate total loss and example count
-                        total_loss += loss
-                        example_count += 1
-                        
-                        # Add to recent losses for moving average
-                        recent_losses.append(loss)
-                        if len(recent_losses) > 1000:
-                            recent_losses.pop(0)
-                        
-                        # Update progress bar with current loss if using
-                        if calculate_loss and example_count % 100 == 0:  # Update every 100 examples to avoid too frequent updates
-                            recent_avg = sum(recent_losses) / len(recent_losses)
-                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, examples={example_count}")
-                else:
-                    # CBOW training
-                    for input_indices, output_idx in self.generate_cbow_examples(sentences):
-                        # Train on this CBOW example
-                        loss = self._train_cbow_example(input_indices, output_idx, current_alpha)
-                        
-                        # Accumulate total loss and example count
-                        total_loss += loss
-                        example_count += 1
-                        
-                        # Add to recent losses for moving average
-                        recent_losses.append(loss)
-                        if len(recent_losses) > 1000:
-                            recent_losses.pop(0)
-                        
-                        # Update progress bar with current loss if using
-                        if calculate_loss and example_count % 100 == 0:  # Update every 100 examples
-                            recent_avg = sum(recent_losses) / len(recent_losses)
-                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, examples={example_count}")
-            
-            # Batch training mode (batch_size > 1)
-            else:
-                # Skip-gram batch training
-                if self.sg:
-                    batch_samples = []
+                    # Generate Skip-gram examples and batch them
                     for input_idx, output_idx in self.generate_skipgram_examples(sentences):
                         # Add this example to the current batch
                         batch_samples.append((input_idx, output_idx))
+                        examples_processed_in_epoch += 1
                         
-                        # If we've collected enough examples, process the batch
+                        # Once we have enough examples for a batch, train on it
                         if len(batch_samples) >= batch_size:
-                            # Train on this batch
+                            # Train on this batch with the current learning rate
                             batch_loss = self._train_batch(batch_samples, current_alpha)
                             batch_count += 1
                             
-                            # Accumulate total loss and example count
-                            total_loss += batch_loss
-                            example_count += len(batch_samples)
+                            # Update total examples processed for learning rate decay
+                            total_examples_processed += batch_size
                             
-                            # Calculate batch average loss
-                            batch_avg_loss = batch_loss / len(batch_samples)
+                            # Decrease learning rate after processing batch if decay is enabled
+                            if decay_alpha:
+                                decay_factor = 1 - (total_examples_processed / (total_example_count * epochs))
+                                current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                                self._update_learning_rate(current_alpha)
                             
-                            # Add to recent losses for moving average
-                            recent_losses.append(batch_avg_loss)
-                            if len(recent_losses) > 1000:
-                                recent_losses.pop(0)
-                            
-                            # Update progress bar with current loss if using
+                            # If we're calculating loss, add this batch's loss to the epoch total
                             if calculate_loss:
+                                epoch_loss += batch_loss
+                                
+                                # Add to recent losses for moving average
+                                batch_avg_loss = batch_loss / len(batch_samples)
+                                recent_losses.append(batch_avg_loss)
+                                if len(recent_losses) > 100:
+                                    recent_losses.pop(0)
+                                    
+                                # Update progress bar
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}")
+                                progress_bar.update(batch_size)
                             
-                            # Reset batch
+                            # Clear the batch for the next set of examples
                             batch_samples = []
                     
-                    # Process any remaining examples in the last batch
+                    # Train on any remaining examples in the final batch
                     if batch_samples:
+                        remaining_batch_size = len(batch_samples)
+                        
+                        # Train on the final batch with the current learning rate
                         batch_loss = self._train_batch(batch_samples, current_alpha)
                         
-                        # Accumulate total loss and example count
-                        total_loss += batch_loss
-                        example_count += len(batch_samples)
-                        batch_count += 1
+                        # Update total examples processed for learning rate decay
+                        total_examples_processed += remaining_batch_size
                         
-                        # Update progress bar if using
+                        # Decrease learning rate after the final batch if decay is enabled
+                        if decay_alpha:
+                            decay_factor = 1 - (total_examples_processed / (total_example_count * epochs))
+                            current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                            self._update_learning_rate(current_alpha)
+                        
+                        # If we're calculating loss, add this batch's loss to the epoch total
                         if calculate_loss:
-                            batch_avg_loss = batch_loss / len(batch_samples)
-                            recent_losses.append(batch_avg_loss)
-                            recent_avg = sum(recent_losses) / len(recent_losses)
-                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
+                            epoch_loss += batch_loss
+                            
+                            # Update progress bar with final batch
+                            if recent_losses:
+                                recent_avg = sum(recent_losses) / len(recent_losses)
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count+1}")
+                            progress_bar.update(remaining_batch_size)
                 
-                # CBOW batch training
+                # For CBOW, each sample is ([context_word_indices], target_word_idx)
                 else:
-                    batch_samples = []
+                    # Generate CBOW examples and batch them
                     for input_indices, output_idx in self.generate_cbow_examples(sentences):
                         # Add this example to the current batch
                         batch_samples.append((input_indices, output_idx))
+                        examples_processed_in_epoch += 1
                         
-                        # If we've collected enough examples, process the batch
+                        # Once we have enough examples for a batch, train on it
                         if len(batch_samples) >= batch_size:
-                            # Train on this batch
+                            # Train on this batch with the current learning rate
                             batch_loss = self._train_batch(batch_samples, current_alpha)
                             batch_count += 1
                             
-                            # Accumulate total loss and example count
-                            total_loss += batch_loss
-                            example_count += len(batch_samples)
+                            # Update total examples processed for learning rate decay
+                            total_examples_processed += batch_size
                             
-                            # Calculate batch average loss
-                            batch_avg_loss = batch_loss / len(batch_samples)
+                            # Decrease learning rate after processing batch if decay is enabled
+                            if decay_alpha:
+                                decay_factor = 1 - (total_examples_processed / (total_example_count * epochs))
+                                current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                                self._update_learning_rate(current_alpha)
                             
-                            # Add to recent losses for moving average
-                            recent_losses.append(batch_avg_loss)
-                            if len(recent_losses) > 1000:
-                                recent_losses.pop(0)
-                            
-                            # Update progress bar with current loss if using
+                            # If we're calculating loss, add this batch's loss to the epoch total
                             if calculate_loss:
+                                epoch_loss += batch_loss
+                                
+                                # Add to recent losses for moving average
+                                batch_avg_loss = batch_loss / len(batch_samples)
+                                recent_losses.append(batch_avg_loss)
+                                if len(recent_losses) > 100:
+                                    recent_losses.pop(0)
+                                    
+                                # Update progress bar
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}")
+                                progress_bar.update(batch_size)
                             
-                            # Reset batch
+                            # Clear the batch for the next set of examples
                             batch_samples = []
                     
-                    # Process any remaining examples in the last batch
+                    # Train on any remaining examples in the final batch
                     if batch_samples:
+                        remaining_batch_size = len(batch_samples)
+                        
+                        # Train on the final batch with the current learning rate
                         batch_loss = self._train_batch(batch_samples, current_alpha)
                         
-                        # Accumulate total loss and example count
-                        total_loss += batch_loss
-                        example_count += len(batch_samples)
-                        batch_count += 1
+                        # Update total examples processed for learning rate decay
+                        total_examples_processed += remaining_batch_size
                         
-                        # Update progress bar if using
+                        # Decrease learning rate after the final batch if decay is enabled
+                        if decay_alpha:
+                            decay_factor = 1 - (total_examples_processed / (total_example_count * epochs))
+                            current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                            self._update_learning_rate(current_alpha)
+                        
+                        # If we're calculating loss, add this batch's loss to the epoch total
                         if calculate_loss:
-                            batch_avg_loss = batch_loss / len(batch_samples)
-                            recent_losses.append(batch_avg_loss)
-                            recent_avg = sum(recent_losses) / len(recent_losses)
-                            progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, batches={batch_count}, examples={example_count}")
+                            epoch_loss += batch_loss
+                            
+                            # Update progress bar with final batch
+                            if recent_losses:
+                                recent_avg = sum(recent_losses) / len(recent_losses)
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count+1}")
+                            progress_bar.update(remaining_batch_size)
             
-            # Calculate epoch average loss
-            epoch_avg_loss = total_loss / max(1, example_count)
-            epoch_losses.append(epoch_avg_loss)
+            # If we're not using batching, train on individual examples
+            else:
+                # For skip-gram
+                if self.sg:
+                    # Train on each Skip-gram example separately
+                    for input_idx, output_idx in self.generate_skipgram_examples(sentences):
+                        # Train on this skipgram example with the current learning rate
+                        loss = self._train_skipgram_example(input_idx, output_idx, current_alpha)
+                        
+                        # Update total examples processed and decrease learning rate
+                        total_examples_processed += 1
+                        # Only decay learning rate if min_alpha is not None
+                        if decay_alpha:
+                            decay_factor = 1 - (total_examples_processed / (total_example_count * epochs))
+                            current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                            # Update Cython learning rate
+                            self._update_learning_rate(current_alpha)
+                        
+                        # If we're calculating loss, add this example's loss to the epoch total
+                        if calculate_loss:
+                            epoch_loss += loss
+                            
+                            # Add to recent losses for moving average
+                            recent_losses.append(loss)
+                            if len(recent_losses) > 1000:
+                                recent_losses.pop(0)
+                                
+                            # Only update progress bar every 10 examples for efficiency
+                            if examples_processed_in_epoch % 10 == 0:
+                                recent_avg = sum(recent_losses) / len(recent_losses)
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}")
+                                progress_bar.update(10)
+                        
+                        examples_processed_in_epoch += 1
+                
+                # For CBOW
+                else:
+                    # Train on each CBOW example separately
+                    for input_indices, output_idx in self.generate_cbow_examples(sentences):
+                        # Train on this CBOW example with the current learning rate
+                        loss = self._train_cbow_example(input_indices, output_idx, current_alpha)
+                        
+                        # Update total examples processed and decrease learning rate
+                        total_examples_processed += 1
+                        # Only decay learning rate if min_alpha is not None
+                        if decay_alpha:
+                            decay_factor = 1 - (total_examples_processed / (total_example_count * epochs))
+                            current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                            # Update Cython learning rate
+                            self._update_learning_rate(current_alpha)
+                        
+                        # If we're calculating loss, add this example's loss to the epoch total
+                        if calculate_loss:
+                            epoch_loss += loss
+                            
+                            # Add to recent losses for moving average
+                            recent_losses.append(loss)
+                            if len(recent_losses) > 1000:
+                                recent_losses.pop(0)
+                                
+                            # Only update progress bar every 10 examples for efficiency
+                            if examples_processed_in_epoch % 10 == 0:
+                                recent_avg = sum(recent_losses) / len(recent_losses)
+                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}")
+                                progress_bar.update(10)
+                        
+                        examples_processed_in_epoch += 1
             
-            # Close the progress bar and print epoch summary
+            # Close the progress bar at the end of the epoch
             if calculate_loss:
+                # Make sure we reach 100% at the end of the epoch
+                progress_bar.update(progress_bar.total - progress_bar.n)
                 progress_bar.close()
-
-        self.total_examples += example_count
-        self.epoch_losses.extend(epoch_losses)
+                # Print epoch summary
+                avg_loss = epoch_loss / examples_processed_in_epoch if examples_processed_in_epoch > 0 else 0
+                print(f"Epoch {epoch+1}/{epochs} completed. Loss: {avg_loss:.6f}, Examples: {examples_processed_in_epoch}")
+            else:
+                # If no progress bar, just print a simple status update
+                print(f"Epoch {epoch+1}/{epochs} completed. Examples: {examples_processed_in_epoch}, Final LR: {current_alpha:.6f}")
+            
+            # Add epoch loss to total if we're calculating it
+            if calculate_loss:
+                total_loss += epoch_loss
+                total_examples += examples_processed_in_epoch
+            
+            # Call any registered callbacks with the model and epoch number
+            if callbacks:
+                for callback in callbacks:
+                    callback(self, epoch)
         
-        return epoch_losses
+        # Calculate and return the final average loss if requested
+        if calculate_loss and total_examples > 0:
+            final_avg_loss = total_loss / total_examples
+            print(f"Training completed. Final average loss: {final_avg_loss:.6f}")
+            return final_avg_loss
+        
+        return None
 
-    def get_vector(self, word: str) -> Optional[np.ndarray]:
+    def get_vector(self, word: str, normalize: bool = False) -> Optional[np.ndarray]:
         """
         Get the vector for a word.
+        
+        Parameters:
+        -----------
+        word: Input word
+        normalize: If True, return the normalized vector (unit length)
+        
+        Returns:
+        --------
+        Word vector
+        """
+        if word in self.vocab:
+            vector = self.W[self.vocab[word]]
+            if normalize:
+                norm = np.linalg.norm(vector)
+                if norm > 0:
+                    return vector / norm
+            return vector
+        else:
+            raise KeyError(f"Word '{word}' not in vocabulary")
+    
+    def __getitem__(self, word: str) -> np.ndarray:
+        """
+        Dictionary-like access to word vectors.
         
         Parameters:
         -----------
@@ -1124,11 +1482,10 @@ class Word2Vec:
         
         Returns:
         --------
-        Word vector or None if the word is not in vocabulary
+        Word vector or raises KeyError if word is not in vocabulary
         """
-        if word in self.vocab:
-            return self.W[self.vocab[word][0]]
-        return None
+        
+        return self.get_vector(word)
     
     def most_similar(self, word: str, topn: int = 10) -> List[Tuple[str, float]]:
         """
@@ -1146,7 +1503,7 @@ class Word2Vec:
         if word not in self.vocab:
             return []
         
-        word_idx = self.vocab[word][0]
+        word_idx = self.vocab[word]
         word_vec = self.W[word_idx]
         
         # Compute cosine similarities
@@ -1161,7 +1518,7 @@ class Word2Vec:
                 most_similar.append((self.index2word[idx], float(sim[idx])))
         
         return most_similar
-    
+
     def save(self, path: str) -> None:
         """
         Save the model to a file.
@@ -1177,6 +1534,7 @@ class Word2Vec:
         model_data = {
             'vocab': self.vocab,
             'index2word': self.index2word,
+            'word_counts': dict(self.word_counts),
             'vector_size': self.vector_size,
             'window': self.window,
             'min_count': self.min_count,
@@ -1187,11 +1545,13 @@ class Word2Vec:
             'sample': self.sample,
             'shrink_windows': self.shrink_windows,
             'max_vocab_size': self.max_vocab_size,
+            'use_double_precision': self.use_double_precision,
+            'use_cython': self.use_cython,
+            'gradient_clip': self.gradient_clip,
             'W': self.W,
             'W_prime': self.W_prime
         }
         np.save(path, model_data, allow_pickle=True)
-        print(f"Model saved to {path}")
     
     @classmethod
     def load(cls, path: str) -> 'Word2Vec':
@@ -1212,6 +1572,9 @@ class Word2Vec:
         shrink_windows = model_data.get('shrink_windows', False)
         sample = model_data.get('sample', 1e-3)
         max_vocab_size = model_data.get('max_vocab_size', None)
+        use_double_precision = model_data.get('use_double_precision', False)
+        use_cython = model_data.get('use_cython', False)
+        gradient_clip = model_data.get('gradient_clip', 1.0)
         
         model = cls(
             vector_size=model_data['vector_size'],
@@ -1223,14 +1586,31 @@ class Word2Vec:
             sg=model_data['sg'],
             sample=sample,
             shrink_windows=shrink_windows,
-            max_vocab_size=max_vocab_size
+            max_vocab_size=max_vocab_size,
+            use_double_precision=use_double_precision,
+            use_cython=use_cython,
+            gradient_clip=gradient_clip
         )
         
         model.vocab = model_data['vocab']
         model.index2word = model_data['index2word']
+        # Convert the word_counts back to a Counter
+        model.word_counts = Counter(model_data.get('word_counts', {}))
         model.W = model_data['W']
         model.W_prime = model_data['W_prime']
         
+        # If Cython is enabled but not loaded, try to re-import it
+        if model.use_cython and model.word2vec_c is None:
+            try:
+                from .cython_ext import word2vec
+                model.word2vec_c = word2vec
+            except ImportError:
+                model.use_cython = False
+                warnings.warn(
+                    "The loaded model was trained with Cython acceleration, but the Cython extension " 
+                    "is not available in the current environment. Falling back to Python implementation."
+                )
+                
         return model
 
 def plot_training_loss(epoch_losses, title="Word2Vec Training Loss"):
@@ -1321,6 +1701,7 @@ class TempRefWord2Vec(Word2Vec):
         corpora: List[List[List[str]]],  # List of corpora, each corpus is a list of sentences
         labels: List[str],               # Labels for each corpus (e.g., time periods)
         targets: List[str],              # Target words to trace semantic change
+        balance: bool = True,            # Whether to balance the corpora
         **kwargs                         # Parameters passed to Word2Vec parent class
     ):
         """
@@ -1340,22 +1721,30 @@ class TempRefWord2Vec(Word2Vec):
         if len(corpora) != len(labels):
             raise ValueError(f"Number of corpora ({len(corpora)}) must match number of labels ({len(labels)})")
         
-        # Calculate token counts and determine minimum
-        corpus_token_counts = [sum(len(sentence) for sentence in corpus) for corpus in corpora]
-        target_token_count = min(corpus_token_counts)
-        print(f"Balancing corpora to minimum size: {target_token_count} tokens")
-        
-        # Balance corpus sizes
-        balanced_corpora = []
+        # print how many sentences in each corpus (each corpus a list of sentences)
+        # and total size of each corpus (how many words; each sentence a list of words)
         for i, corpus in enumerate(corpora):
-            if corpus_token_counts[i] <= target_token_count:
-                balanced_corpora.append(corpus)
-            else:
-                sampled_corpus = sample_sentences_to_token_count(corpus, target_token_count)
-                balanced_corpora.append(sampled_corpus)
+            print(f"Corpus {labels[i]} has {len(corpus)} sentences and {sum(len(sentence) for sentence in corpus)} words")
+
+        # Calculate token counts and determine minimum
+        if balance:
+            corpus_token_counts = [sum(len(sentence) for sentence in corpus) for corpus in corpora]
+            target_token_count = min(corpus_token_counts)
+            print(f"Balancing corpora to minimum size: {target_token_count} tokens")
+            
+            # Balance corpus sizes
+            balanced_corpora = []
+            for i, corpus in enumerate(corpora):
+                if corpus_token_counts[i] <= target_token_count:
+                    balanced_corpora.append(corpus)
+                else:
+                    sampled_corpus = sample_sentences_to_token_count(corpus, target_token_count)
+                    balanced_corpora.append(sampled_corpus)
         
-        # Add corpus tags to the corpora
-        tagged_corpora = add_corpus_tags(balanced_corpora, labels, targets)
+            # Add corpus tags to the corpora
+            tagged_corpora = add_corpus_tags(balanced_corpora, labels, targets)
+        else:
+            tagged_corpora = add_corpus_tags(corpora, labels, targets)
 
         # Initialize combined corpus before using it
         self.combined_corpus = []
@@ -1364,6 +1753,11 @@ class TempRefWord2Vec(Word2Vec):
         for corpus in tagged_corpora:
             self.combined_corpus.extend(corpus)
         print(f"Combined corpus: {len(self.combined_corpus)} sentences, {sum(len(s) for s in self.combined_corpus)} tokens")
+        
+        # clear memory
+        del tagged_corpora
+        del balanced_corpora
+        del sampled_corpus
         
         # Create temporal word map: maps base words to their temporal variants
         self.temporal_word_map = {}
@@ -1379,16 +1773,6 @@ class TempRefWord2Vec(Word2Vec):
         
         # Initialize parent Word2Vec class with kwargs
         super().__init__(**kwargs)
-        
-        # Build vocabulary using the combined corpus
-        self.build_vocab(self.combined_corpus)
-        
-        # Initialize weights after building vocabulary
-        self._initialize_weights()
-        
-        # Calculate discard probabilities for subsampling if needed
-        if self.sample > 0:
-            self._calculate_discard_probs()
     
     def build_vocab(self, sentences: List[List[str]]) -> None:
         """
@@ -1416,24 +1800,26 @@ class TempRefWord2Vec(Word2Vec):
             print(f"Sample: {missing_variants[:10]}")
             print("These variants will not be part of the temporal analysis.")
         
-        # Add base words to vocabulary if they're not already there
+        # Add base words to vocabulary if they're not already there (should not be)
         added_base_words = 0
         for base_word in self.temporal_word_map:
             if base_word not in self.vocab:
-                # Add the base word to vocabulary with count 0
+                # Add the base word to vocabulary with count 1
                 # First, get the index for this new word
                 word_id = len(self.index2word)
                 # Add to vocab dictionary
-                self.vocab[base_word] = (word_id, 1)  # Count 1 just to avoid division by 0
+                self.vocab[base_word] = word_id
                 # Add to index2word list
                 self.index2word.append(base_word)
+                # Add to word_counts
+                self.word_counts[base_word] = 1  # Count 1 just to avoid division by 0
                 added_base_words += 1
         
         if added_base_words > 0:
             # Update vocabulary size
             self.vocab_size = len(self.vocab)
             self.corpus_word_count += added_base_words
-
+    
     def generate_skipgram_examples(self, 
                                  sentences: List[List[str]]) -> Generator[Tuple[int, int], None, None]:
         """
@@ -1441,6 +1827,9 @@ class TempRefWord2Vec(Word2Vec):
         
         For Skip-gram, temporal referencing means that target words (inputs) are replaced
         with their temporal variants, while context words (outputs) remain unchanged.
+        
+        This implementation calls the parent's implementation and then modifies the yielded
+        examples by converting any temporal variant context words to their base form.
         
         Parameters:
         -----------
@@ -1450,75 +1839,36 @@ class TempRefWord2Vec(Word2Vec):
         --------
         Generator yielding (input_idx, output_idx) tuples for positive examples
         """
-        # Process sentences one by one
-        for sentence in sentences:
-            # Filter words based on subsampling and vocabulary
-            if self.sample > 0:
-                # Filter words based on subsampling probability
-                kept_words = [
-                    word for word in sentence 
-                    if word in self.vocab and np.random.random() >= self.discard_probs[word]
-                ]
-            else:
-                # No subsampling, just filter out words not in vocabulary
-                kept_words = [word for word in sentence if word in self.vocab]
+        # Call the parent implementation to get basic examples
+        for input_idx, output_idx in super().generate_skipgram_examples(sentences):
+            # For Skip-gram:
+            # - Input (center word) is already handled by data preprocessing (with temporal variants)
+            # - Output (context word) should always use the base word form
             
-            # Convert words to indices, using temporal variants as appropriate
-            sentence_len = len(kept_words)
-            if sentence_len == 0:
-                continue
+            # Get the actual word for the output index
+            output_word = self.index2word[output_idx]
             
-            # Process each word in the sentence
-            for pos in range(sentence_len):
-                # Get the current word
-                current_word = kept_words[pos]
-                
-                # Determine window size for this target word
-                if self.shrink_windows:
-                    # Uniform sampling from 1 to self.window (inclusive)
-                    dynamic_window = random.randint(1, self.window)
-                else:
-                    dynamic_window = self.window
-                
-                # Define context window bounds
-                start = max(0, pos - dynamic_window)
-                end = min(sentence_len, pos + dynamic_window + 1)
-                
-                # For Skip-gram:
-                # - Input (center word) uses the temporal variant if it's in the temporal_word_map
-                # - Output (context word) always uses the base word
-                
-                # Get the index for the center word (input)
-                center_word = current_word
-                center_idx = self.vocab[center_word][0]
-                
-                # Generate training examples (center, context)
-                for context_pos in range(start, end):
-                    # Skip the center word itself
-                    if context_pos == pos:
-                        continue
-                    
-                    # Get context word (always use base form for output)
-                    context_word = kept_words[context_pos]
-                    
-                    # If context word is a temporal variant, use its base form
-                    if context_word in self.reverse_temporal_map:
-                        base_context_word = self.reverse_temporal_map[context_word]
-                        context_idx = self.vocab[base_context_word][0]
-                    else:
-                        context_idx = self.vocab[context_word][0]
-                    
-                    # Yield example (input_idx, output_idx)
-                    yield (center_idx, context_idx)
+            # Check if the output word is a temporal variant and convert to base form if needed
+            if output_word in self.reverse_temporal_map:
+                base_word = self.reverse_temporal_map[output_word]
+                # Make sure the base word is in vocabulary
+                if base_word in self.vocab:
+                    output_idx = self.vocab[base_word]
+            
+            # Yield the modified example
+            yield (input_idx, output_idx)
     
     def generate_cbow_examples(self, 
                              sentences: List[List[str]]) -> Generator[Tuple[List[int], int], None, None]:
         """
         Override parent method to implement temporal referencing in CBOW model.
         
-        For CBOW, our temporal referencing implementation means:
-        - Context words (inputs) remain as base words
-        - Target words (outputs) are replaced with their temporal variants (already included in the data)
+        For CBOW, temporal referencing means:
+        - Context words (inputs) should be converted to their base forms
+        - Target words (outputs) are already handled by data preprocessing (with temporal variants)
+        
+        This implementation calls the parent's implementation and then modifies the yielded
+        examples by converting any temporal variant context words to their base form.
         
         Parameters:
         -----------
@@ -1528,72 +1878,30 @@ class TempRefWord2Vec(Word2Vec):
         --------
         Generator yielding (input_indices, output_idx) tuples for positive examples
         """
-        # Process sentences one by one
-        for sentence in sentences:
-            # Filter words based on subsampling and vocabulary
-            if self.sample > 0:
-                # Filter words based on subsampling probability
-                kept_words = [
-                    word for word in sentence 
-                    if word in self.vocab and np.random.random() >= self.discard_probs[word]
-                ]
-            else:
-                # No subsampling, just filter out words not in vocabulary
-                kept_words = [word for word in sentence if word in self.vocab]
+        # Call the parent implementation to get basic examples
+        for input_indices, output_idx in super().generate_cbow_examples(sentences):
+            # For CBOW:
+            # - Context words (inputs) should be in base form
+            # - Output (center word) is already handled by data preprocessing (with temporal variants)
             
-            # Convert words to indices
-            sentence_len = len(kept_words)
-            if sentence_len == 0:
-                continue
+            # Process context word indices to ensure they use base forms
+            modified_input_indices = []
+            for idx in input_indices:
+                word = self.index2word[idx]
+                
+                # If the word is a temporal variant, use its base form
+                if word in self.reverse_temporal_map:
+                    base_word = self.reverse_temporal_map[word]
+                    # Make sure the base word is in vocabulary
+                    if base_word in self.vocab:
+                        idx = self.vocab[base_word]
+                
+                modified_input_indices.append(idx)
             
-            # Process each word in the sentence
-            for pos in range(sentence_len):
-                # Determine window size for this target word
-                if self.shrink_windows:
-                    # Uniform sampling from 1 to self.window (inclusive)
-                    dynamic_window = random.randint(1, self.window)
-                else:
-                    dynamic_window = self.window
-                
-                # Define context window bounds
-                start = max(0, pos - dynamic_window)
-                end = min(sentence_len, pos + dynamic_window + 1)
-                
-                # Get all context indices for this position
-                context_indices = []
-                for context_pos in range(start, end):
-                    if context_pos != pos:  # Skip the center word
-                        # Get context word (input)
-                        context_word = kept_words[context_pos]
-                        
-                        # For CBOW inputs (context words), always use base form
-                        if context_word in self.reverse_temporal_map:
-                            base_context_word = self.reverse_temporal_map[context_word]
-                            # Make sure the base word is in vocabulary
-                            if base_context_word in self.vocab:
-                                context_idx = self.vocab[base_context_word][0]
-                            else:
-                                # If base word not in vocab, use the temporal variant
-                                context_idx = self.vocab[context_word][0]
-                        else:
-                            context_idx = self.vocab[context_word][0]
-                            
-                        context_indices.append(context_idx)
-                
-                if not context_indices:
-                    continue
-                
-                # Get center word (output)
-                center_word = kept_words[pos]
-                center_idx = self.vocab[center_word][0]
-                
-                # Yield example (input_indices, output_idx)
-                yield (context_indices, center_idx)
+            # Yield the modified example
+            yield (modified_input_indices, output_idx)
 
-    def train(self, sentences: Optional[List[str]] = None, 
-              epochs: int = 1, 
-              batch_size: int = 32,
-              calculate_loss: bool = False) -> List[float]:
+    def train(self, sentences: Optional[List[str]] = None, **kwargs) -> Optional[float]:
         """
         Train the TempRefWord2Vec model using the preprocessed combined corpus.
         
@@ -1604,20 +1912,16 @@ class TempRefWord2Vec(Word2Vec):
         Parameters:
         -----------
         sentences: Ignored in TempRefWord2Vec, will use self.combined_corpus instead
-        epochs: Number of training epochs
-        batch_size: Batch size for training. If None, use self.batch_size. If 1, use example-by-example training.
-        calculate_loss: Whether to calculate and display loss during training with a progress bar
+        **kwargs: All additional arguments are passed to the parent's train method
+                 (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.)
         
         Returns:
         --------
-        List of average losses per epoch
+        Final loss value if calculate_loss is True in kwargs, None otherwise
         """
         if sentences is not None:
             print("Warning: TempRefWord2Vec always uses its internal preprocessed corpus for training.")
-            print("The provided 'sentences' argument will be ignored.")
-        # Call the parent's train method with our combined corpus
-        # Always pass the combined_corpus to avoid ValueErrors in the parent class
-        return super().train(sentences=self.combined_corpus, 
-                            epochs=epochs, 
-                            batch_size=batch_size, 
-                            calculate_loss=calculate_loss)
+            print("The provided 'sentences' argument will be ignored (using self.combined_corpus instead).")
+        
+        # Call the parent's train method with our combined corpus and forward all kwargs
+        return super().train(sentences=self.combined_corpus, **kwargs)

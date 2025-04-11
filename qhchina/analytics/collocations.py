@@ -2,6 +2,7 @@ from collections import Counter, defaultdict
 from scipy.stats import fisher_exact
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5):
     total_tokens = 0  # Total number of token positions in the corpus
@@ -16,7 +17,7 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
     token_counter = Counter()
 
     # Loop over all sentences and token positions.
-    for sentence in tokenized_sentences:
+    for sentence in tqdm(tokenized_sentences):
         for i, token in enumerate(sentence):
             total_tokens += 1
             token_counter[token] += 1  # global count for this token
@@ -41,14 +42,27 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
         for candidate, a in candidate_in_context[target].items():
             if candidate == target:
                 continue  # Skip if the candidate is the target itself.
+                
+            # the contingency table is:
+            #               candidate | ~candidate
+            # near (target)     [a,        b]
+            # ~near (target)    [c,        d]
 
             # a: candidate appears in a token position whose context includes target.
-            # c: candidate appears in a token position whose context does NOT include target.
-            c = token_counter[candidate] - a
+            # this we already have from candidate_in_context[target][candidate]
             # b: positions with target in context where candidate did not appear.
             b = T_count[target] - a
-            # d: all other positions.
-            d = total_tokens - T_count[target] - c - token_counter[target]
+            # c: candidate appears in a token position whose context does NOT include target.
+            c = token_counter[candidate] - a
+            # d: all other positions. We need to remove token_counter[target] from total_tokens
+            # because it has never been included in the previous calculations.
+            # a + b are all the positions where the target is in the context
+            # or in other words, all positions surrounding the target (already excluded)
+            # c is the number of times the candidate appears without the target in the context  
+            # so d are the remaining positions
+            d = (total_tokens - token_counter[target]) - (a + b + c)        
+            # this is equivalent to:
+            # d = total_tokens - T_count[target] - c - token_counter[target]
 
             # Calculate the expected frequency (if independent) and ratio.
             expected = (a + b) * (a + c) / total_tokens if total_tokens > 0 else 0
@@ -76,7 +90,7 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words):
     candidate_in_sentences = {target: Counter() for target in target_words}
     sentences_with_token = defaultdict(int)
 
-    for sentence in tokenized_sentences:
+    for sentence in tqdm(tokenized_sentences):
         unique_tokens = set(sentence)
         for token in unique_tokens:
             sentences_with_token[token] += 1
@@ -112,7 +126,35 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words):
 
     return results
 
-def find_collocates(sentences, target_words, method='window', horizon=5, stopwords=None, as_dataframe=False):
+def find_collocates(sentences, target_words, method='window', horizon=5, filters=None, as_dataframe=False):
+    """
+    Find collocates for target words within a corpus of sentences.
+    
+    Parameters:
+    -----------
+    sentences : list
+        List of tokenized sentences, where each sentence is a list of tokens.
+    target_words : str or list
+        Target word(s) to find collocates for.
+    method : str, default='window'
+        Method to use for calculating collocations. Either 'window' or 'sentence'.
+        - 'window': Uses a sliding window of specified horizon around each token
+        - 'sentence': Considers whole sentences as context units
+    horizon : int, default=5
+        Size of the context window on each side (only used if method='window').
+    filters : dict, optional
+        Dictionary of filters to apply to results, AFTER computation is done:
+        - 'max_p': float - Maximum p-value threshold for statistical significance
+        - 'stopwords': list - Words to exclude from results
+        - 'min_length': int - Minimum character length for collocates
+    as_dataframe : bool, default=False
+        If True, return results as a pandas DataFrame.
+    
+    Returns:
+    --------
+    list or DataFrame
+        List of dictionaries or DataFrame containing collocation statistics.
+    """
     if not isinstance(target_words, list):
         target_words = [target_words]
     target_words = set(target_words)
@@ -124,8 +166,19 @@ def find_collocates(sentences, target_words, method='window', horizon=5, stopwor
     else:
         raise NotImplementedError(f"The method {method} is not implemented.")
 
-    if stopwords:
-        results = [result for result in results if result["collocate"] not in stopwords]
+    # Apply filters if specified
+    if filters:
+        # Filter by p-value threshold
+        if 'max_p' in filters:
+            results = [result for result in results if result["p_value"] <= filters['max_p']]
+        
+        # Filter out stopwords
+        if 'stopwords' in filters:
+            results = [result for result in results if result["collocate"] not in filters['stopwords']]
+        
+        # Filter by minimum length
+        if 'min_length' in filters:
+            results = [result for result in results if len(result["collocate"]) >= filters['min_length']]
 
     if as_dataframe:
         results = pd.DataFrame(results)

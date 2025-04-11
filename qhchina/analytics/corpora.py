@@ -1,27 +1,46 @@
 from collections import Counter
 import numpy as np
 from scipy.stats import fisher_exact, chi2_contingency
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Tuple, Union, Any
+from tqdm.auto import tqdm
 
-def compare_corpora(corpusA : List[str], 
-                    corpusB : List[str], 
-                    method : str = 'fisher', 
-                    min_count : Union[int, Tuple[int, int]] = 1,
-                    as_dataframe : bool = False) -> List[Dict]:
+def compare_corpora(corpusA: Union[List[str], List[List[str]]], 
+                    corpusB: Union[List[str], List[List[str]]], 
+                    method: str = 'fisher', 
+                    filters: Dict = None,
+                    as_dataframe: bool = False) -> List[Dict]:
     """
     Compare two corpora to identify statistically significant differences in word usage.
     
     Parameters:
-      corpusA (list of str): List of tokens from corpus A.
-      corpusB (list of str): List of tokens from corpus B.
+      corpusA: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
+      corpusB: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
       method (str): 'fisher' for Fisher's exact test or 'chi2' for the chi-square test.
-      min_count (int or tuple): minimum count for a word to be included in the analysis.
+      filters (dict, optional): Dictionary of filters to apply to results:
+          - 'min_count': int or tuple - Minimum count threshold(s) for a word to be included 
+            (can be a single int for both corpora or tuple (min_countA, min_countB)).
+            Default is 0, which includes words that appear in either corpus, even if absent in one.
+          - 'max_p': float - Maximum p-value threshold for statistical significance
+          - 'stopwords': list - Words to exclude from results
+          - 'min_length': int - Minimum character length for words
       as_dataframe (bool): Whether to return a pandas DataFrame.
       
     Returns:
       List[dict]: Each dict contains information about a word's frequency in both corpora,
                   the p-value, and the ratio of relative frequencies.
     """
+    # Helper function to flatten list of sentences if needed
+    def flatten(corpus):
+        if not corpus:
+            return []
+        if isinstance(corpus[0], list):
+            return [word for sentence in corpus for word in sentence]
+        return corpus
+    
+    # Flatten corpora if they are lists of sentences
+    corpusA = flatten(corpusA)
+    corpusB = flatten(corpusB)
+    
     # Count word frequencies in each corpus
     abs_freqA = Counter(corpusA)
     abs_freqB = Counter(corpusB)
@@ -32,16 +51,22 @@ def compare_corpora(corpusA : List[str],
     all_words = set(abs_freqA.keys()).union(abs_freqB.keys())
     results = []
     
-    for word in all_words:
+    # Get min_count from filters if available, default to 0
+    min_count = filters.get('min_count', 0) if filters else 0
+    
+    for word in tqdm(all_words):
         a = abs_freqA.get(word, 0)  # Count in Corpus A
         b = abs_freqB.get(word, 0)  # Count in Corpus B
-        c = totalA - a          # Other words in Corpus A
-        d = totalB - b          # Other words in Corpus B
         
+        # Check minimum counts
         if isinstance(min_count, int):
             min_count = (min_count, min_count)
         if a < min_count[0] or b < min_count[1]:
-           continue
+            continue
+            
+        c = totalA - a          # Other words in Corpus A
+        d = totalB - b          # Other words in Corpus B
+        
         table = np.array([[a, b], [c, d]])
 
         # Compute the p-value using the selected statistical test.
@@ -66,6 +91,21 @@ def compare_corpora(corpusA : List[str],
             "rel_ratio": ratio,
             "p_value": p_value,
         })
+    
+    # Apply other filters if specified
+    if filters:
+        # Filter by p-value threshold
+        if 'max_p' in filters:
+            results = [result for result in results if result["p_value"] <= filters['max_p']]
+        
+        # Filter out stopwords
+        if 'stopwords' in filters:
+            results = [result for result in results if result["word"] not in filters['stopwords']]
+        
+        # Filter by minimum length
+        if 'min_length' in filters:
+            results = [result for result in results if len(result["word"]) >= filters['min_length']]
+            
     if as_dataframe:
         import pandas as pd
         results = pd.DataFrame(results)
