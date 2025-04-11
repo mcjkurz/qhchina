@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]  # Focus on Linux for Colab and Windows for local use
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -23,28 +23,31 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install build wheel setuptools cython numpy scipy
 
-      # For manylinux wheels
-      - name: Build manylinux wheels
+      # Linux builds using cibuildwheel
+      - name: Build Linux wheels
         if: runner.os == 'Linux'
         uses: pypa/cibuildwheel@v2.16.2
         env:
-          CIBW_ARCHS: "x86_64"
-          CIBW_BUILD: "cp38-manylinux* cp39-manylinux* cp310-manylinux* cp311-manylinux*"
-          CIBW_SKIP: "*-musllinux*"
+          CIBW_ARCHS: "x86_64"  # Only build 64-bit wheels
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-*"  # Build for Python 3.8-3.11
+          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"  # Skip musl and 32-bit builds
           CIBW_BEFORE_BUILD: "pip install cython numpy scipy"
-          
-      # For Windows wheels
-      - name: Build wheels (Windows)
+          CIBW_OUTPUT_DIR: "./dist"  # Output to dist directory
+
+      # Windows builds
+      - name: Build Windows wheels
         if: runner.os == 'Windows'
         run: |
-          pip wheel . -w ./dist --no-deps
+          python -m pip install --upgrade pip
+          python -m pip install wheel setuptools cython numpy scipy
+          python -m build --wheel --outdir ./dist
 
-      - name: Upload wheels as artifacts
+      - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
