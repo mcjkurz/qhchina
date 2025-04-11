@@ -20,7 +20,6 @@ license-files = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",  # Added explicit license classifier
     "Operating System :: OS Independent",
 ]
 

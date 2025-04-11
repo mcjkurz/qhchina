@@ -8,7 +8,6 @@ import os
 import sys
 import platform
 import numpy
-import scipy
 
 try:
     from Cython.Build import cythonize
