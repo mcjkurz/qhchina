@@ -1,7 +1,13 @@
 # pyproject.toml
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "Cython>=0.29.24", "numpy>=1.19.0", "scipy>=1.5.0"]
+requires = [
+    "setuptools>=61.0",
+    "wheel",
+    "Cython>=0.29.24",
+    "numpy==2.0.2",
+    "scipy>=1.5.0"
+]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -21,8 +27,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "scipy",
-    "numpy",
+    "numpy>=2.0.2",
+    "scipy>=1.5.0",
     "matplotlib",
     "pandas",
     "scikit-learn",
