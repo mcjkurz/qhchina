@@ -145,7 +145,8 @@ def init_globals(
     float gradient_clip=DEFAULT_MAX_GRAD,
     int negative=5,
     float learning_rate=0.025,
-    bint cbow_mean=True
+    bint cbow_mean=True,
+    bint use_double_precision=False
 ):
     """
     Initialize global variables for shared resources.
@@ -161,6 +162,7 @@ def init_globals(
         negative: Number of negative samples
         learning_rate: Current learning rate
         cbow_mean: Whether to use mean or sum for context vectors
+        use_double_precision: Whether to use double precision (float64) calculations
     """
     global SIGMOID_TABLE_FLOAT32, LOG_SIGMOID_TABLE_FLOAT32, NOISE_DISTRIBUTION_FLOAT32
     global SIGMOID_TABLE_FLOAT64, LOG_SIGMOID_TABLE_FLOAT64, NOISE_DISTRIBUTION_FLOAT64
@@ -172,8 +174,8 @@ def init_globals(
     global _reusable_center_grad, _reusable_context_grads, _reusable_neg_grads
     global _reusable_context_mask, _reusable_neg_mask
     
-    # Determine the precision of the input arrays
-    USING_DOUBLE_PRECISION = sigmoid_table.dtype == np.float64
+    # Set the precision based on the provided parameter instead of inferring from dtype
+    USING_DOUBLE_PRECISION = use_double_precision
     
     # Copy data to the appropriate global variables based on precision
     if USING_DOUBLE_PRECISION:

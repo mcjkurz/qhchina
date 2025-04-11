@@ -179,23 +179,6 @@ class Word2Vec:
             self.use_cython = True
             return True
         except ImportError:
-            # First attempt to compile the extensions if compilation module exists
-            try:
-                from .compile_extensions import compile_extensions
-                # Call compile_extensions() to build the extension
-                compile_extensions(["word2vec"]) 
-                
-                # If compilation succeeded, try importing again
-                try:
-                    from .cython_ext import word2vec
-                    self.word2vec_c = word2vec
-                    self.use_cython = True
-                    return True
-                except ImportError:
-                    pass
-            except ImportError:
-                pass
-                
             self.use_cython = False
             warnings.warn(
                 "Cython acceleration for Word2Vec was requested but the extension "
@@ -218,12 +201,12 @@ class Word2Vec:
             # Calculate x value in range [-max_exp, max_exp]
             x = (i / self.exp_table_size * 2 - 1) * self.max_exp
             # Compute sigmoid(x) = 1 / (1 + exp(-x))
-            self.sigmoid_table[i] = 1.0 / (1.0 + np.exp(-x))
+            self.sigmoid_table[i] = self.dtype(1.0 / (1.0 + np.exp(-x)))
             # Compute log(sigmoid(x))
-            self.log_sigmoid_table[i] = np.log(self.sigmoid_table[i])
+            self.log_sigmoid_table[i] = np.log(self.sigmoid_table[i], dtype=self.dtype)
         
-        self.sigmoid_scale = self.exp_table_size / (2 * self.max_exp)  # Scale factor
-        self.sigmoid_offset = self.exp_table_size // 2     
+        self.sigmoid_scale = self.dtype(self.exp_table_size / (2 * self.max_exp))  # Scale factor
+        self.sigmoid_offset = self.dtype(self.exp_table_size // 2)
     
     def _sigmoid(self, x: np.ndarray) -> np.ndarray:
         """
@@ -371,8 +354,11 @@ class Word2Vec:
         noise_dist = word_counts ** self.ns_exponent
         
         # Normalize to get a probability distribution
-        self.noise_distribution = noise_dist / np.sum(noise_dist)
+        noise_dist_normalized = noise_dist / np.sum(noise_dist)
         
+        # Explicitly cast to the correct dtype (float32 or float64)
+        self.noise_distribution = noise_dist_normalized.astype(self.dtype)
+
     def _initialize_cython_globals(self) -> None:
         
         if not self.use_cython:
@@ -387,7 +373,7 @@ class Word2Vec:
             if not isinstance(arr, np.ndarray):
                 raise ValueError(f"{name} must be a numpy array")
             if not arr.flags['C_CONTIGUOUS']:
-                arr = np.ascontiguousarray(arr)  # Force C-contiguous
+                arr = np.ascontiguousarray(arr, dtype=self.dtype)  # Force C-contiguous
         
         # Initialize Cython globals
         try:
@@ -401,6 +387,7 @@ class Word2Vec:
                 negative=self.negative,
                 learning_rate=self.alpha,
                 cbow_mean=int(self.cbow_mean),
+                use_double_precision=self.use_double_precision,  # Pass the precision parameter
             )
         except Exception as e:
             self.use_cython = False
