@@ -1,0 +1,64 @@
+// Custom styles
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  color: #333;
+}
+
+.wrapper {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+header {
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.site-nav {
+  margin-top: 20px;
+}
+
+.site-nav ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+}
+
+.site-nav li {
+  margin-right: 20px;
+}
+
+.site-nav a {
+  text-decoration: none;
+  color: #0366d6;
+  font-weight: 600;
+}
+
+.site-nav a:hover {
+  text-decoration: underline;
+}
+
+.post-preview {
+  margin-bottom: 30px;
+}
+
+.post-date {
+  color: #6a737d;
+  font-size: 14px;
+}
+
+footer {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+  color: #6a737d;
+}
+
+.footer-content {
+  font-size: 14px;
+} 
