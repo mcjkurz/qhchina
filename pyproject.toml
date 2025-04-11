@@ -14,7 +14,10 @@ description = "A Python package for NLP tasks related to Chinese text."
 readme = "README.md"
 requires-python = ">=3.8"
 keywords = ["digital humanities", "nlp", "Chinese", "text analysis", "corpus linguistics", "topic modeling"]
-license = {file = "LICENSE"}  # Fixed license specification
+license = "MIT"
+license-files = [
+    "LICENSE",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",  # Added explicit license classifier
