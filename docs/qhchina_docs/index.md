@@ -55,6 +55,7 @@ texts = [
 
 # Example of using topic modeling
 from qhchina.analytics import LDAGibbsSampler
+
 lda = LDAGibbsSampler(n_topics=10)
 lda.fit(texts)
 ```

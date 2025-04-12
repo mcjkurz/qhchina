@@ -57,6 +57,17 @@ segmenter = create_segmenter(
         "min_sentence_length": 3        # Minimum sentence length
     }
 )
+
+# Or create a segmenter with Jieba backend
+jieba_segmenter = create_segmenter(
+    backend="jieba",                    # Use Jieba backend
+    pos_tagging=True,                   # Enable POS tagging
+    filters={
+        "min_token_length": 2,          # Minimum token length to include
+        "excluded_pos": ["m", "x"],     # POS tags to exclude
+        "stopwords": ["的", "了"]       # Stopwords to exclude
+    }
+)
 ```
 
 ### Available Backends
@@ -66,7 +77,12 @@ Currently, the following segmentation backends are supported:
 - **spaCy**: A powerful NLP library with Chinese language support
   - Requires installing spaCy and a Chinese model: `pip install spacy && python -m spacy download zh_core_web_sm`
   - Supports POS filtering and other advanced features
-  - Slower but more accurate
+  - Slower but more accurate for complex NLP tasks
+
+- **Jieba**: A popular Chinese text segmentation library
+  - Requires installing Jieba: `pip install jieba`
+  - Faster processing speed, especially for large volumes of text
+  - Simpler to use with good accuracy for most use cases
 
 ### SpacySegmenter
 
@@ -80,6 +96,7 @@ segmenter = SpacySegmenter(
     model_name="zh_core_web_sm",        # spaCy model to use
     disabled=["ner", "lemmatizer"],     # Disable components for speed
     batch_size=100,                     # Batch size for processing
+    user_dict=["中国科学院", "人工智能"], # Custom user dictionary
     filters={
         "min_token_length": 2,          # Min token length to keep
         "excluded_pos": ["NUM", "SYM", "SPACE"],  # POS tags to exclude
@@ -98,6 +115,26 @@ segmenter = SpacySegmenter(
 
 Install with: `python -m spacy download zh_core_web_sm`
 
+### JiebaSegmenter
+
+The `JiebaSegmenter` class provides Chinese text segmentation using the Jieba library:
+
+```python
+from qhchina.preprocessing import JiebaSegmenter
+
+# Create a Jieba-based segmenter
+segmenter = JiebaSegmenter(
+    pos_tagging=True,                   # Enable POS tagging
+    user_dict_path="path/to/dict.txt",  # Custom user dictionary
+    filters={
+        "min_token_length": 2,          # Min token length to keep
+        "excluded_pos": ["m", "x"],     # POS tags to exclude (Jieba's POS tags)
+        "stopwords": ["的", "了"],      # Words to exclude
+        "min_sentence_length": 3        # Min sentence length to keep
+    }
+)
+```
+
 ## Filtering Options
 
 All segmenters support filtering options that can be passed during initialization:
@@ -105,7 +142,7 @@ All segmenters support filtering options that can be passed during initializatio
 | Filter | Description |
 |--------|-------------|
 | `min_token_length` | Minimum length of tokens to include (default: 1) |
-| `excluded_pos` | Set of POS tags to exclude (SpacySegmenter only) |
+| `excluded_pos` | Set of POS tags to exclude (requires POS tagging support) |
 | `min_sentence_length` | Minimum sentence length to include when using `segment_to_sentences()` |
 | `stopwords` | List of words to exclude from results |
 
@@ -122,7 +159,7 @@ stopwords = load_stopwords("zh_sim")
 
 # Create segmenter with filters
 segmenter = create_segmenter(
-    backend="spacy",
+    backend="jieba",  # Using Jieba for faster processing
     filters={"stopwords": stopwords, "min_token_length": 2}
 )
 
@@ -142,7 +179,7 @@ for text in raw_texts:
 
 ```python
 from qhchina.preprocessing import create_segmenter
-from qhchina.analytics import LDAGibbsSampler
+from qhchina.analytics.topicmodels import LDAGibbsSampler
 
 # Create segmenter
 segmenter = create_segmenter(backend="spacy")
@@ -163,10 +200,3 @@ topics = lda.get_topics(n_words=5)
 for i, topic in enumerate(topics):
     print(f"Topic {i}: {[word for word, _ in topic]}")
 ```
-
-## Performance Considerations
-
-- For large corpora, use batch processing to improve performance
-- Disable unnecessary pipeline components in spaCy for faster processing
-- For very large texts, the segmenter automatically handles text chunking
-- Use the `batch_size` parameter to optimize memory usage and speed 

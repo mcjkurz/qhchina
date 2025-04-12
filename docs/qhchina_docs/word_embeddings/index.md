@@ -249,7 +249,7 @@ for transition, word_changes in changes.items():
 You can visualize the semantic change using the standard vector projection tools:
 
 ```python
-from qhchina.analytics import project_2d
+from qhchina.analytics.vectors import project_2d
 from sklearn.decomposition import PCA
 
 # Get vectors for target word across all time periods
@@ -280,7 +280,7 @@ qhChina provides tools for analyzing and visualizing word embeddings.
 ### Vector Projection
 
 ```python
-from qhchina.analytics import project_2d
+from qhchina.analytics.vectors import project_2d
 
 # Project vectors to 2D space using PCA
 project_2d(
@@ -301,7 +301,7 @@ project_2d(
 ### Bias Analysis
 
 ```python
-from qhchina.analytics import calculate_bias, project_bias
+from qhchina.analytics.vectors import calculate_bias, project_bias
 
 # Define gender dimension
 gender_pairs = [("男人", "女人"), ("他", "她"), ("父亲", "母亲")]
@@ -325,7 +325,7 @@ project_bias(
 When comparing word vectors across different models (e.g., from different training runs), you can align them to enable direct comparison:
 
 ```python
-from qhchina.analytics import align_vectors
+from qhchina.analytics.vectors import align_vectors
 
 # Align model2's vectors to model1's vector space
 align_vectors(model1, model2)
@@ -371,7 +371,7 @@ economy_terms = model.most_similar("经济", topn=50)
 
 # Find clusters within a semantic field
 from sklearn.cluster import KMeans
-from qhchina.analytics import cosine_similarity
+from qhchina.analytics.vectors import cosine_similarity
 
 # Get vectors for economy-related terms
 vectors = [model.get_vector(word) for word, _ in economy_terms]

@@ -15,16 +15,7 @@ The `find_collocates` function allows you to identify words that co-occur with s
 ### Basic Usage
 
 ```python
-from qhchina.analytics import find_collocates
-
-# Example data: list of tokenized sentences
-sentences = [
-    ["中国", "经济", "快速", "发展"],
-    ["经济", "政策", "改革", "开放"],
-    ["改革", "开放", "推动", "中国", "经济", "发展"],
-    ["政府", "经济", "政策", "调整"],
-    # More sentences...
-]
+from qhchina.analytics.collocations import find_collocates
 
 # Find collocates of "经济"
 collocates = find_collocates(
@@ -227,20 +218,15 @@ plt.show()
 qhChina also provides a function to compute co-occurrence matrices:
 
 ```python
-from qhchina.analytics import cooc_matrix
+from qhchina.analytics.collocations import cooc_matrix
 
-# Create a co-occurrence matrix
-matrix, word_to_index = cooc_matrix(
-    documents=sentences,
-    method='window',
-    horizon=3,
-    min_abs_count=2,
-    min_doc_count=1,
-    as_dataframe=True
+# Get co-occurrence matrix
+context_words = ["经济", "发展", "科技", "创新", "改革", "政策"]
+target_matrix, row_labels, col_labels = cooc_matrix(
+    tokenized_docs, 
+    context_words=context_words,
+    window_size=5
 )
-
-# Examine co-occurrence patterns
-print(matrix)
 ```
 
 ### Matrix Parameters

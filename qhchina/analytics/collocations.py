@@ -77,7 +77,7 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
                 "collocate": candidate,
                 "exp_local": expected,
                 "obs_local": a,
-                "ratio_local": round(ratio, 2),
+                "ratio_local": ratio,
                 "obs_global": token_counter[candidate],
                 "p_value": p_value,
             })
@@ -119,7 +119,7 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words):
                 "collocate": candidate,
                 "exp_local": expected,
                 "obs_local": a,
-                "ratio_local": round(ratio, 2),
+                "ratio_local": ratio,
                 "obs_global": sentences_with_token[candidate],
                 "p_value": p_value,
             })
@@ -303,8 +303,15 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
     if use_sparse:
         row_indices, col_indices, data_values = zip(*((i, j, count) for (i, j), count in cooc_dict.items()))
         cooc_matrix_array = sparse.coo_matrix((data_values, (row_indices, col_indices)), shape=(n, n)).tocsr()
+    else:
+        # Create a dense matrix for non-sparse case
+        cooc_matrix_array = np.zeros((n, n))
+        for (i, j), count in cooc_dict.items():
+            cooc_matrix_array[i, j] = count
     
-    # Return results based on parameters
+    del cooc_dict # free memory
+    
+    # Return results based on parametersi
     if as_dataframe:
         if use_sparse:
             # Convert sparse matrix to dense for DataFrame

@@ -13,8 +13,11 @@ Topic modeling is a technique used to discover the hidden thematic structure in 
 The `LDAGibbsSampler` class provides a simple interface for topic modeling:
 
 ```python
-from qhchina.analytics import LDAGibbsSampler
+from qhchina.preprocessing.segmentation import create_segmenter
+from qhchina.analytics.topicmodels import LDAGibbsSampler
 from qhchina.helpers import load_stopwords
+import numpy as np
+import matplotlib.pyplot as plt
 
 # Example tokenized documents after Chinese word segmentation
 documents = [

@@ -86,22 +86,22 @@ filtered_results = compare_corpora(
 )
 
 # Identify words that are significantly more common in corpus A
-words_overrepresented_in_A = results[
-    (results["p_value"] < 0.05) & 
-    (results["rel_ratio"] > 1)
+words_overrepresented_in_A = filtered_results[
+    (filtered_results["p_value"] < 0.05) & 
+    (filtered_results["rel_ratio"] > 1)
 ]
 
 # Identify words that are significantly more common in corpus B
-words_overrepresented_in_B = results[
-    (results["p_value"] < 0.05) & 
-    (results["rel_ratio"] < 1)
+words_overrepresented_in_B = filtered_results[
+    (filtered_results["p_value"] < 0.05) & 
+    (filtered_results["rel_ratio"] < 1)
 ]
 
 # Visualize the most significant differences
 import matplotlib.pyplot as plt
 import numpy as np
 
-top_words = results.sort_values("p_value").head(10)
+top_words = filtered_results.sort_values("p_value").head(10)
 plt.figure(figsize=(10, 6))
 plt.barh(
     top_words["word"],
@@ -122,7 +122,7 @@ The `cooc_matrix` function allows you to create a co-occurrence matrix from a co
 ### Basic Usage
 
 ```python
-from qhchina.analytics import cooc_matrix
+from qhchina.analytics.collocations import cooc_matrix
 
 # Example data - list of tokenized documents
 documents = [
@@ -140,9 +140,6 @@ cooc = cooc_matrix(
     min_abs_count=2,     # Minimum word frequency
     as_dataframe=True    # Return as pandas DataFrame
 )
-
-# Display the matrix
-print(cooc)
 ```
 
 ### Parameters
@@ -243,7 +240,8 @@ similar_to_reform_2010s = model.most_similar("改革_2010s", topn=10)
 You can use the corpus analysis tools in combination with word embeddings for more sophisticated analyses:
 
 ```python
-from qhchina.analytics import Word2Vec, compare_corpora
+from qhchina.analytics.word2vec import Word2Vec
+from qhchina.analytics.corpora import compare_corpora
 
 # Train Word2Vec model on your corpus
 model = Word2Vec(vector_size=100, window=5, min_count=5)
@@ -259,7 +257,7 @@ comparison = compare_corpora(
 significant_words = comparison[comparison["p_value"] < 0.05]["word"].tolist()
 
 # Examine the semantic relationships between significant words
-from qhchina.analytics import project_2d
+from qhchina.analytics.vectors import project_2d
 
 # Get vectors for significant words that appear in the model
 significant_vectors = {}

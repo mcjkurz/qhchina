@@ -114,12 +114,14 @@ classifier.save("./saved_classifier")
 The `SequenceClassifier` class is the main component for text classification tasks. It wraps Hugging Face's transformers library and provides a simplified API for training, evaluation, and prediction.
 
 ```python
-from qhchina.analytics import SequenceClassifier
+from qhchina.analytics.classification import SequenceClassifier
 
-# Initialize with a pre-trained model
+# Initialize with a pre-trained BERT model
 classifier = SequenceClassifier(
     model_name="bert-base-chinese",
-    num_labels=3  # For multi-class classification
+    num_labels=2,
+    max_length=128,
+    batch_size=16
 )
 ```
 
