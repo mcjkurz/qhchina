@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, Trainer, TrainingArguments
-# from datasets import Dataset  # Removing this dependency
+from datasets import Dataset
 from sklearn.model_selection import train_test_split
 import numpy as np
 from pathlib import Path
@@ -8,69 +8,6 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import warnings
 import os
-
-# Custom dataset implementation to replace Hugging Face's Dataset
-class SimpleDataset:
-    """A minimal implementation of a dataset for use with HuggingFace Transformers Trainer."""
-    
-    def __init__(self, data_dict: Dict[str, List]):
-        """
-        Initialize the dataset with a dictionary of features.
-        
-        Args:
-            data_dict: Dictionary mapping feature names to lists of values.
-                       All lists must have the same length.
-        """
-        # Validate input
-        if not data_dict:
-            raise ValueError("data_dict cannot be empty")
-        
-        # Check all lists have the same length
-        lengths = [len(v) for v in data_dict.values()]
-        if len(set(lengths)) > 1:
-            raise ValueError("All feature lists must have the same length")
-        
-        self.data = data_dict
-        self.length = lengths[0] if lengths else 0
-        self.features = list(data_dict.keys())
-    
-    def __len__(self):
-        """Return the number of samples in the dataset."""
-        return self.length
-    
-    def __getitem__(self, idx):
-        """Get a sample from the dataset at the given index."""
-        if isinstance(idx, int):
-            if idx < 0 or idx >= self.length:
-                raise IndexError(f"Index {idx} out of bounds for dataset of size {self.length}")
-            
-            # Return a dictionary with features for this sample
-            return {feature: self.data[feature][idx] for feature in self.features}
-        else:
-            # For slicing and other advanced indexing, make a new dataset
-            if isinstance(idx, slice):
-                # Convert slice to list of indices
-                indices = list(range(*idx.indices(self.length)))
-            else:
-                # Assume idx is an iterable of indices
-                indices = list(idx)
-            
-            # Create a new dataset with the selected samples
-            new_data = {feature: [self.data[feature][i] for i in indices] for feature in self.features}
-            return SimpleDataset(new_data)
-    
-    @classmethod
-    def from_dict(cls, data_dict: Dict[str, List]):
-        """
-        Create a dataset from a dictionary of lists.
-        
-        Args:
-            data_dict: Dictionary mapping feature names to lists of values
-        
-        Returns:
-            A SimpleDataset instance
-        """
-        return cls(data_dict)
 
 class SequenceClassifier:
     """
@@ -177,10 +114,10 @@ class SequenceClassifier:
                 texts, labels, test_size=val_split, random_state=42
             )
             
-            train_dataset = SimpleDataset.from_dict({"text": train_texts, "label": train_labels})
-            val_dataset = SimpleDataset.from_dict({"text": val_texts, "label": val_labels})
+            train_dataset = Dataset.from_dict({"text": train_texts, "label": train_labels})
+            val_dataset = Dataset.from_dict({"text": val_texts, "label": val_labels})
         else:
-            train_dataset = SimpleDataset.from_dict({"text": texts, "label": labels})
+            train_dataset = Dataset.from_dict({"text": texts, "label": labels})
             val_dataset = None
             
         # Set up training arguments
@@ -274,7 +211,7 @@ class SequenceClassifier:
             raise ValueError("Cannot predict on empty text list")
             
         # Create dataset with consistent format
-        dataset = SimpleDataset.from_dict({"text": texts})
+        dataset = Dataset.from_dict({"text": texts})
         
         # Set model to evaluation mode
         self.model.eval()
@@ -336,7 +273,7 @@ class SequenceClassifier:
                           f"This may cause errors during evaluation.")
         
         # Create dataset
-        eval_dataset = SimpleDataset.from_dict({"text": texts, "label": labels})
+        eval_dataset = Dataset.from_dict({"text": texts, "label": labels})
         
         # Explicitly set model to evaluation mode
         self.model.eval()

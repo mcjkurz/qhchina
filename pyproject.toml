@@ -4,15 +4,15 @@
 requires = [
     "setuptools",
     "wheel",
-    "Cython>=0.29.24",
-    "numpy",
-    "scipy"
+    "Cython >= 0.29.24",
+    "numpy >= 2.0.2",
+    "scipy >= 1.6.1"
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.43"
+version = "0.0.44"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -27,10 +27,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy",
-    "scipy",
+    "numpy >= 2.0.2",
+    "scipy >= 1.6.1",
     "matplotlib",
-    "scikit-learn",
+    "scikit-learn >= 1.14.1",
     "tqdm",
 ]
 

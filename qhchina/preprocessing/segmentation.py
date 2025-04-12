@@ -1,4 +1,3 @@
-import spacy
 from typing import List, Dict, Any, Union, Optional, Set
 from tqdm.auto import tqdm
 import importlib
@@ -70,12 +69,15 @@ class SpacySegmenter(SegmentationWrapper):
         
         # Try to load the model, download if needed
         try:
+            import spacy
+        except ImportError:
+            raise ImportError("spacy is not installed. Please install it with 'pip install spacy'")
+        
+        try:
             self.nlp = spacy.load(model_name, disable=self.disabled)
         except OSError:
             # Model not found, try to download it
             try:
-                print(f"Downloading the model {model_name}...")
-                # Ensure spacy.cli is available
                 if importlib.util.find_spec("spacy.cli") is not None:
                     spacy.cli.download(model_name)
                 else:
