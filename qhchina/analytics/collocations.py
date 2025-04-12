@@ -126,7 +126,7 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words):
 
     return results
 
-def find_collocates(sentences, target_words, method='window', horizon=5, filters=None, as_dataframe=False):
+def find_collocates(sentences, target_words, method='window', horizon=5, filters=None, as_dataframe=True):
     """
     Find collocates for target words within a corpus of sentences.
     

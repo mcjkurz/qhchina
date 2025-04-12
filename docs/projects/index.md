@@ -6,7 +6,7 @@ permalink: /projects/
 
 # Projects
 
-At QHChina Lab, we are engaged in several research projects focused on computational analysis of Chinese texts. Here are some of our key initiatives:
+At qhChina Lab, we are engaged in several research projects focused on computational analysis of Chinese texts. Here are some of our key initiatives:
 
 ## Current Projects
 

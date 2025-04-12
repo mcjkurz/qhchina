@@ -4,9 +4,9 @@ title: About
 permalink: /about/
 ---
 
-# About QHChina Lab
+# About qhChina Lab
 
-QHChina Lab is a research group dedicated to applying quantitative methods to the study of Chinese humanities. Our interdisciplinary approach combines computational linguistics, natural language processing, and traditional humanities research.
+qhChina Lab is a research group dedicated to applying quantitative methods to the study of Chinese humanities. Our interdisciplinary approach combines computational linguistics, natural language processing, and traditional humanities research.
 
 ## Our Mission
 
@@ -25,4 +25,4 @@ Our mission is to develop innovative computational tools and methodologies speci
 
 ## Contact
 
-For more information about QHChina Lab, please contact us at [email address]. 
+For more information about qhChina Lab, please contact us at [email address]. 

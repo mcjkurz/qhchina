@@ -2,7 +2,7 @@
 layout: post
 title: "New Release: qhchina v1.0"
 date: 2023-07-15
-author: QHChina Team
+author: qhChina Team
 ---
 
 We are thrilled to announce the official release of qhchina v1.0! After months of development and testing, our Python package for Chinese humanities research is now available.

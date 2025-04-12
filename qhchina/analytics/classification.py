@@ -1,6 +1,5 @@
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, Trainer, TrainingArguments
-from datasets import Dataset
 from sklearn.model_selection import train_test_split
 import numpy as np
 from pathlib import Path
@@ -28,6 +27,11 @@ class SequenceClassifier:
         self.trainer = None
 
         # if provided, initialize the tokenizer and model
+        try:
+            from datasets import Dataset
+        except ImportError:
+            raise ImportError("datasets is not installed. Please install it with 'pip install datasets' and initialize the classifier again.")
+
         if model_name:
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
             if num_labels:
@@ -71,7 +75,8 @@ class SequenceClassifier:
     
     def train(self, texts: List[str], labels: List[int], 
               val_split: float = 0.2, epochs: int = 3, 
-              batch_size: int = 16, output_dir: str = "./results", learning_rate: float = 2e-5,
+              batch_size: int = 16, output_dir: str = "./results", 
+              learning_rate: float = 2e-5,
               eval_interval: Optional[int] = None):
         """
         Train the classifier on text data.
@@ -111,7 +116,7 @@ class SequenceClassifier:
         # Create dataset and split if validation is requested
         if val_split > 0:
             train_texts, val_texts, train_labels, val_labels = train_test_split(
-                texts, labels, test_size=val_split, random_state=42
+                texts, labels, test_size=val_split, random_state=42, stratify=labels
             )
             
             train_dataset = Dataset.from_dict({"text": train_texts, "label": train_labels})
@@ -176,10 +181,6 @@ class SequenceClassifier:
         self.model.save_pretrained(f"{output_dir}/final-model")
         self.tokenizer.save_pretrained(f"{output_dir}/final-model")
         print(f"The best model saved to {output_dir}/final-model.")
-        
-        # Important: we no longer keep a reference to the trainer
-        # This avoids confusion between the trainer's model and our model
-        del trainer
     
     def predict(self, 
                 texts: Union[str, List[str]],

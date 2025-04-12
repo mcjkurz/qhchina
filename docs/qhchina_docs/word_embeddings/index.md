@@ -67,13 +67,28 @@ skipgram_model = Word2Vec(sg=1)
 | `window` | Maximum distance between target and context words (default: 5) |
 | `min_count` | Ignores words with frequency below this threshold (default: 5) |
 | `alpha` | Initial learning rate (default: 0.025) |
-| `min_alpha` | Final learning rate (default: 0.0001) |
+| `min_alpha` | Final learning rate (default: None) |
 | `negative` | Number of negative samples for each positive sample (default: 5) |
 | `ns_exponent` | Exponent for negative sampling distribution (default: 0.75) |
 | `max_vocab_size` | Maximum vocabulary size (default: None) |
 | `sample` | Threshold for downsampling frequent words (default: 1e-3) |
 | `shrink_windows` | Whether to use dynamic window size (default: True) |
 | `seed` | Random seed for reproducibility (default: 1) |
+| `cbow_mean` | Whether to use mean or sum for context word vectors in CBOW (default: True) |
+| `use_double_precision` | Whether to use double precision for calculations (default: False) |
+| `use_cython` | Whether to use Cython for performance-critical operations (default: False) |
+| `gradient_clip` | Clipping value for gradients (default: 1.0) |
+| `exp_table_size` | Size of the precomputed sigmoid table (default: 1000) |
+| `max_exp` | Maximum value in the precomputed sigmoid table (default: 6.0) |
+
+#### Batch Training
+
+The Word2Vec implementation supports batch-based training for better performance:
+
+```python
+# Train with batching
+model.train(sentences, epochs=5, batch_size=64)
+```
 
 #### Advanced Methods
 

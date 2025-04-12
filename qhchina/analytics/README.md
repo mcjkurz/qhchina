@@ -1,4 +1,4 @@
-# QHChina Analytics Module
+# qhChina Analytics Module
 
 This module provides utilities for text analytics and topic modeling.
 

@@ -31,15 +31,9 @@ collocates = find_collocates(
     sentences=sentences,
     target_words=["经济"],
     method="window",
-    horizon=3
+    horizon=3,
+    as_dataframe=True
 )
-
-# Convert to pandas DataFrame for easier analysis
-import pandas as pd
-collocates_df = pd.DataFrame(collocates)
-
-# Sort by statistical significance
-collocates_df = collocates_df.sort_values("p_value")
 ```
 
 ### Parameters
@@ -50,8 +44,8 @@ collocates_df = collocates_df.sort_values("p_value")
 | `target_words` | List of target words (or a single word) to find collocates for |
 | `method` | Method to use: 'window' (default) or 'sentence' |
 | `horizon` | Context window size (only used with `method='window'`) |
-| `stopwords` | Optional list of stopwords to exclude from the final results (only filtered out at the end) |
-| `as_dataframe` | Whether to return results as a pandas DataFrame |
+| `filters` | Dictionary of filters to apply to results (see section on Filtering Results) |
+| `as_dataframe` | Whether to return results as a pandas DataFrame (default: True) |
 
 ### Results Interpretation
 
@@ -71,7 +65,7 @@ A small p-value indicates that the association between the target word and the c
 
 ```python
 # Get top 10 most significant collocates
-top_collocates = collocates_df.head(10)
+top_collocates = collocates.head(10)
 print("Top collocates of target word:")
 for _, row in top_collocates.iterrows():
     print(f"{row['collocate']}: observed={row['obs_local']}, expected={row['exp_local']:.2f}, ratio={row['ratio_local']}")
@@ -120,37 +114,44 @@ multi_collocates = find_collocates(
     method="window",
     horizon=3
 )
-
-# Filter to see collocates for a specific target
-china_collocates = pd.DataFrame(multi_collocates)
 china_collocates = china_collocates[china_collocates["target"] == "中国"]
 ```
 
 ## Filtering Results
 
-### Removing Stopwords
-
-You can exclude common stopwords from the final result:
+The `filters` parameter allows you to apply multiple filters to the results:
 
 ```python
-# Define Chinese stopwords
-stopwords = ["的", "了", "在", "是", "和", "有", "被", "与", "等", "及"]
+# Define filters
+filters = {
+    'max_p': 0.05,              # Maximum p-value threshold
+    'stopwords': ["的", "了", "在", "是", "和", "有", "被"],  # Words to exclude
+    'min_length': 2             # Minimum character length
+}
 
-# Find collocates excluding stopwords from the final list
+# Find collocates with filters
 filtered_collocates = find_collocates(
     sentences=sentences,
     target_words=["经济"],
-    stopwords=stopwords
+    filters=filters
 )
 ```
 
-### Filtering by Significance
+### Available Filters
 
-You can filter results to focus on statistically significant associations:
+| Filter | Description |
+|--------|-------------|
+| `max_p` | Maximum p-value threshold for statistical significance |
+| `stopwords` | List of words to exclude from results |
+| `min_length` | Minimum character length for collocates |
+
+### Filtering After Results
+
+You can also apply filters after obtaining the results:
 
 ```python
 # Get only statistically significant collocates (p < 0.05)
-significant_collocates = collocates_df[collocates_df["p_value"] < 0.05]
+significant_collocates = collocates[collocates["p_value"] < 0.05]
 
 # Sort by strength of association
 significant_collocates = significant_collocates.sort_values("ratio_local", ascending=False)
@@ -164,7 +165,7 @@ significant_collocates = significant_collocates.sort_values("ratio_local", ascen
 import matplotlib.pyplot as plt
 
 # Get top 10 collocates by significance
-top10 = collocates_df.sort_values("p_value").head(10)
+top10 = collocates.sort_values("p_value").head(10)
 
 plt.figure(figsize=(10, 6))
 plt.barh(
@@ -191,7 +192,7 @@ target = "经济"
 G.add_node(target, size=20)
 
 # Add edges to significant collocates
-significant = collocates_df[collocates_df["p_value"] < 0.01]
+significant = collocates[collocates["p_value"] < 0.01]
 significant = significant.sort_values("ratio_local", ascending=False).head(15)
 
 for _, row in significant.iterrows():
@@ -220,6 +221,42 @@ plt.title(f"Collocation Network for '{target}'")
 plt.tight_layout()
 plt.show()
 ```
+
+## Co-occurrence Matrix
+
+qhChina also provides a function to compute co-occurrence matrices:
+
+```python
+from qhchina.analytics import cooc_matrix
+
+# Create a co-occurrence matrix
+matrix, word_to_index = cooc_matrix(
+    documents=sentences,
+    method='window',
+    horizon=3,
+    min_abs_count=2,
+    min_doc_count=1,
+    as_dataframe=True
+)
+
+# Examine co-occurrence patterns
+print(matrix)
+```
+
+### Matrix Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `documents` | List of tokenized documents |
+| `method` | Method to use: 'window' (default) or 'document' |
+| `horizon` | Context window size (only with method='window') |
+| `min_abs_count` | Minimum absolute count for inclusion |
+| `min_doc_count` | Minimum document count for inclusion |
+| `vocab_size` | Maximum vocabulary size |
+| `binary` | Whether to count co-occurrences as binary (0/1) |
+| `as_dataframe` | Return as pandas DataFrame (default: True) |
+| `vocab` | Predefined vocabulary to use |
+| `use_sparse` | Use sparse matrix for memory efficiency |
 
 ## Practical Examples
 

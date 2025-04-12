@@ -25,16 +25,13 @@ corpus_b = ["美国", "经济", "市场", "金融", "美国", "贸易", "进口"
 results = compare_corpora(
     corpusA=corpus_a, 
     corpusB=corpus_b, 
-    method="fisher",  # Statistical test to use
-    min_count=1       # Minimum word frequency to include
+    method="fisher",
+    filters={"min_count": 10},
+    as_dataframe=True
 )
 
-# Convert to pandas DataFrame for easier analysis
-import pandas as pd
-results_df = pd.DataFrame(results)
-
 # Sort by statistical significance
-results_df = results_df.sort_values("p_value")
+results = results.sort_values("p_value")
 ```
 
 ### Parameters
@@ -43,13 +40,24 @@ results_df = results_df.sort_values("p_value")
 |-----------|-------------|
 | `corpusA` | List of tokens from the first corpus |
 | `corpusB` | List of tokens from the second corpus |
-| `method` | Statistical test to use: 'fisher' (default) or 'chi2' |
+| `method` | Statistical test to use: 'fisher' (default), 'chi2', or 'chi2_corrected' |
+| `filters` | Dictionary of filters to apply to results (see Filtering Options) |
+| `as_dataframe` | Whether to return results as a pandas DataFrame (default: True) |
+
+### Filtering Options
+
+The `filters` parameter accepts a dictionary with the following options:
+
+| Filter | Description |
+|--------|-------------|
 | `min_count` | Minimum count for a word to be included (int or tuple of two ints) |
-| `as_dataframe` | Whether to return results as a pandas DataFrame (default: False) |
+| `max_p` | Maximum p-value threshold for statistical significance |
+| `stopwords` | List of words to exclude from results |
+| `min_length` | Minimum character length for words |
 
 ### Results Interpretation
 
-The function returns a list of dictionaries (or a DataFrame), with each entry containing:
+The function returns a DataFrame (or list of dictionaries), with each entry containing:
 
 - `word`: The word being compared
 - `abs_freqA`: Absolute frequency in corpus A
@@ -64,23 +72,36 @@ A small p-value indicates that the difference in word frequency between the two 
 ### Example Analysis
 
 ```python
+# Apply multiple filters during corpus comparison
+filtered_results = compare_corpora(
+    corpusA=corpus_a,
+    corpusB=corpus_b,
+    method="fisher",
+    filters={
+        "min_count": 3,       # Minimum count in both corpora
+        "max_p": 0.05,        # Only statistically significant differences
+        "stopwords": ["的", "了", "和"],  # Exclude common words
+        "min_length": 2       # Only include words with at least 2 characters
+    }
+)
+
 # Identify words that are significantly more common in corpus A
-words_overrepresented_in_A = results_df[
-    (results_df["p_value"] < 0.05) & 
-    (results_df["rel_ratio"] > 1)
+words_overrepresented_in_A = results[
+    (results["p_value"] < 0.05) & 
+    (results["rel_ratio"] > 1)
 ]
 
 # Identify words that are significantly more common in corpus B
-words_overrepresented_in_B = results_df[
-    (results_df["p_value"] < 0.05) & 
-    (results_df["rel_ratio"] < 1)
+words_overrepresented_in_B = results[
+    (results["p_value"] < 0.05) & 
+    (results["rel_ratio"] < 1)
 ]
 
 # Visualize the most significant differences
 import matplotlib.pyplot as plt
 import numpy as np
 
-top_words = results_df.sort_values("p_value").head(10)
+top_words = results.sort_values("p_value").head(10)
 plt.figure(figsize=(10, 6))
 plt.barh(
     top_words["word"],
@@ -179,6 +200,44 @@ plt.tight_layout()
 plt.show()
 ```
 
+## Temporal Analysis with TempRefWord2Vec
+
+For analyzing corpus data over time, qhChina provides the `TempRefWord2Vec` model and supporting functions. This allows you to track semantic change in specific words across different time periods.
+
+```python
+from qhchina.analytics import TempRefWord2Vec
+
+# Prepare corpus data from different time periods
+time_labels = ["1980s", "1990s", "2000s", "2010s"]
+corpora = [corpus_1980s, corpus_1990s, corpus_2000s, corpus_2010s]
+
+# Target words to track for semantic change
+target_words = ["改革", "经济", "科技", "人民"]
+
+# Initialize and train the model
+model = TempRefWord2Vec(
+    corpora=corpora,          # List of corpora for different time periods
+    labels=time_labels,       # Labels for each time period
+    targets=target_words,     # Words to track for semantic change
+    balance=True,             # Balance corpus sizes
+    vector_size=100,
+    window=5,
+    min_count=5,
+    sg=1                      # Use Skip-gram model
+)
+
+# Train the model
+model.train(epochs=5)
+
+# Access temporal variants of words
+reform_1980s = model.get_vector("改革_1980s")
+reform_2010s = model.get_vector("改革_2010s")
+
+# Find similar words for a target in different time periods
+similar_to_reform_1980s = model.most_similar("改革_1980s", topn=10)
+similar_to_reform_2010s = model.most_similar("改革_2010s", topn=10)
+```
+
 ## Combining with Word Embeddings
 
 You can use the corpus analysis tools in combination with word embeddings for more sophisticated analyses:
@@ -192,9 +251,12 @@ model.build_vocab(all_sentences)
 model.train(all_sentences, epochs=5)
 
 # Analyze differences between two corpora
-comparison = compare_corpora(corpus_a, corpus_b)
-comparison_df = pd.DataFrame(comparison)
-significant_words = comparison_df[comparison_df["p_value"] < 0.05]["word"].tolist()
+comparison = compare_corpora(
+    corpusA=corpus_a, 
+    corpusB=corpus_b,
+    filters={"min_count": 5, "max_p": 0.05}
+)
+significant_words = comparison[comparison["p_value"] < 0.05]["word"].tolist()
 
 # Examine the semantic relationships between significant words
 from qhchina.analytics import project_2d
@@ -202,7 +264,7 @@ from qhchina.analytics import project_2d
 # Get vectors for significant words that appear in the model
 significant_vectors = {}
 for word in significant_words:
-    if word in model:
+    if word in model.vocab:
         significant_vectors[word] = model.get_vector(word)
 
 # Visualize the semantic space
@@ -260,4 +322,5 @@ economy_comparison = compare_corpora(
 ## References
 
 1. Dunning, T. (1993). Accurate methods for the statistics of surprise and coincidence. Computational linguistics, 19(1), 61-74.
-2. Church, K. W., & Hanks, P. (1990). Word association norms, mutual information, and lexicography. Computational linguistics, 16(1), 22-29. 
+2. Church, K. W., & Hanks, P. (1990). Word association norms, mutual information, and lexicography. Computational linguistics, 16(1), 22-29.
+3. Hamilton, W. L., Leskovec, J., & Jurafsky, D. (2016). Diachronic word embeddings reveal statistical laws of semantic change. arXiv preprint arXiv:1605.09096. 

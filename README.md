@@ -1,4 +1,4 @@
-# QHChina Lab
+# qhChina Lab
 
 **Quantitative Humanities China Lab** - A research lab and Python package for NLP tasks related to Chinese text analysis.
 
@@ -7,7 +7,7 @@
 This repository contains:
 
 1. **Python Package**: The `qhchina` package for Chinese text analysis in humanities research
-2. **Lab Website**: The QHChina Lab website located in the `/docs` folder with information about our research, projects, resources, and documentation
+2. **Lab Website**: The qhChina Lab website located in the `/docs` folder with information about our research, projects, resources, and documentation
 
 ## Python Package Features
 
@@ -55,7 +55,7 @@ For more examples, see the module documentation.
 
 The lab website is built with Jekyll and includes:
 
-- Information about the QHChina Lab and our research
+- Information about the qhChina Lab and our research
 - Project descriptions and updates
 - Resources for Chinese humanities research
 - Comprehensive documentation for the qhchina package

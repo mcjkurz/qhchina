@@ -124,29 +124,8 @@ class LDAGibbsSampler:
             from .cython_ext import lda_sampler
             self.lda_sampler = lda_sampler
             self.use_cython = True
-            print("Successfully imported Cython acceleration for LDA.")
             return True
         except ImportError:
-            # First attempt to compile the extensions if compilation module exists
-            try:
-                from .compile_extensions import compile_extensions
-                # print a warning that it might take a while
-                print("Trying to compile Cython extensions...")
-                # Call compile_extensions() to build the extension
-                compile_extensions(["lda_sampler"]) 
-                
-                # If compilation succeeded, try importing again
-                try:
-                    from .cython_ext import lda_sampler
-                    self.lda_sampler = lda_sampler
-                    self.use_cython = True
-                    print("Successfully compiled and imported Cython acceleration for LDA.")
-                    return True
-                except ImportError:
-                    pass
-            except ImportError:
-                pass
-                
             self.use_cython = False
             warnings.warn(
                 "Cython acceleration for LDA was requested but the extension "

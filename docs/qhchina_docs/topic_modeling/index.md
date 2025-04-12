@@ -195,19 +195,24 @@ lda = LDAGibbsSampler(
     min_count=2,             # Minimum word count to include in vocabulary
     max_vocab_size=10000,    # Maximum vocabulary size
     min_length=2,            # Minimum word length to include
-    stopwords=stopwords      # Set of stopwords to exclude
+    stopwords=stopwords,     # Set of stopwords to exclude
+    use_cython=True          # Whether to use Cython acceleration if available
 )
 ```
 
 ## Performance Optimization
 
-The `LDAGibbsSampler` can use optimized Cython implementations for faster sampling. The module automatically checks for Cython availability and uses it when possible. If Cython is not available, a warning will be issued, and the pure Python implementation will be used.
+The `LDAGibbsSampler` can use optimized Cython implementations for faster sampling. By default, the module automatically checks for Cython availability and uses it when possible. If Cython is not available, a warning will be issued, and the pure Python implementation will be used.
+
+You can control Cython usage with the `use_cython` parameter:
 
 ```python
-# Check if Cython is being used
-from qhchina.analytics.topicmodels import CYTHON_AVAILABLE
-print(f"Using Cython: {CYTHON_AVAILABLE}")
-```
+lda = LDAGibbsSampler(
+    n_topics=10,
+    use_cython=True
+)
+
+The Cython version typically offers 10-50x better performance than the pure Python implementation, which is particularly valuable for large corpora or many topics.
 
 ## Complete Example
 
@@ -248,7 +253,8 @@ lda = LDAGibbsSampler(
     eval_interval=100,
     stopwords=stopwords,
     min_count=2,
-    min_length=2
+    min_length=2,
+    use_cython=True
 )
 
 lda.fit(documents)
@@ -278,7 +284,8 @@ lda.save("lda_model.npy")
 class LDAGibbsSampler:
     def __init__(self, n_topics=10, alpha=None, beta=0.01, iterations=1000, 
                  random_state=None, eval_interval=None, min_count=1, 
-                 max_vocab_size=None, min_length=1, stopwords=None):
+                 max_vocab_size=None, min_length=1, stopwords=None,
+                 use_cython=True):
         """Initialize the LDA model with Gibbs sampling."""
         
     def fit(self, documents):

@@ -8,14 +8,14 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
                     corpusB: Union[List[str], List[List[str]]], 
                     method: str = 'fisher', 
                     filters: Dict = None,
-                    as_dataframe: bool = False) -> List[Dict]:
+                    as_dataframe: bool = True) -> List[Dict]:
     """
     Compare two corpora to identify statistically significant differences in word usage.
     
     Parameters:
       corpusA: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
       corpusB: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
-      method (str): 'fisher' for Fisher's exact test or 'chi2' for the chi-square test.
+      method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' for the chi-square test.
       filters (dict, optional): Dictionary of filters to apply to results:
           - 'min_count': int or tuple - Minimum count threshold(s) for a word to be included 
             (can be a single int for both corpora or tuple (min_countA, min_countB)).
@@ -26,14 +26,18 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
       as_dataframe (bool): Whether to return a pandas DataFrame.
       
     Returns:
-      List[dict]: Each dict contains information about a word's frequency in both corpora,
-                  the p-value, and the ratio of relative frequencies.
+      If as_dataframe is True:
+        pandas.DataFrame: A DataFrame containing information about each word's frequency in both corpora,
+                          the p-value, and the ratio of relative frequencies.
+      If as_dataframe is False:
+        List[dict]: Each dict contains information about a word's frequency in both corpora,
+                    the p-value, and the ratio of relative frequencies.
     """
     # Helper function to flatten list of sentences if needed
     def flatten(corpus):
         if not corpus:
             return []
-        if isinstance(corpus[0], list):
+        if isinstance(corpus[0], list): # if a list of sentences
             return [word for sentence in corpus for word in sentence]
         return corpus
     
@@ -53,14 +57,14 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
     
     # Get min_count from filters if available, default to 0
     min_count = filters.get('min_count', 0) if filters else 0
+    if isinstance(min_count, int):
+        min_count = (min_count, min_count)
     
     for word in tqdm(all_words):
         a = abs_freqA.get(word, 0)  # Count in Corpus A
         b = abs_freqB.get(word, 0)  # Count in Corpus B
         
         # Check minimum counts
-        if isinstance(min_count, int):
-            min_count = (min_count, min_count)
         if a < min_count[0] or b < min_count[1]:
             continue
             
@@ -74,6 +78,8 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             p_value = fisher_exact(table, alternative='two-sided')[1]
         elif method == 'chi2':
             _, p_value, _, _ = chi2_contingency(table, correction=True)
+        elif method == 'chi2_corrected':
+            _, p_value, _, _ = chi2_contingency(table, correction=False)
         else:
             raise ValueError("Invalid method specified. Use 'fisher' or 'chi2'")
         

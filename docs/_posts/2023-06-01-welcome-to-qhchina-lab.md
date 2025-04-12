@@ -1,15 +1,15 @@
 ---
 layout: post
-title: "Welcome to QHChina Lab"
+title: "Welcome to qhChina Lab"
 date: 2023-06-01
-author: QHChina Team
+author: qhChina Team
 ---
 
-We are excited to announce the launch of the QHChina Lab website! This site will serve as a central hub for our research on quantitative approaches to Chinese humanities.
+We are excited to announce the launch of the qhChina Lab website! This site will serve as a central hub for our research on quantitative approaches to Chinese humanities.
 
-## About QHChina Lab
+## About qhChina Lab
 
-QHChina Lab is dedicated to developing computational tools and methodologies for humanities research focused on Chinese language texts. Our interdisciplinary approach combines:
+qhChina Lab is dedicated to developing computational tools and methodologies for humanities research focused on Chinese language texts. Our interdisciplinary approach combines:
 
 - Natural Language Processing
 - Machine Learning
