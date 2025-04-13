@@ -1,9 +1,6 @@
 name: Build Wheels
 
 on:
-  push:
-    tags:
-      - 'v*'  # Run when a tag starting with 'v' is pushed
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
