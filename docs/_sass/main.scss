@@ -56,6 +56,7 @@ header p {
 
 .site-nav {
   margin-top: calc(1.5 * var(--spacing-unit));
+  text-align: center;
 }
 
 .site-nav ul {
@@ -64,10 +65,11 @@ header p {
   margin: 0;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
 }
 
 .site-nav li {
-  margin-right: calc(1.5 * var(--spacing-unit));
+  margin: 0 calc(0.75 * var(--spacing-unit));
   margin-bottom: calc(0.5 * var(--spacing-unit));
 }
 
@@ -319,8 +321,11 @@ main {
 
 /* Site logo */
 .logo-link {
-  display: inline-block;
+  display: block;
   transition: opacity 0.2s ease;
+  width: 80%;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .logo-link:hover {
@@ -329,6 +334,7 @@ main {
 }
 
 .site-logo {
+  width: 100%;
   height: auto;
   margin: calc(var(--spacing-unit)) 0;
   display: block;
