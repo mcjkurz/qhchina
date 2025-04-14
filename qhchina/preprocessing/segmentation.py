@@ -54,7 +54,7 @@ class SpacySegmenter(SegmentationWrapper):
     """Segmentation wrapper for spaCy models."""
     
     def __init__(self, model_name: str = "zh_core_web_lg", 
-                 disabled: List[str] = ["ner", "lemmatizer", "attribute_ruler"],
+                 disable: Optional[List[str]] = ["ner", "lemmatizer"],
                  batch_size: int = 200,
                  user_dict: Union[List[str], str] = None,
                  filters: Dict[str, Any] = None):
@@ -62,7 +62,7 @@ class SpacySegmenter(SegmentationWrapper):
         
         Args:
             model_name: Name of the spaCy model to use
-            disabled: List of pipeline components to disable for better performance
+            disable: List of pipeline components to disable for better performance; default setting is ["ner", "lemmatizer"]
             batch_size: Batch size for processing multiple texts
             user_dict: Custom user dictionary - either a list of words or path to a dictionary file
             filters: Dictionary of filters to apply during segmentation
@@ -72,7 +72,7 @@ class SpacySegmenter(SegmentationWrapper):
         """
         super().__init__(filters)
         self.model_name = model_name
-        self.disabled = disabled
+        self.disable = disable
         self.batch_size = batch_size
         self.user_dict = user_dict
         
@@ -83,7 +83,7 @@ class SpacySegmenter(SegmentationWrapper):
             raise ImportError("spacy is not installed. Please install it with 'pip install spacy'")
         
         try:
-            self.nlp = spacy.load(model_name, disable=self.disabled)
+            self.nlp = spacy.load(model_name, disable=self.disable)
         except OSError:
             # Model not found, try to download it
             try:
@@ -94,7 +94,7 @@ class SpacySegmenter(SegmentationWrapper):
                     from spacy.cli import download
                     download(model_name)
                 # Load the model after downloading
-                self.nlp = spacy.load(model_name, disable=self.disabled)
+                self.nlp = spacy.load(model_name, disable=self.disable)
                 print(f"Model {model_name} successfully downloaded and loaded.")
             except Exception as e:
                 raise ImportError(
@@ -489,7 +489,7 @@ class BertSegmenter(SegmentationWrapper):
                 tags = [self.labels[p.item()] for p in pred[1:length+1]]  # Skip [CLS], include all characters
             else:
                 # Include special tokens - but still limit to the actual content length
-                tags = [self.labels[p.item()] for p in pred[:length]]
+                tags = [self.labels[p.item()] for p in pred[:length+1]]
             
             all_tags.append(tags)
         

@@ -11,21 +11,29 @@
   <body>
     <div class="wrapper">
       <header>
-        <h1><a href="{{ "/" | relative_url }}">{{ site.title }}</a></h1>
-        
-        {% if site.logo %}
-          <!-- <img src="{{site.logo | relative_url}}" alt="Logo" style="width: 300px/> --> 
-        {% endif %}
+        <div class="container">
+          <h1><a href="{{ "/" | relative_url }}">{{ site.title }}</a></h1>
+          
+          {% if site.logo %}
+            <img src="{{site.logo | relative_url}}" alt="Logo" class="site-logo"/>
+          {% endif %}
 
-        <p>{{ site.description }}</p>
+          <p>{{ site.description }}</p>
 
-        {% include navigation.html %}
+          {% include navigation.html %}
+        </div>
       </header>
-      <section>
-        {{ content }}
-      </section>
+      
+      <main>
+        <div class="container">
+          {{ content }}
+        </div>
+      </main>
+      
       <footer>
-        {% include footer.html %}
+        <div class="container">
+          {% include footer.html %}
+        </div>
       </footer>
     </div>
   </body>

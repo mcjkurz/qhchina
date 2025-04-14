@@ -1,10 +1,23 @@
-def load_texts(filenames):
+def load_text(filename, encoding="utf-8"):
+    """
+    Loads text from a file.
+
+    Parameters:
+    filename (str): The filename to load text from.
+    encoding (str): The encoding of the file. Default is "utf-8".
+    """
+    if isinstance(filename, str):
+        return load_texts([filename], encoding)[0]
+    else:
+        raise ValueError("filename must be a string")
+
+def load_texts(filenames, encoding="utf-8"):
     """
     Loads text from a file or a list of files.
 
     Parameters:
     filenames (str or list): The filename or list of filenames to load text from.
-
+    encoding (str): The encoding of the file. Default is "utf-8".
     Returns:
     str or list: The text content of the file or a list of text contents if multiple files are provided.
     """
@@ -12,7 +25,7 @@ def load_texts(filenames):
         filenames = [filenames]
     texts = []
     for filename in filenames:
-        with open(filename, 'r', encoding='utf-8') as file:
+        with open(filename, 'r', encoding=encoding) as file:
             texts.append(file.read())
     return texts
 

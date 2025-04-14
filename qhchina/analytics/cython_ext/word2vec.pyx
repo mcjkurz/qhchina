@@ -1,5 +1,5 @@
 """
-Fast Word2Vec training operations implemented in Cython
+Fast Word2Vec training operations implemented in Cython, inspired heavily by gensim.models.word2vec
 ------------------------------------------------------
 This module provides optimized implementations of the core training
 operations for Word2Vec, including:
@@ -29,8 +29,6 @@ from libc.math cimport exp, log, fmax, fmin
 from libc.stdlib cimport rand, RAND_MAX, srand
 from libc.time cimport time
 from cython cimport floating
-# Remove PyDict imports since we're not using dictionaries anymore
-# Add Python print function
 from builtins import print as py_print
 
 # Import BLAS functions for optimized linear algebra
@@ -45,13 +43,15 @@ ctypedef fused real_t:
     
 ctypedef np.int32_t ITYPE_t    # for word indices
 
-# Maximum gradient value for clipping
-DEF DEFAULT_MAX_GRAD = 5.0  # Default value, can be overridden by gradient_clip parameter
+# for grad clipping
+DEF DEFAULT_MAX_GRAD = 1.0  # Can be overridden by gradient_clip parameter
 
 # Constants for BLAS
 cdef int ONE = 1
 cdef float ONEF = 1.0
 cdef double ONED = 1.0
+cdef float ZEROF = 0.0  # Add constant for zeroing vectors
+cdef double ZEROD = 0.0  # Add constant for zeroing vectors
 
 # Global variables for shared resources
 # These will be initialized once per training session
@@ -141,7 +141,7 @@ def init_globals(
     log_sigmoid_table,  # Can be either float32 or float64
     float max_exp,  # Maximum exp value for sigmoid calculations
     noise_distribution,  # Can be either float32 or float64
-    int vector_size,  # Vector size, default 300 for backward compatibility
+    int vector_size,
     float gradient_clip=DEFAULT_MAX_GRAD,
     int negative=5,
     float learning_rate=0.025,
@@ -215,14 +215,13 @@ def init_globals(
     LEARNING_RATE = learning_rate
     CBOW_MEAN = cbow_mean
     VECTOR_SIZE = vector_size
+    dtype = np.float64 if USING_DOUBLE_PRECISION else np.float32
 
-    # Initialize alias method for efficient sampling
-    init_alias(noise_distribution if not USING_DOUBLE_PRECISION 
-               else np.asarray(noise_distribution, dtype=np.float32))
+    # Initialize alias method for sampling
+    init_alias(np.asarray(noise_distribution, dtype=dtype))
     
     # Initialize reusable buffers for single example training functions
     # Use the appropriate dtype for the reusable buffers
-    dtype = np.float64 if USING_DOUBLE_PRECISION else np.float32
     _reusable_input_grad = np.zeros(VECTOR_SIZE, dtype=dtype)
     _reusable_output_grads = np.zeros((NOISE_DISTRIBUTION_SIZE, VECTOR_SIZE), dtype=dtype)
     _reusable_output_mask = np.zeros(NOISE_DISTRIBUTION_SIZE, dtype=np.int8)
@@ -355,6 +354,14 @@ cdef inline void our_scal(real_t *vec, real_t alpha, int size) noexcept:
     else:
         dscal(&size, &alpha, vec, &inc)
 
+# Add a new function to efficiently zero a vector
+cdef inline void our_zero(real_t *vec, int size) noexcept:
+    """Zero out a vector using BLAS scal with zero factor"""
+    if real_t is np.float32_t:
+        sscal(&size, &ZEROF, vec, &ONE)
+    else:
+        dscal(&size, &ZEROD, vec, &ONE)
+
 # Fast sigmoid implementation using table lookup
 cdef inline real_t fast_sigmoid(real_t x) noexcept:
     """Fast sigmoid computation using precomputed lookup table"""
@@ -444,17 +451,15 @@ cdef real_t train_skipgram_single(
     cdef int vocab_size = W.shape[0]
     cdef int j, k, neg_idx
     cdef real_t score, prediction, gradient, neg_loss, loss = 0.0
-    cdef real_t pos_loss = 0.0  # Track positive sample loss separately
+    cdef real_t pos_loss = 0.0
     
     # Use reusable buffers instead of allocating new memory
-    # First reset the buffers to zeros
     cdef real_t[:] input_grad = _reusable_input_grad
     cdef real_t[:, :] output_grads = _reusable_output_grads
     cdef np.int8_t[:] output_mask = _reusable_output_mask
     
-    # Zero out the buffers - only the portion we'll actually use
-    for j in range(vector_size):
-        input_grad[j] = 0.0
+    # Zero out the buffers with BLAS - only the portion we'll actually use
+    our_zero(&input_grad[0], vector_size)
     
     for j in range(vocab_size):
         output_mask[j] = 0
@@ -564,9 +569,8 @@ def train_skipgram_batch(
         in_idx = input_indices[i]
         out_idx = output_indices[i]
         
-        # Reset the input gradient buffer
-        for j in range(vector_size):
-            input_grad[j] = 0.0
+        # Reset the input gradient buffer using BLAS
+        our_zero(&input_grad[0], vector_size)
         
         # === POSITIVE EXAMPLE ===
         # Compute dot product
@@ -660,23 +664,17 @@ cdef real_t train_cbow_single(
     cdef np.int8_t[:] neg_mask = _reusable_neg_mask
     cdef real_t[:] combined_input = _reusable_combined_input  # Use the global reusable buffer
     
-    # Reset the buffers
-    for j in range(vector_size):
-        center_grad[j] = 0.0
+    # Reset the buffers using BLAS
+    our_zero(&center_grad[0], vector_size)
+    our_zero(&combined_input[0], vector_size)
         
     for j in range(vocab_size):
         context_mask[j] = 0
         neg_mask[j] = 0
-        if j < context_grads.shape[0]:
-            for k in range(vector_size):
-                if k < context_grads.shape[1]:
-                    context_grads[j, k] = 0.0
-                    neg_grads[j, k] = 0.0
-        
-    # Reset combined input vector
-    for j in range(vector_size):
-        combined_input[j] = 0.0
-        
+        for k in range(vector_size):
+            context_grads[j, k] = 0.0
+            neg_grads[j, k] = 0.0
+    
     # Combine context vectors using BLAS for efficiency
     for c in range(context_size):
         ctx_idx = context_indices[c]
@@ -765,12 +763,12 @@ cdef real_t train_cbow_single(
     
     # Update negative sample vectors
     for j in range(vocab_size):
-        if j < neg_mask.shape[0] and neg_mask[j] == 1:  # Only update vectors that were used
+        if neg_mask[j] == 1: # Only update vectors that were used
             our_axpy(&neg_grads[j, 0], &W_prime[j, 0], -LEARNING_RATE, vector_size)
     
     # Update context word vectors
     for j in range(vocab_size):
-        if j < context_mask.shape[0] and context_mask[j] == 1:  # Only update context words
+        if context_mask[j] == 1: # Only update context words
             our_axpy(&context_grads[j, 0], &W[j, 0], -LEARNING_RATE, vector_size)
         
     return loss
@@ -821,9 +819,8 @@ def train_cbow_batch(
         if not context_indices:
             continue
             
-        # Reset the combined input vector
-        for j in range(vector_size):
-            combined_input[j] = 0.0
+        # Reset the combined input vector using BLAS
+        our_zero(&combined_input[0], vector_size)
         
         # Combine context vectors
         context_size = len(context_indices)
@@ -852,9 +849,8 @@ def train_cbow_batch(
             W_prime[center_idx, j] += neg_lr * gradient * combined_input[j]
             
         # Calculate context word gradients for positive sample
-        # Reset context_grad buffer
-        for j in range(vector_size):
-            context_grad[j] = 0.0
+        # Reset context_grad buffer using BLAS
+        our_zero(&context_grad[0], vector_size)
             
         # Compute context gradient scaling factor
         input_gradient_scale = gradient

@@ -213,37 +213,6 @@ plt.tight_layout()
 plt.show()
 ```
 
-## Co-occurrence Matrix
-
-qhChina also provides a function to compute co-occurrence matrices:
-
-```python
-from qhchina.analytics.collocations import cooc_matrix
-
-# Get co-occurrence matrix
-context_words = ["经济", "发展", "科技", "创新", "改革", "政策"]
-target_matrix, row_labels, col_labels = cooc_matrix(
-    tokenized_docs, 
-    context_words=context_words,
-    window_size=5
-)
-```
-
-### Matrix Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `documents` | List of tokenized documents |
-| `method` | Method to use: 'window' (default) or 'document' |
-| `horizon` | Context window size (only with method='window') |
-| `min_abs_count` | Minimum absolute count for inclusion |
-| `min_doc_count` | Minimum document count for inclusion |
-| `vocab_size` | Maximum vocabulary size |
-| `binary` | Whether to count co-occurrences as binary (0/1) |
-| `as_dataframe` | Return as pandas DataFrame (default: True) |
-| `vocab` | Predefined vocabulary to use |
-| `use_sparse` | Use sparse matrix for memory efficiency |
-
 ## Practical Examples
 
 ### Comparing Collocations Across Corpora

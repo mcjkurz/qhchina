@@ -3,9 +3,10 @@ layout: default
 title: Home
 ---
 
-# qhChina Lab
-
-qhChina is dedicated to quantitative research in Chinese humanities, providing computational tools and resources for researchers in the field.
+<div class="hero-section">
+  <h1>qhChina Lab</h1>
+  <p class="lead-text">qhChina is dedicated to quantitative research in Chinese humanities, providing computational tools and resources for researchers in the field.</p>
+</div>
 
 ## Latest News and Updates
 
@@ -17,7 +18,7 @@ qhChina is dedicated to quantitative research in Chinese humanities, providing c
       </h2>
       <span class="post-date">{{ post.date | date: "%B %d, %Y" }}</span>
       <p>{{ post.excerpt }}</p>
-      <a href="{{ post.url | relative_url }}">Read more</a>
+      <a href="{{ post.url | relative_url }}" class="read-more">Read more</a>
     </div>
   {% endfor %}
 </div>

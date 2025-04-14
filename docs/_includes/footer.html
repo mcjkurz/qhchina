@@ -1,10 +1,15 @@
 <div class="footer-content">
-  <p>&copy; {{ site.time | date: '%Y' }} qhChina Lab. All rights reserved.</p>
+  <div class="footer-section">
+    <p>&copy; {{ site.time | date: '%Y' }} qhChina Lab. All rights reserved.</p>
+  </div>
+  
   {% if site.github_username %}
-  <p>
-    <a href="https://github.com/{{ site.github_username }}" target="_blank">
-      GitHub
-    </a>
-  </p>
+  <div class="footer-section">
+    <div class="social-links">
+      <a href="https://github.com/{{ site.github_username }}" target="_blank" class="social-link">
+        GitHub
+      </a>
+    </div>
+  </div>
   {% endif %}
 </div> 

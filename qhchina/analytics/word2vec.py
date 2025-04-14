@@ -1460,13 +1460,6 @@ class Word2Vec:
                     progress_bar.update(progress_bar.total - progress_bar.n)
                 progress_bar.close()
                 
-                # Print epoch summary
-                avg_loss = epoch_loss / examples_processed_in_epoch if examples_processed_in_epoch > 0 else 0
-                print(f"Epoch {epoch+1}/{epochs} completed. Loss: {avg_loss:.6f}, Examples: {examples_processed_in_epoch}")
-            else:
-                # If no progress bar, just print a simple status update
-                print(f"Epoch {epoch+1}/{epochs} completed. Examples: {examples_processed_in_epoch}, Final LR: {current_alpha:.6f}")
-            
             # Add epoch loss to total if we're calculating it
             if calculate_loss:
                 total_loss += epoch_loss
