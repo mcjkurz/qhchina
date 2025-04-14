@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -37,9 +37,19 @@ jobs:
       # Windows builds
       - name: Build Windows wheels
         if: runner.os == 'Windows'
-        uses: pypa/cibuildwheel@v2.16.2
+        run: |
+          python -m pip install cibuildwheel
+          python -m cibuildwheel --output-dir wheelhouse
         env:
           CIBW_ARCHS: "AMD64"  # Only build 64-bit wheels
+          CIBW_BUILD: "cp310-win* cp311-win* cp312-win* cp313-win*"  # Build for Python 3.10-3.13
+          
+      # macOS builds
+      - name: Build macOS wheels
+        if: runner.os == 'macOS'
+        uses: pypa/cibuildwheel@v2.16.2
+        env:
+          CIBW_ARCHS: "x86_64 arm64"
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"  # Build for Python 3.10-3.13
           
       # Upload artifacts
