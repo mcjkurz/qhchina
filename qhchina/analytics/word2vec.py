@@ -81,7 +81,7 @@ class Word2Vec:
         max_exp: float = 6.0,
         max_vocab_size: Optional[int] = None,
         use_double_precision: bool = False,
-        use_cython: bool = False,
+        use_cython: bool = True,
         gradient_clip: float = 1.0,
     ):
         """
@@ -1117,7 +1117,7 @@ class Word2Vec:
               epochs: int = 1, 
               alpha: Optional[float] = None,
               min_alpha: Optional[float] = None,
-              batch_size: int = 0, 
+              batch_size: int = 10000, 
               callbacks: List[Callable] = None,
               calculate_loss: bool = True) -> Optional[float]:
         """
@@ -1129,7 +1129,7 @@ class Word2Vec:
         epochs: Number of training iterations over the corpus
         alpha: Initial learning rate
         min_alpha: Minimum allowed learning rate
-        batch_size: Batch size for training; if 0, no batching is used
+        batch_size: Batch size for training; if 0, no batching is used; default is 10000;
         callbacks: List of callback functions to call after each epoch
         calculate_loss: Whether to calculate and return the final loss
         
@@ -1522,6 +1522,20 @@ class Word2Vec:
         """
         
         return self.get_vector(word)
+    
+    def __contains__(self, word: str) -> bool:
+        """
+        Check if a word is in the vocabulary using the 'in' operator.
+        
+        Parameters:
+        -----------
+        word: Word to check
+        
+        Returns:
+        --------
+        True if the word is in the vocabulary, False otherwise
+        """
+        return word in self.vocab
     
     def most_similar(self, word: str, topn: int = 10) -> List[Tuple[str, float]]:
         """

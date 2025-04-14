@@ -8,6 +8,11 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 import warnings
 import os
 
+try:
+    from datasets import Dataset
+except ImportError:
+    raise ImportError("datasets is not installed. Please install it with 'pip install datasets'")
+
 class SequenceClassifier:
     """
     A simplified text classifier based on pretrained BERT models.
@@ -27,11 +32,6 @@ class SequenceClassifier:
         self.trainer = None
 
         # if provided, initialize the tokenizer and model
-        try:
-            from datasets import Dataset
-        except ImportError:
-            raise ImportError("datasets is not installed. Please install it with 'pip install datasets' and initialize the classifier again.")
-
         if model_name:
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
             if num_labels:
@@ -150,13 +150,11 @@ class SequenceClassifier:
             else:
                 training_args_dict["eval_strategy"] = "epoch"
                 training_args_dict["save_strategy"] = "epoch"
-                training_args_dict["logging_strategy"] = "steps"
-                training_args_dict["logging_steps"] = 100
+                training_args_dict["logging_strategy"] = "epoch"
         else:
             training_args_dict["eval_strategy"] = "no" 
             training_args_dict["save_strategy"] = "no"
-            training_args_dict["logging_strategy"] = "steps"
-            training_args_dict["logging_steps"] = 100
+            training_args_dict["logging_strategy"] = "epoch"
         
         training_args = TrainingArguments(**training_args_dict)
         

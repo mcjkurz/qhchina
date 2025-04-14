@@ -20,7 +20,7 @@ def project_2d(vectors,
     Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
     Parameters:
-    vectors (list of lists or dict {label: vector}): Vectors to project.
+    vectors (list of vectors or dict {label: vector}): Vectors to project.
     labels (list of str, optional): List of labels for the vectors. Defaults to None.
     method (str, optional): Method to use for projection ('pca', 'tsne', or 'umap'). Defaults to 'pca'.
     title (str, optional): Title of the plot. Defaults to None.
