@@ -292,12 +292,14 @@ footer {
 }
 
 .container {
-  width: 100%;
-  margin: 0;
+  width: 80%;
+  max-width: 1400px;
+  margin: 0 auto;
   padding: 0;
 }
 
 main {
+  width: 100%;
   padding: calc(1.5 * var(--spacing-unit)) 0;
 }
 
@@ -305,7 +307,8 @@ main {
 @media (max-width: 768px) {
   .wrapper,
   .logo-section,
-  .nav-section {
+  .nav-section,
+  .container {
     width: 90%;
   }
   
@@ -340,7 +343,8 @@ main {
 @media (max-width: 576px) {
   .wrapper,
   .logo-section,
-  .nav-section {
+  .nav-section,
+  .container {
     width: 95%;
   }
   
