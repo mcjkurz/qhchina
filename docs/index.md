@@ -3,12 +3,14 @@ layout: default
 title: Home
 ---
 
+<!--
 <div class="hero-section">
   <h1>qhChina Lab</h1>
   <p class="lead-text">qhChina is dedicated to quantitative research in Chinese humanities, providing computational tools and resources for researchers in the field.</p>
 </div>
+-->
 
-## Latest News and Updates
+## Latest Updates
 
 <div class="posts-list">
   {% for post in site.posts limit:5 %}
