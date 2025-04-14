@@ -90,3 +90,12 @@ div[class^="language-"] {
 .highlight .vg { color: #008080; }
 .highlight .vi { color: #008080; }
 .highlight .il { color: #099; }
+
+.highlight .kr { 
+  font-weight: bold; 
+}
+
+// Specific Python import/from highlighting
+.highlight .kn { 
+  font-weight: bold;
+}
