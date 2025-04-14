@@ -28,9 +28,40 @@ body {
 
 header {
   margin-bottom: calc(2 * var(--spacing-unit));
+}
+
+.logo-section {
+  width: 100%;
+  background-color: var(--secondary-color);
+  padding: 0;
+  margin: 0;
+}
+
+.nav-section {
+  width: 100%;
+  background-color: white;
   padding: calc(1.5 * var(--spacing-unit)) 0;
   border-bottom: 1px solid var(--border-color);
-  background-color: var(--secondary-color);
+}
+
+.logo-link {
+  display: block;
+  transition: opacity 0.2s ease;
+  width: 80%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.logo-link:hover {
+  opacity: 0.9;
+  text-decoration: none;
+}
+
+.site-logo {
+  width: 100%;
+  height: auto;
+  margin: 0;
+  display: block;
 }
 
 header h1 {
@@ -317,25 +348,4 @@ main {
   .social-link {
     margin: 0 calc(0.5 * var(--spacing-unit));
   }
-}
-
-/* Site logo */
-.logo-link {
-  display: block;
-  transition: opacity 0.2s ease;
-  width: 80%;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.logo-link:hover {
-  opacity: 0.9;
-  text-decoration: none;
-}
-
-.site-logo {
-  width: 100%;
-  height: auto;
-  margin: calc(var(--spacing-unit)) 0;
-  display: block;
 } 

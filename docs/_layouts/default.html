@@ -11,7 +11,7 @@
   <body>
     <div class="wrapper">
       <header>
-        <div class="container">
+        <div class="logo-section">
           {% if site.logo %}
             <a href="{{ "/" | relative_url }}" class="logo-link">
               <img src="{{site.logo | relative_url}}" alt="{{ site.title }}" class="site-logo"/>
@@ -19,10 +19,13 @@
           {% else %}
             <h1><a href="{{ "/" | relative_url }}">{{ site.title }}</a></h1>
           {% endif %}
+        </div>
 
-          <p>{{ site.description }}</p>
-
-          {% include navigation.html %}
+        <div class="nav-section">
+          <div class="container">
+            <p>{{ site.description }}</p>
+            {% include navigation.html %}
+          </div>
         </div>
       </header>
       
