@@ -21,7 +21,8 @@ body {
 }
 
 .wrapper {
-  max-width: 1140px;
+  width: 80%;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 0 var(--spacing-unit);
 }
@@ -288,8 +289,8 @@ footer {
 }
 
 .container {
-  width: 100%;
-  max-width: 1140px;
+  width: 80%;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 0 var(--spacing-unit);
 }
@@ -300,6 +301,12 @@ main {
 
 /* Responsive styles */
 @media (max-width: 768px) {
+  .wrapper,
+  .container {
+    width: 90%;
+    padding: 0 calc(0.5 * var(--spacing-unit));
+  }
+  
   .site-nav ul {
     flex-direction: column;
   }
@@ -329,6 +336,12 @@ main {
 }
 
 @media (max-width: 576px) {
+  .wrapper,
+  .container {
+    width: 95%;
+    padding: 0 calc(0.25 * var(--spacing-unit));
+  }
+  
   header h1 {
     font-size: 1.8rem;
   }
