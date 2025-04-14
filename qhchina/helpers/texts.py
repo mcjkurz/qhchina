@@ -109,18 +109,19 @@ def load_stopwords(language: str = "zh_sim") -> set:
         print(f"Warning: Stopwords file not found for language '{language}' at path {stopwords_path}")
         return set()
     
-def split_into_chunks(tokens, chunk_size, overlap=0.0):
+def split_into_chunks(sequence, chunk_size, overlap=0.0):
     """
-    Splits a list of tokens into chunks with optional overlap between consecutive chunks.
+    Splits text or a list of tokens into chunks with optional overlap between consecutive chunks.
     
     Parameters:
-    tokens (list): The list of tokens to be split.
-    chunk_size (int): The size of each chunk.
+    sequence (str or list): The text string or list of tokens to be split.
+    chunk_size (int): The size of each chunk (characters for text, items for lists).
     overlap (float): The fraction of overlap between consecutive chunks (0.0 to 1.0).
                     Default is 0.0 (no overlap).
     
     Returns:
-    list: A list of chunks, where each chunk is a list of tokens.
+    list: A list of chunks. If input is a string, each chunk is a string.
+         If input is a list, each chunk is a list of tokens.
     
     Raises:
     ValueError: If overlap is not between 0 and 1.
@@ -128,18 +129,18 @@ def split_into_chunks(tokens, chunk_size, overlap=0.0):
     if not 0 <= overlap < 1:
         raise ValueError("Overlap must be between 0 and 1")
         
-    if not tokens:
+    if not sequence:
         return []
         
     overlap_size = int(chunk_size * overlap)
     stride = chunk_size - overlap_size
     
     chunks = []
-    for i in range(0, len(tokens) - chunk_size + 1, stride):
-        chunks.append(tokens[i:i + chunk_size])
+    for i in range(0, len(sequence) - chunk_size + 1, stride):
+        chunks.append(sequence[i:i + chunk_size])
     
-    # Handle the last chunk if there are remaining tokens
-    if i + chunk_size < len(tokens):
-        chunks.append(tokens[-chunk_size:])
+    # Handle the last chunk if there are remaining tokens/characters
+    if i + chunk_size < len(sequence):
+        chunks.append(sequence[-chunk_size:])
         
     return chunks

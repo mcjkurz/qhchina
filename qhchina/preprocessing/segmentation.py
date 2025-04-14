@@ -1,7 +1,9 @@
 from typing import List, Dict, Any, Union, Optional, Set
 from tqdm.auto import tqdm
+from qhchina.helpers.texts import split_into_chunks
 import importlib
 import re
+
 
 class SegmentationWrapper:
     """Base segmentation wrapper class that can be extended for different segmentation tools."""
@@ -135,17 +137,6 @@ class SpacySegmenter(SegmentationWrapper):
         return [token for token in tokens 
                 if token.pos_ not in excluded_pos and len(token.text) >= min_length]
     
-    def _split_text_into_chunks(self, text: str, max_length: int) -> List[str]:
-        """Split text into chunks of maximum length."""
-        if len(text) <= max_length:
-            return [text]
-            
-        chunks = []
-        for i in range(0, len(text), max_length):
-            chunks.append(text[i:i + max_length])
-        
-        return chunks
-    
     def segment(self, text: Union[str, List[str]]) -> Union[List[str], List[List[str]]]:
         """Segment text(s) into tokens, removing unwanted tokens.
         
@@ -160,7 +151,7 @@ class SpacySegmenter(SegmentationWrapper):
             # Check if the text is longer than the model's max length
             if len(text) > self.nlp.max_length:
                 # Split text into chunks and process each chunk
-                chunks = self._split_text_into_chunks(text, self.nlp.max_length)
+                chunks = split_into_chunks(text, self.nlp.max_length)
                 all_tokens = []
                 
                 for chunk in chunks:

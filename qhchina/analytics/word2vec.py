@@ -426,49 +426,56 @@ class Word2Vec:
         """
         # Process sentences one by one
         for sentence in sentences:
-            # Filter words based on subsampling and vocabulary
-            if self.sample > 0:
-                # Filter words based on subsampling probability
-                kept_words = [
-                    word for word in sentence 
-                    if word in self.vocab and np.random.random() >= self.discard_probs[word]
-                ]
+            sentence_len = len(sentence)
+            
+            # Pre-compute all random numbers needed for this sentence
+            # 1. Pre-generate window sizes for each position
+            if self.shrink_windows:
+                window_sizes = np.random.randint(1, self.window + 1, size=sentence_len)
             else:
-                # No subsampling, just filter out words not in vocabulary
-                kept_words = [word for word in sentence if word in self.vocab]
-            
-            # Convert words to indices
-            indices = [self.vocab[word] for word in kept_words]
-            
-            sentence_len = len(indices)
-            if sentence_len == 0:
-                continue
-            
-            # Process each word in the sentence
-            for pos in range(sentence_len):
-                # Determine window size for this target word
-                if self.shrink_windows:
-                    # Uniform sampling from 1 to self.window (inclusive)
-                    dynamic_window = random.randint(1, self.window)
-                else:
-                    dynamic_window = self.window
+                window_sizes = np.full(sentence_len, self.window)
                 
-                # Define context window bounds
+            # 2. Pre-generate subsampling random values for all words
+            if self.sample > 0:
+                random_values = np.random.random(sentence_len)
+            
+            # 3. Pre-compute all word indices (-1 for words not in vocabulary)
+            word_indices = [self.vocab.get(word, -1) for word in sentence]
+            
+            # Process each position in the sentence
+            for pos in range(sentence_len):
+                center_idx = word_indices[pos]
+                
+                # Skip if word is not in vocabulary
+                if center_idx == -1:
+                    continue
+                
+                # Apply subsampling to center word
+                if self.sample > 0 and random_values[pos] < self.discard_probs[sentence[pos]]:
+                    continue
+                    
+                # Determine window boundaries on the original sentence
+                dynamic_window = window_sizes[pos]
                 start = max(0, pos - dynamic_window)
                 end = min(sentence_len, pos + dynamic_window + 1)
                 
-                # Center word is the input
-                center_idx = indices[pos]
-                
-                # Generate training examples (center, context)
+                # For each potential context position within the window
                 for context_pos in range(start, end):
                     # Skip the center word itself
                     if context_pos == pos:
                         continue
                     
-                    # Yield example (input_idx, output_idx) 
-                    # For Skip-gram: input is center, output is context
-                    context_idx = indices[context_pos]
+                    context_idx = word_indices[context_pos]
+                    
+                    # Skip if context word is not in vocabulary
+                    if context_idx == -1:
+                        continue
+                        
+                    # Apply subsampling to context word
+                    if self.sample > 0 and random_values[context_pos] < self.discard_probs[sentence[context_pos]]:
+                        continue
+                    
+                    # Both words passed filters, yield the example
                     yield (center_idx, context_idx)
 
     def generate_cbow_examples(self, 
@@ -492,52 +499,62 @@ class Word2Vec:
         """
         # Process sentences one by one
         for sentence in sentences:
-            # Filter words based on subsampling and vocabulary
-            if self.sample > 0:
-                # Filter words based on subsampling probability
-                kept_words = [
-                    word for word in sentence 
-                    if word in self.vocab and np.random.random() >= self.discard_probs[word]
-                ]
+            sentence_len = len(sentence)
+            
+            # Pre-compute all random numbers needed for this sentence
+            # 1. Pre-generate window sizes for each position
+            if self.shrink_windows:
+                window_sizes = np.random.randint(1, self.window + 1, size=sentence_len)
             else:
-                # No subsampling, just filter out words not in vocabulary
-                kept_words = [word for word in sentence if word in self.vocab]
-            
-            # Convert words to indices
-            indices = [self.vocab[word] for word in kept_words]
-            
-            sentence_len = len(indices)
-            if sentence_len == 0:
-                continue
-            
-            # Process each word in the sentence
-            for pos in range(sentence_len):
-                # Determine window size for this target word
-                if self.shrink_windows:
-                    # Uniform sampling from 1 to self.window (inclusive)
-                    dynamic_window = random.randint(1, self.window)
-                else:
-                    dynamic_window = self.window
+                window_sizes = np.full(sentence_len, self.window)
                 
-                # Define context window bounds
+            # 2. Pre-generate subsampling random values for all words
+            if self.sample > 0:
+                random_values = np.random.random(sentence_len)
+            
+            # 3. Pre-compute all word indices (-1 for words not in vocabulary)
+            word_indices = [self.vocab.get(word, -1) for word in sentence]
+            
+            # Process each position in the sentence
+            for pos in range(sentence_len):
+                center_idx = word_indices[pos]
+                
+                # Skip if center word is not in vocabulary
+                if center_idx == -1:
+                    continue
+                
+                # Apply subsampling to center word
+                if self.sample > 0 and random_values[pos] < self.discard_probs[sentence[pos]]:
+                    continue
+                    
+                # Determine window boundaries on the original sentence
+                dynamic_window = window_sizes[pos]
                 start = max(0, pos - dynamic_window)
                 end = min(sentence_len, pos + dynamic_window + 1)
                 
-                # Get all context indices for this position
+                # Collect context indices with vocabulary and subsampling filters
                 context_indices = []
                 for context_pos in range(start, end):
-                    if context_pos != pos:  # Skip the center word
-                        context_indices.append(indices[context_pos])
+                    # Skip the center word itself
+                    if context_pos == pos:
+                        continue
+                    
+                    context_idx = word_indices[context_pos]
+                    
+                    # Skip if context word is not in vocabulary
+                    if context_idx == -1:
+                        continue
+                        
+                    # Apply subsampling to context word
+                    if self.sample > 0 and random_values[context_pos] < self.discard_probs[sentence[context_pos]]:
+                        continue
+                    
+                    # Word passed all filters, add to context
+                    context_indices.append(context_idx)
                 
-                if not context_indices:
-                    continue
-                
-                # Center word is the output
-                center_idx = indices[pos]
-                
-                # Yield example (input_indices, output_idx)
-                # For CBOW: inputs are context words, output is center
-                yield (context_indices, center_idx)
+                # Only yield examples if we have at least one context word
+                if context_indices:
+                    yield (context_indices, center_idx)
 
     def _train_skipgram_example_python(self, input_idx: int, output_idx: int, learning_rate: float) -> float:
         """
@@ -1154,11 +1171,9 @@ class Word2Vec:
         # For tracking moving average loss
         recent_losses = []
         
-        # Count total examples for progress bar and learning rate decay
-        if decay_alpha or calculate_loss:
-            print(f"Counting total examples ({decay_alpha=}, {calculate_loss=})...")
-            total_example_count = 0
-        
+        # Only count total examples if needed for learning rate decay
+        if decay_alpha:
+            print(f"Counting total examples for learning rate decay (starting alpha = {self.alpha}, min_alpha = {self.min_alpha})...")
             # Calculate total example count
             if self.sg:
                 for _ in self.generate_skipgram_examples(sentences):
@@ -1191,11 +1206,19 @@ class Word2Vec:
             
             # Create a progress bar if calculating loss
             if calculate_loss:
+                # Choose bar format based on whether we know the total
+                if decay_alpha:
+                    # When we know total, show percentage
+                    bar_format = '{l_bar}{bar}| {percentage:.2f}% [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
+                else:
+                    # When we don't know total, don't show percentage or remaining time
+                    bar_format = '{l_bar}{bar}| [{elapsed}, {rate_fmt}{postfix}]'
+                
                 # Show a progress bar for this epoch
                 progress_bar = tqdm(
                     desc=f"Epoch {epoch+1}/{epochs}",
-                    total=total_example_count if total_example_count else None,
-                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]',
+                    total=total_example_count if decay_alpha else None,
+                    bar_format=bar_format,
                     unit="ex",
                     mininterval=0.5  # Update twice per second
                 )
@@ -1239,7 +1262,11 @@ class Word2Vec:
                                     
                                 # Update progress bar
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}")
+                                if decay_alpha: 
+                                    postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
+                                else:
+                                    postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
+                                progress_bar.set_postfix_str(postfix_str)
                                 progress_bar.update(batch_size)
                             
                             # Clear the batch for the next set of examples
@@ -1268,7 +1295,11 @@ class Word2Vec:
                             # Update progress bar with final batch
                             if recent_losses:
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count+1}")
+                                if decay_alpha: 
+                                    postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count+1}"
+                                else:
+                                    postfix_str = f"loss={recent_avg:.6f}, b={batch_count+1}"
+                                progress_bar.set_postfix_str(postfix_str)
                             progress_bar.update(remaining_batch_size)
                 
                 # For CBOW, each sample is ([context_word_indices], target_word_idx)
@@ -1306,7 +1337,11 @@ class Word2Vec:
                                     
                                 # Update progress bar
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}")
+                                if decay_alpha: 
+                                    postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
+                                else:
+                                    postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
+                                progress_bar.set_postfix_str(postfix_str)
                                 progress_bar.update(batch_size)
                             
                             # Clear the batch for the next set of examples
@@ -1335,7 +1370,11 @@ class Word2Vec:
                             # Update progress bar with final batch
                             if recent_losses:
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count+1}")
+                                if decay_alpha: 
+                                    postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count+1}"
+                                else:
+                                    postfix_str = f"loss={recent_avg:.6f}, b={batch_count+1}"
+                                progress_bar.set_postfix_str(postfix_str)
                             progress_bar.update(remaining_batch_size)
             
             # If we're not using batching, train on individual examples
@@ -1368,7 +1407,11 @@ class Word2Vec:
                             # Only update progress bar every 10 examples for efficiency
                             if examples_processed_in_epoch % 10 == 0:
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}")
+                                if decay_alpha: 
+                                    postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}"
+                                else:
+                                    postfix_str = f"loss={recent_avg:.6f}, e={examples_processed_in_epoch}"
+                                progress_bar.set_postfix_str(postfix_str)
                                 progress_bar.update(10)
                         
                         examples_processed_in_epoch += 1
@@ -1401,16 +1444,22 @@ class Word2Vec:
                             # Only update progress bar every 10 examples for efficiency
                             if examples_processed_in_epoch % 10 == 0:
                                 recent_avg = sum(recent_losses) / len(recent_losses)
-                                progress_bar.set_postfix_str(f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}")
+                                if decay_alpha: 
+                                    postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}"
+                                else:
+                                    postfix_str = f"loss={recent_avg:.6f}, e={examples_processed_in_epoch}"
+                                progress_bar.set_postfix_str(postfix_str)
                                 progress_bar.update(10)
                         
                         examples_processed_in_epoch += 1
             
             # Close the progress bar at the end of the epoch
             if calculate_loss:
-                # Make sure we reach 100% at the end of the epoch
-                progress_bar.update(progress_bar.total - progress_bar.n)
+                # Close the progress bar - only update to total if we know it
+                if decay_alpha and progress_bar.total is not None:
+                    progress_bar.update(progress_bar.total - progress_bar.n)
                 progress_bar.close()
+                
                 # Print epoch summary
                 avg_loss = epoch_loss / examples_processed_in_epoch if examples_processed_in_epoch > 0 else 0
                 print(f"Epoch {epoch+1}/{epochs} completed. Loss: {avg_loss:.6f}, Examples: {examples_processed_in_epoch}")
