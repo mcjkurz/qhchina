@@ -318,8 +318,18 @@ main {
 }
 
 /* Site logo */
+.logo-link {
+  display: inline-block;
+  transition: opacity 0.2s ease;
+}
+
+.logo-link:hover {
+  opacity: 0.9;
+  text-decoration: none;
+}
+
 .site-logo {
-  max-width: 200px;
   height: auto;
   margin: calc(var(--spacing-unit)) 0;
+  display: block;
 } 

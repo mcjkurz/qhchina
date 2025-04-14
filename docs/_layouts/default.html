@@ -12,10 +12,12 @@
     <div class="wrapper">
       <header>
         <div class="container">
-          <h1><a href="{{ "/" | relative_url }}">{{ site.title }}</a></h1>
-          
           {% if site.logo %}
-            <img src="{{site.logo | relative_url}}" alt="Logo" class="site-logo"/>
+            <a href="{{ "/" | relative_url }}" class="logo-link">
+              <img src="{{site.logo | relative_url}}" alt="{{ site.title }}" class="site-logo"/>
+            </a>
+          {% else %}
+            <h1><a href="{{ "/" | relative_url }}">{{ site.title }}</a></h1>
           {% endif %}
 
           <p>{{ site.description }}</p>
