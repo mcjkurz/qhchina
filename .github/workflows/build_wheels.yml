@@ -37,10 +37,12 @@ jobs:
       # Windows builds
       - name: Build Windows wheels
         if: runner.os == 'Windows'
-        run: |
-          mkdir -p wheelhouse
-          python -m build --wheel --outdir wheelhouse
-
+        uses: pypa/cibuildwheel@v2.16.2
+        env:
+          CIBW_ARCHS: "AMD64"  # Only build 64-bit wheels
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"  # Build for Python 3.10-3.13
+          
+      # Upload artifacts
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
