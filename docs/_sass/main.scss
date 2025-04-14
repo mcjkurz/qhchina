@@ -24,32 +24,35 @@ body {
   width: 80%;
   max-width: 1400px;
   margin: 0 auto;
-  padding: 0 var(--spacing-unit);
+  padding: 0;
 }
 
 header {
   margin-bottom: 0;
+  width: 100%;
 }
 
 .logo-section {
-  width: 100%;
-  background-color: white;
+  width: 80%;
+  max-width: 1400px;
+  margin: 0 auto;
   padding: 0;
-  margin: 0;
+  background-color: white;
 }
 
 .nav-section {
-  width: 100%;
-  background-color: white;
+  width: 80%;
+  max-width: 1400px;
+  margin: 0 auto;
   padding: var(--spacing-unit) 0;
+  background-color: white;
 }
 
 .logo-link {
   display: block;
   transition: opacity 0.2s ease;
-  width: 80%;
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
 }
 
 .logo-link:hover {
@@ -289,10 +292,9 @@ footer {
 }
 
 .container {
-  width: 80%;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 var(--spacing-unit);
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 main {
@@ -302,9 +304,9 @@ main {
 /* Responsive styles */
 @media (max-width: 768px) {
   .wrapper,
-  .container {
+  .logo-section,
+  .nav-section {
     width: 90%;
-    padding: 0 calc(0.5 * var(--spacing-unit));
   }
   
   .site-nav ul {
@@ -337,9 +339,9 @@ main {
 
 @media (max-width: 576px) {
   .wrapper,
-  .container {
+  .logo-section,
+  .nav-section {
     width: 95%;
-    padding: 0 calc(0.25 * var(--spacing-unit));
   }
   
   header h1 {
