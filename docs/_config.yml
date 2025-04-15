@@ -1,7 +1,7 @@
 theme: minima
 title: qhChina Lab
 description: Quantitative Humanities Lab for Chinese Studies
-baseurl: ""  # Leave empty
+baseurl: ""
 url: "https://www.qhchina.org"
 
 # Build settings
