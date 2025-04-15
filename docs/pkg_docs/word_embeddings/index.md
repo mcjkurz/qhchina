@@ -14,7 +14,7 @@ qhChina provides a custom implementation of Word2Vec with both CBOW (Continuous 
 ### Basic Usage
 
 ```python
-from qhchina.analytics import Word2Vec
+from qhchina.analytics.word2vec import Word2Vec
 
 # Initialize a Word2Vec model
 model = Word2Vec(
@@ -115,7 +115,7 @@ qhChina provides a specialized implementation called `TempRefWord2Vec` for track
 ### Basic Usage
 
 ```python
-from qhchina.analytics import TempRefWord2Vec
+from qhchina.analytics.word2vec import TempRefWord2Vec
 
 # Prepare corpus data from different time periods
 time_labels = ["1980", "1990", "2000", "2010"]
@@ -250,7 +250,6 @@ You can visualize the semantic change using the standard vector projection tools
 
 ```python
 from qhchina.analytics.vectors import project_2d
-from sklearn.decomposition import PCA
 
 # Get vectors for target word across all time periods
 target_word = "改革"

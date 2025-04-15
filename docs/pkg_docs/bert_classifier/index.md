@@ -51,8 +51,7 @@ pip install -e .
 ## Quick Start
 
 ```python
-from qhchina.analytics import SequenceClassifier
-from transformers import AutoTokenizer
+from qhchina.analytics.classification import SequenceClassifier
 from datasets import Dataset
 
 # Create a classifier with a Chinese BERT model

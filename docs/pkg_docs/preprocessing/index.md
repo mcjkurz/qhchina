@@ -15,7 +15,7 @@ Chinese text segmentation (word tokenization) is a critical preprocessing step f
 ### Basic Usage
 
 ```python
-from qhchina.preprocessing import create_segmenter
+from qhchina.preprocessing.segmentation import create_segmenter
 
 # Create a segmenter with default settings (uses spaCy)
 segmenter = create_segmenter(backend="spacy")
@@ -44,7 +44,7 @@ print(sentences)  # Output: [['中国', '经济', '快速', '发展'], ['人工'
 The `create_segmenter()` function is the main entry point for creating segmentation tools:
 
 ```python
-from qhchina.preprocessing import create_segmenter
+from qhchina.preprocessing.segmentation import create_segmenter
 
 # Create a segmenter with spaCy backend
 segmenter = create_segmenter(
@@ -89,7 +89,7 @@ Currently, the following segmentation backends are supported:
 The `SpacySegmenter` class provides Chinese text segmentation using spaCy models:
 
 ```python
-from qhchina.preprocessing import SpacySegmenter
+from qhchina.preprocessing.segmentation import SpacySegmenter
 
 # Create a spaCy-based segmenter
 segmenter = SpacySegmenter(
@@ -120,7 +120,7 @@ Install with: `python -m spacy download zh_core_web_sm`
 The `JiebaSegmenter` class provides Chinese text segmentation using the Jieba library:
 
 ```python
-from qhchina.preprocessing import JiebaSegmenter
+from qhchina.preprocessing.segmentation import JiebaSegmenter
 
 # Create a Jieba-based segmenter
 segmenter = JiebaSegmenter(
@@ -151,7 +151,7 @@ All segmenters support filtering options that can be passed during initializatio
 ### Basic Text Processing Pipeline
 
 ```python
-from qhchina.preprocessing import create_segmenter
+from qhchina.preprocessing.segmentation import create_segmenter
 from qhchina.helpers import load_texts, load_stopwords
 
 # Load stopwords
@@ -178,7 +178,7 @@ for text in raw_texts:
 ### Integration with Analytics
 
 ```python
-from qhchina.preprocessing import create_segmenter
+from qhchina.preprocessing.segmentation import create_segmenter
 from qhchina.analytics.topicmodels import LDAGibbsSampler
 
 # Create segmenter

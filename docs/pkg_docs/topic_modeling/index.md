@@ -222,7 +222,7 @@ The Cython version typically offers 10-50x better performance than the pure Pyth
 Here's a complete example that demonstrates many features of the `LDAGibbsSampler`:
 
 ```python
-from qhchina.analytics import LDAGibbsSampler
+from qhchina.analytics.topicmodels import LDAGibbsSampler
 from qhchina.helpers import load_stopwords, load_texts
 import jieba
 import re
