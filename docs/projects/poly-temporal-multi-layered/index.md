@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Poly-Temporal, Multi-Layered
-permalink: /projects/poly-temporal/
+permalink: /projects/poly-temporal-multi-layered/
 ---
 
 # Poly-Temporal, Multi-Layered
