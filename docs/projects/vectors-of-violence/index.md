@@ -8,7 +8,7 @@ permalink: /projects/vectors-of-violence/
 
 ## Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989
 
-<img src="/qhchina/projects/vectors-of-violence/main.png" alt="Vectors of Violence" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
+<img src="main.png" alt="Vectors of Violence" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
 
 From personal memoirs and cooking recipes to revolutionary agitation and war coverage, the *People's Liberation Army Daily* offers a wealth of insights into the sociopolitical and affective realities of post-1949 China. One of the few major periodicals that continued publication during the Cultural Revolution (1966-1976), the journal has received relatively scant attention from scholars, except for political science studies devoted to the PRC propaganda system. Combining close reading and historical analysis with quantitative conceptuality and text mining, we demonstrate how the *PLA Daily* legitimizes state violence differently through its representation of various soldier figures, the zhanshi, the junren, and the minbing. Our close reading is based on the collocation analysis of these major soldier terms. We also use a large language model (a fine-tuned bert-base-chinese) to show how the journal distributes violent sentiments to international topics in times of domestic turmoil.
 
