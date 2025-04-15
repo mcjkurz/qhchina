@@ -5,7 +5,7 @@ title: Home
 
 <style>
 .welcome-section {
-  margin: 3rem 0;
+  margin: 1rem 0 2rem;
   text-align: center;
 }
 
