@@ -4,30 +4,68 @@ title: Projects
 permalink: /projects/
 ---
 
+<style>
+.projects-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+    padding: 2rem 0;
+}
+
+.project-card {
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 1.5rem;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.project-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.project-card h3 {
+    margin-top: 0;
+}
+
+.project-card p {
+    color: #666;
+    font-size: 0.9rem;
+}
+</style>
+
 # Projects
 
-### [Poly-Temporal, Multi-Layered](/qhchina/projects/poly-temporal-multi-layered/)
-A Techno-Cognitive Theory of Narrative Experience in Literature
+<div class="projects-grid">
+    <div class="project-card">
+        <h3><a href="/qhchina/projects/poly-temporal-multi-layered/">Poly-Temporal, Multi-Layered</a></h3>
+        <p>A Techno-Cognitive Theory of Narrative Experience in Literature</p>
+    </div>
 
-### [Brevity and Breadth](/qhchina/projects/brevity-and-breadth/)
-with Prof. Zong-qi Cai  
-A Linguistic, Aesthetic, and DH-Assisted Study of the Book of Poetry and "Nineteen Old Poems"
+    <div class="project-card">
+        <h3><a href="/qhchina/projects/brevity-and-breadth/">Brevity and Breadth</a></h3>
+        <p>with Prof. Zong-qi Cai</p>
+        <p>A Linguistic, Aesthetic, and DH-Assisted Study of the Book of Poetry and "Nineteen Old Poems"</p>
+    </div>
 
-### [Perplexity Games](/qhchina/projects/perplexity-games/)
-Maoism vs. Literature through the Lens of Cognitive Stylometry
+    <div class="project-card">
+        <h3><a href="/qhchina/projects/perplexity-games/">Perplexity Games</a></h3>
+        <p>Maoism vs. Literature through the Lens of Cognitive Stylometry</p>
+    </div>
 
-### [Vectors of Violence](/qhchina/projects/vectors-of-violence/)
-with Aaron Gilkison  
-Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989
+    <div class="project-card">
+        <h3><a href="/qhchina/projects/vectors-of-violence/">Vectors of Violence</a></h3>
+        <p>with Aaron Gilkison</p>
+        <p>Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989</p>
+    </div>
 
-### [Words Close to Heart](/qhchina/projects/words-close-to-heart/)
-A Techno-Cognitive Approach to Interiority in Modern Chinese Literature
+    <div class="project-card">
+        <h3><a href="/qhchina/projects/words-close-to-heart/">Words Close to Heart</a></h3>
+        <p>A Techno-Cognitive Approach to Interiority in Modern Chinese Literature</p>
+    </div>
 
-### [The Sublime as a Narrative Technology](/qhchina/projects/sublime-narrative/)
-A Perspective from Modern Chinese Literature
-
-## Collaborate With Us
-
-We welcome collaboration opportunities with researchers interested in computational approaches to Chinese humanities. 
-
-If you are interested in collaborating on a project, please [contact us](/qhchina/about/). 
+    <div class="project-card">
+        <h3><a href="/qhchina/projects/sublime-narrative/">The Sublime as a Narrative Technology</a></h3>
+        <p>A Perspective from Modern Chinese Literature</p>
+    </div>
+</div>
