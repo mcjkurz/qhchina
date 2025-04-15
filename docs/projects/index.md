@@ -56,7 +56,7 @@ permalink: /projects/
     <div class="project-card">
         <h3><a href="/qhchina/projects/vectors-of-violence/">Vectors of Violence</a></h3>
         <p>with <strong>Aaron Gilkison</strong></p>
-        <p>Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989</p>
+        <p>Legitimation and Distribution of State Power in the <i>People's Liberation Army Daily</i>(<i>Jiefangjun Bao</i>), 1956-1989</p>
     </div>
 
     <div class="project-card">
