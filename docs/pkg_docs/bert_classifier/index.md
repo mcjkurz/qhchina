@@ -1,7 +1,7 @@
 ---
 layout: default
 title: BERT Classification
-permalink: /qhchina_docs/bert_classifier/
+permalink: /pkg_docs/bert_classifier/
 ---
 
 # BERT Text Classification with qhChina

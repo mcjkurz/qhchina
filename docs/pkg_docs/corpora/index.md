@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Corpus Analysis
-permalink: /qhchina_docs/corpora/
+permalink: /pkg_docs/corpora/
 ---
 
 # Corpus Analysis in qhChina

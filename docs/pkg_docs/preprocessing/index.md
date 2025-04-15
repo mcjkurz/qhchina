@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Text Preprocessing
-permalink: /qhchina_docs/preprocessing/
+permalink: /pkg_docs/preprocessing/
 ---
 
 # Text Preprocessing in qhChina

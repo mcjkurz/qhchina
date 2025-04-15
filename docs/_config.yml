@@ -24,7 +24,7 @@ header_pages:
   - about/index.md
   - projects/index.md
   - resources/index.md
-  - qhchina_docs/index.md
+  - pkg_docs/index.md
 
 # Collections
 collections:

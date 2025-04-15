@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Word Embeddings
-permalink: /qhchina_docs/word_embeddings/
+permalink: /pkg_docs/word_embeddings/
 ---
 
 # Word Embeddings in qhChina

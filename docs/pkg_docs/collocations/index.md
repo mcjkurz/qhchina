@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Collocation Analysis
-permalink: /qhchina_docs/collocations/
+permalink: /pkg_docs/collocations/
 ---
 
 # Collocation Analysis in qhChina

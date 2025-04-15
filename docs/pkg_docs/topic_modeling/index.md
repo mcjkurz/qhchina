@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Topic Modeling
-permalink: /qhchina_docs/topic_modeling/
+permalink: /pkg_docs/topic_modeling/
 ---
 
 # Topic Modeling with qhChina
