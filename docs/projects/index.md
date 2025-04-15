@@ -44,7 +44,7 @@ permalink: /projects/
 
     <div class="project-card">
         <h3><a href="/qhchina/projects/brevity-and-breadth/">Brevity and Breadth</a></h3>
-        <p>with Prof. Zong-qi Cai</p>
+        <p>with **Prof. Zong-qi Cai**</p>
         <p>A Linguistic, Aesthetic, and DH-Assisted Study of the Book of Poetry and "Nineteen Old Poems"</p>
     </div>
 
@@ -55,7 +55,7 @@ permalink: /projects/
 
     <div class="project-card">
         <h3><a href="/qhchina/projects/vectors-of-violence/">Vectors of Violence</a></h3>
-        <p>with Aaron Gilkison</p>
+        <p>with **Aaron Gilkison**</p>
         <p>Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989</p>
     </div>
 
