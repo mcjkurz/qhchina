@@ -8,7 +8,7 @@ permalink: /projects/sublime-narrative/
 
 ## A Perspective from Modern Chinese Literature
 
-<img src="/qhchina/projects/sublime-narrative/main.png" alt="The Sublime as a Narrative Technology" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
+<img src="main.png" alt="The Sublime as a Narrative Technology" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
 
 Words transmit not only semantic meaning but also affective energy.
 
