@@ -8,36 +8,16 @@ permalink: /resources/
 
 This page provides a collection of resources for researchers working in Chinese humanities and computational text analysis.
 
+## Models
+
+- [BERT-JFJB-violence-0.1](https://huggingface.co/qhchina/BERT-JFJB-violence-0.1) – *bert-base-chinese* fine-tuned on the *People's Liberation Army Daily* (*Jiefangjun Bao* or *JFJB*) for detecting violent and non-violent content in Chinese texts.
+- [BERT-EmotionIntensity-0.1](https://huggingface.co/qhchina/BERT-EmotionIntensity-0.1) – *bert-base-chinese* fine-tuned on the *Douban* dataset for measuring emotional intensity in Chinese texts.
+
 ## Datasets
 
-*Datasets will be listed here*
-
-## Tools and Libraries
-
-### qhchina Package
-Our primary toolkit for Chinese humanities research. [Learn more in our documentation](/qhchina_docs/).
-
-### Other Useful Tools
-- [pkuseg](https://github.com/lancopku/pkuseg-python) - Chinese word segmentation toolkit
-- [HanLP](https://github.com/hankcs/HanLP) - Natural language processing for Chinese
-- [THULAC](https://github.com/thunlp/THULAC) - Tsinghua University's lexical analyzer for Chinese
-
-## Tutorials
-
-*Tutorials will be added soon*
-
-## Publications
-
-*Key publications will be listed here*
+*To Do*
 
 ## External Resources
 
-### Corpora
-- [Academia Sinica Balanced Corpus of Modern Chinese](http://asbc.iis.sinica.edu.tw/)
-- [Chinese Text Project](https://ctext.org/)
-- [CLIP Chinese Corpus](http://ymcui.github.io/cmrc2019/)
-
-### Research Groups
 - [MARKUS Project](https://dh.chinese-empires.eu/markus/)
-- [Chinese NLP](https://chinesenlp.xyz/)
-- [Digital Sinology](https://digitalsinology.org/) 
+- [Digital Orientalist](https://digitalorientalist.com/)
