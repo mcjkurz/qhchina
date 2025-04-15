@@ -8,19 +8,23 @@ permalink: /about/
 .bio-container {
   display: flex;
   gap: 2rem;
-  align-items: flex-start;
+  align-items: center;
   margin: 2rem 0;
   flex-wrap: wrap;
 }
 
 .bio-image {
   flex: 0 0 300px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .bio-image img {
   width: 100%;
   height: auto;
   border-radius: 8px;
+  display: block;
 }
 
 .bio-text {
@@ -57,18 +61,3 @@ permalink: /about/
     <p>You can contact me at maciej.kurzynski[at]ln.edu.hk.</p>
   </div>
 </div>
-
-## Research Focus
-
-- Digital humanities approaches to Chinese literature and history
-- Computational text analysis of pre-modern and modern Chinese texts
-- Machine learning applications for Chinese cultural studies
-- Development of specialized NLP tools for classical Chinese
-
-## The Team
-
-*Team information will be added soon*
-
-## Contact
-
-For more information about qhChina Lab, please contact us at [email address]. 
