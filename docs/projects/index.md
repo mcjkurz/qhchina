@@ -38,29 +38,29 @@ permalink: /projects/
 
 <div class="projects-grid">
     <div class="project-card">
-        <h3><a href="/poly-temporal-multi-layered/">Poly-Temporal, Multi-Layered</a></h3>
+        <h3><a href="/projects/poly-temporal-multi-layered/">Poly-Temporal, Multi-Layered</a></h3>
         <p>A Techno-Cognitive Theory of Narrative Experience in Literature</p>
     </div>
     <div class="project-card">
-        <h3><a href="/brevity-and-breadth/">Brevity and Breadth</a></h3>
+        <h3><a href="/projects/brevity-and-breadth/">Brevity and Breadth</a></h3>
         <p>with <strong>Prof. Zong-qi Cai</strong></p>
         <p>A Linguistic, Aesthetic, and DH-Assisted Study of the Book of Poetry and "Nineteen Old Poems"</p>
     </div>
     <div class="project-card">
-        <h3><a href="/perplexity-games/">Perplexity Games</a></h3>
+        <h3><a href="/projects/perplexity-games/">Perplexity Games</a></h3>
         <p>Maoism vs. Literature through the Lens of Cognitive Stylometry</p>
     </div>
     <div class="project-card">
-        <h3><a href="/vectors-of-violence/">Vectors of Violence</a></h3>
+        <h3><a href="/projects/vectors-of-violence/">Vectors of Violence</a></h3>
         <p>with <strong>Aaron Gilkison</strong></p>
         <p>Legitimation and Distribution of State Power in the <i>People's Liberation Army Daily</i>(<i>Jiefangjun Bao</i>), 1956-1989</p>
     </div>
     <div class="project-card">
-        <h3><a href="/words-close-to-heart/">Words Close to Heart</a></h3>
+        <h3><a href="/projects/words-close-to-heart/">Words Close to Heart</a></h3>
         <p>A Techno-Cognitive Approach to Interiority in Modern Chinese Literature</p>
     </div>
     <div class="project-card">
-        <h3><a href="/sublime-narrative/">The Sublime as a Narrative Technology</a></h3>
+        <h3><a href="/projects/sublime-narrative/">The Sublime as a Narrative Technology</a></h3>
         <p>A Perspective from Modern Chinese Literature</p>
     </div>
 </div>
