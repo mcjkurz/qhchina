@@ -43,7 +43,7 @@ permalink: /about/
 }
 </style>
 
-# About qhChina Lab
+# About
 
 <div class="bio-container">
   <div class="bio-image">
