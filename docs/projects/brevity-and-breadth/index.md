@@ -1,6 +1,6 @@
 ---
-layout: project
-title: "Brevity and Breadth"
+layout: default
+title: Brevity and Breadth
 permalink: /projects/brevity-and-breadth/
 ---
 

@@ -1,6 +1,6 @@
 ---
-layout: project
-title: "Vectors of Violence"
+layout: default
+title: Vectors of Violence
 permalink: /projects/vectors-of-violence/
 ---
 

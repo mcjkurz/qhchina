@@ -1,6 +1,6 @@
 ---
-layout: project
-title: "Poly-Temporal, Multi-Layered"
+layout: default
+title: Poly-Temporal, Multi-Layered
 permalink: /projects/poly-temporal/
 ---
 

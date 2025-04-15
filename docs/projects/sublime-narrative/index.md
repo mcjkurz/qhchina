@@ -1,6 +1,6 @@
 ---
-layout: project
-title: "The Sublime as a Narrative Technology"
+layout: default
+title: The Sublime as a Narrative Technology
 permalink: /projects/sublime-narrative/
 ---
 

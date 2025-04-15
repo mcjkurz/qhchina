@@ -1,6 +1,6 @@
 ---
-layout: project
-title: "Words Close to Heart"
+layout: default
+title: Words Close to Heart
 permalink: /projects/words-close-to-heart/
 ---
 

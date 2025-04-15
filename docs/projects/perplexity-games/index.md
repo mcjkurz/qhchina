@@ -1,6 +1,6 @@
 ---
-layout: project
-title: "Perplexity Games"
+layout: default
+title: Perplexity Games
 permalink: /projects/perplexity-games/
 ---
 
