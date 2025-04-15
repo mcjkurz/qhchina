@@ -43,7 +43,7 @@ permalink: /about/
 
 <div class="bio-container">
   <div class="bio-image">
-    <img src="/assets/kurzynski_pic.png" alt="Maciej Kurzynski" />
+    <img src="qhchina/assets/img/kurzynski_pic.png" alt="Maciej Kurzynski" />
   </div>
   <div class="bio-text">
     <p>My name is Maciej Kurzynski (馬傑 / 马杰), and I am a Postdoctoral Fellow (Research Assistant Professor) at the Advanced Institute for Global Chinese Studies, Lingnan University, Hong Kong.</p>
