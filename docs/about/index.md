@@ -23,7 +23,7 @@ permalink: /about/
 .bio-image img {
   width: 100%;
   height: auto;
-  border-radius: 8px;
+  border-radius: 50%;
   display: block;
 }
 
