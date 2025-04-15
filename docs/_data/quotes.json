@@ -1,0 +1,22 @@
+{
+  "quotes": [
+    {
+      "text": "The idea which I have never ceased to develop is that in the end one is always responsible for what is made of one. Even if one can do nothing else besides assume this responsibility. For I believe that a man can always make something out of what is made of him. This is the limit I would today accord to freedom: the small movement which makes of a totally conditioned social being someone who does not render back completely what his conditioning has given him.",
+      "author": "Jean-Paul Sartre",
+      "language": "en"
+    },
+    {
+      "text": "过去一家人碰到一块，说闲话的时候多。现在不是，到一块就是辩论无产阶级文化大革命的问题。父子之间、兄弟姐妹之间、夫妻之间，连十几岁娃娃和老太大，都参加了辩论。",
+      "translation": "In the past, when a family gathered, they spent most of the time chatting casually. That's not the case anymore. Now, whenever they come together, it's to debate the issues of the Proletarian Cultural Revolution. Between fathers and sons, brothers and sisters, husbands and wives—even kids in their teens and elderly grandmothers—everyone joins the debate.",
+      "source": "毛主席视察华北、中南和华东地区时的重要指示",
+      "source_translation": "The Important Instructions Given by Chairman Mao During His Inspections of North China, Central-South China, and East China",
+      "language": "zh"
+    },
+    {
+      "text": "The only way to represent the infinite objects in a finite way is using quantificational logic over tight symbolic structures. That's why neural networks cannot do basic arithmetic. You need intensions that are symbolic procedures over variables.",
+      "source": "Machine Learning Street Talk",
+      "source_detail": "\"The Ghost in the Machine\" (YouTube)",
+      "language": "en"
+    }
+  ]
+} 

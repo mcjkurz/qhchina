@@ -1,0 +1,78 @@
+{% assign quotes = site.data.quotes.quotes %}
+{% assign random_index = "now" | date: "%N" | modulo: quotes.size %}
+{% assign quote = quotes[random_index] %}
+
+<div class="random-quote">
+  <blockquote>
+    {% if quote.language == "zh" %}
+    <p class="chinese-text">{{ quote.text }}</p>
+    <p class="translation">{{ quote.translation }}</p>
+    {% else %}
+    <p>{{ quote.text }}</p>
+    {% endif %}
+    
+    <footer>
+      {% if quote.author %}
+        — {{ quote.author }}
+      {% endif %}
+      {% if quote.source %}
+        <br>
+        <cite>
+          {% if quote.language == "zh" %}
+            {{ quote.source }}
+            {% if quote.source_translation %}
+            <br>
+            <span class="source-translation">{{ quote.source_translation }}</span>
+            {% endif %}
+          {% else %}
+            {{ quote.source }}
+            {% if quote.source_detail %}
+            <br>
+            <span class="source-detail">{{ quote.source_detail }}</span>
+            {% endif %}
+          {% endif %}
+        </cite>
+      {% endif %}
+    </footer>
+  </blockquote>
+</div>
+
+<style>
+.random-quote {
+  margin: 2rem 0;
+  padding: 1.5rem;
+  background-color: #f8f9fa;
+  border-left: 4px solid #dee2e6;
+  border-radius: 4px;
+}
+
+.random-quote blockquote {
+  margin: 0;
+  padding: 0;
+}
+
+.random-quote .chinese-text {
+  font-size: 1.1em;
+  margin-bottom: 1rem;
+}
+
+.random-quote .translation {
+  color: #666;
+  font-style: italic;
+}
+
+.random-quote footer {
+  margin-top: 1rem;
+  color: #666;
+}
+
+.random-quote cite {
+  font-style: italic;
+}
+
+.random-quote .source-translation,
+.random-quote .source-detail {
+  font-size: 0.9em;
+  color: #888;
+}
+</style> 
