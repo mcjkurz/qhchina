@@ -21,7 +21,7 @@ permalink: /projects/
 
 .project-card:hover {
     transform: translateY(-5px);
-    box-shadow: 0 5px 15px rgba(16, 99, 124, 0.50);
+    box-shadow: 0 5px 15px rgba(16, 99, 124, 0.30);
 }
 
 .project-card h3 {

@@ -17,3 +17,8 @@ Our article engages with the current scholarship on military and affective viole
 [Gilkison, Aaron, and Maciej Kurzynski. "Vectors of Violence: Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989," *Journal of Cultural Analytics* 9(1), 2024.](https://culturalanalytics.org/article/115481-vectors-of-violence-legitimation-and-distribution-of-state-power-in-the-_people-s-liberation-army-daily_-_jiefangjun-bao_-1956-1989)
 
 [Kurzynski, Maciej and Aaron Gilkison. "Revolution + Love: Measuring the Entanglements of State Violence and Emotions in Early PRC," Proceedings of the *Computational Humanities Research Conference* 2024 (CHR 2024), Aarhus, Denmark. CEUR-WS, vol. 38, pp. 1012-1022](https://ceur-ws.org/Vol-3834/paper94.pdf)
+
+## Resources
+
+- [BERT-JFJB-violence-0.1](https://huggingface.co/qhchina/BERT-JFJB-violence-0.1) – *bert-base-chinese* fine-tuned on the *People's Liberation Army Daily* (*Jiefangjun Bao* or *JFJB*) for detecting violent and non-violent content in Chinese texts.
+- [BERT-EmotionIntensity-0.1](https://huggingface.co/qhchina/BERT-EmotionIntensity-0.1) – *bert-base-chinese* fine-tuned on the *Douban* dataset for measuring emotional intensity in Chinese texts.
