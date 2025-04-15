@@ -6,9 +6,9 @@ permalink: /projects/sublime-narrative/
 
 # The Sublime as a Narrative Technology
 
-<img src="/qhchina/projects/sublime-narrative/main.png" alt="The Sublime as a Narrative Technology" style="max-width: 100%; height: auto; margin: 2rem 0;">
-
 ## A Perspective from Modern Chinese Literature
+
+<img src="/qhchina/projects/sublime-narrative/main.png" alt="The Sublime as a Narrative Technology" style="max-width: 100%; height: auto; margin: 2rem 0;">
 
 Journal of Digital Humanities 《数字人文》, 2022 (1), pp. 87-115.
 

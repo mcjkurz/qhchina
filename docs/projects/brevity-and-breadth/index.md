@@ -6,9 +6,9 @@ permalink: /projects/brevity-and-breadth/
 
 # Brevity and Breadth
 
-<img src="/qhchina/projects/brevity-and-breadth/main.png" alt="Brevity and Breadth" style="max-width: 100%; height: auto; margin: 2rem 0;">
-
 ## A Linguistic, Aesthetic, and DH-Assisted Study of the Book of Poetry and "Nineteen Old Poems"
+
+<img src="/qhchina/projects/brevity-and-breadth/main.png" alt="Brevity and Breadth" style="max-width: 100%; height: auto; margin: 2rem 0;">
 
 Zong-qi Cai & Maciej Kurzynski, Journal of Chinese Literature and Culture, 2024 (2), forthcoming.
 

@@ -6,9 +6,9 @@ permalink: /projects/perplexity-games/
 
 # Perplexity Games
 
-<img src="/qhchina/projects/perplexity-games/main.png" alt="Perplexity Games" style="max-width: 100%; height: auto; margin: 2rem 0;">
-
 ## Maoism vs. Literature through the Lens of Cognitive Stylometry
+
+<img src="/qhchina/projects/perplexity-games/main.png" alt="Perplexity Games" style="max-width: 100%; height: auto; margin: 2rem 0;">
 
 Journal of Data Mining & Digital Humanities, April 29, 2024, NLP4DH
 
