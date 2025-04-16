@@ -47,9 +47,9 @@ title: Home
 <div class="posts-list">
   {% for post in site.posts limit:5 %}
     <div class="post-preview">
-      <h2>
+      <h3>
         <a href="{{ post.url | relative_url }}">{{ post.title }}</a>
-      </h2>
+      </h3>
       <span class="post-date">{{ post.date | date: "%B %d, %Y" }}</span>
       <p>{{ post.excerpt }}</p>
       <a href="{{ post.url | relative_url }}" class="read-more">Read more</a>
