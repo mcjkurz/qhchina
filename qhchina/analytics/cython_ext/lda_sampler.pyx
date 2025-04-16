@@ -75,7 +75,7 @@ def sample_topic(np.ndarray[INT_t, ndim=2] n_wt,
                 np.ndarray[INT_t, ndim=1] n_t, 
                 np.ndarray[INT_t, ndim=2] z,
                 int d, int i, int w, 
-                double alpha, double beta, 
+                np.ndarray[DOUBLE_t, ndim=1] alpha, double beta, 
                 int n_topics, int vocab_size):
     """
     Optimized Cython implementation of topic sampling for LDA Gibbs sampler.
@@ -88,7 +88,7 @@ def sample_topic(np.ndarray[INT_t, ndim=2] n_wt,
         d: Document ID
         i: Position in document
         w: Word ID
-        alpha: Dirichlet prior for document-topic distributions
+        alpha: Dirichlet prior for document-topic distributions (array)
         beta: Dirichlet prior for topic-word distributions
         n_topics: Number of topics
         vocab_size: Size of vocabulary
@@ -112,7 +112,7 @@ def sample_topic(np.ndarray[INT_t, ndim=2] n_wt,
     
     # Calculate probability for each topic directly into the buffer
     for k in range(n_topics):
-        PROB_BUFFER[k] = (n_wt[w, k] + beta) * (n_dt[d, k] + alpha) * TOPIC_NORMALIZERS[k]
+        PROB_BUFFER[k] = (n_wt[w, k] + beta) * (n_dt[d, k] + alpha[k]) * TOPIC_NORMALIZERS[k]
         p_sum += PROB_BUFFER[k]
     
     # Convert to cumulative probabilities for linear search
@@ -137,7 +137,7 @@ def run_iteration(np.ndarray[INT_t, ndim=2] n_wt,
                  np.ndarray[INT_t, ndim=1] n_t,
                  np.ndarray[INT_t, ndim=2] z,
                  list docs_tokens,
-                 double alpha, double beta,
+                 np.ndarray[DOUBLE_t, ndim=1] alpha, double beta,
                  int n_topics, int vocab_size):
     """
     Run a full iteration of Gibbs sampling over all documents and words.

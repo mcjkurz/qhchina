@@ -7,41 +7,28 @@ import os
 from collections import defaultdict, Counter
 import matplotlib.pyplot as plt
 from tqdm.auto import trange
+from scipy.special import psi, polygamma  # Add scipy.special imports for alpha estimation
 
 class LDAGibbsSampler:
     """
-    Latent Dirichlet Allocation with Gibbs sampling implementation.
-    
-    This implementation is designed to be modular, with the core sampling logic 
-    isolated to enable future optimization with Cython.
-    
-    Attributes:
-        n_topics (int): Number of topics
-        alpha (float): Dirichlet prior for document-topic distributions
-        beta (float): Dirichlet prior for topic-word distributions
-        iterations (int): Number of Gibbs sampling iterations
-        random_state (int, optional): Random seed for reproducibility
-        eval_interval (int, optional): Perform evaluation every eval iterations
-        min_count (int): Minimum count of word to be included in vocabulary
-        max_vocab_size (int): Maximum vocabulary size to keep
-        min_length (int): Minimum length of word to be included in vocabulary
-        stopwords (set): Set of words to exclude from vocabulary
-        use_cython (bool): Whether to use Cython acceleration if available
+    Latent Dirichlet Allocation with Gibbs sampling implementation. 
+    Using Cython for speed.
     """
     
     def __init__(
         self,
         n_topics: int = 10,
-        alpha: Optional[float] = None,  # Changed to None as default to use 50/n_topics heuristic
-        beta: float = 0.1,
+        alpha: Optional[float] = None,
+        beta: Optional[float] = None,
         iterations: int = 1000,
         random_state: Optional[int] = None,
-        eval_interval: Optional[int] = None,
+        log_interval: Optional[int] = None,
         min_count: int = 1,
         max_vocab_size: Optional[int] = None,
         min_length: int = 1,
         stopwords: Optional[set] = None,
-        use_cython: bool = True  # Added use_cython parameter with default True
+        use_cython: bool = True,
+        estimate_alpha: int = 1
     ):
         """
         Initialize the LDA model with Gibbs sampling.
@@ -53,12 +40,13 @@ class LDAGibbsSampler:
             beta: Dirichlet prior for topic-word distributions (can be float or array of floats)
             iterations: Number of Gibbs sampling iterations
             random_state: Random seed for reproducibility
-            eval_interval: Perform evaluation every eval iterations
+            log_interval: Calculate perplexity and print results every log_interval iterations
             min_count: Minimum count of word to be included in vocabulary
             max_vocab_size: Maximum vocabulary size to keep
             min_length: Minimum length of word to be included in vocabulary
             stopwords: Set of words to exclude from vocabulary
             use_cython: Whether to use Cython acceleration if available (default: True)
+            estimate_alpha: Frequency for estimating alpha (0 = no estimation; default 1 = after every iteration)
         """
         self.n_topics = n_topics
         # Use Griffiths and Steyvers (2004) heuristic if alpha is None
@@ -66,14 +54,26 @@ class LDAGibbsSampler:
             self.alpha = 50.0 / n_topics
         else:
             self.alpha = alpha
-        self.beta = beta
+        
+        if beta is None:
+            self.beta = 1.0 / n_topics
+        else:
+            self.beta = beta
+            
+        # Ensure alpha is a numpy array for vectorized operations
+        if np.isscalar(self.alpha):
+            self.alpha = np.ones(n_topics) * self.alpha
+        else:
+            self.alpha = np.asarray(self.alpha)
+            
         self.iterations = iterations
         self.random_state = random_state
-        self.eval_interval = eval_interval
+        self.log_interval = log_interval
         self.min_count = min_count
         self.max_vocab_size = max_vocab_size
         self.min_length = min_length
         self.stopwords = set() if stopwords is None else set(stopwords)
+        self.estimate_alpha = estimate_alpha
         
         # Initialize Cython-related attributes
         self.use_cython = False  # Default to False until successful import
@@ -224,6 +224,65 @@ class LDAGibbsSampler:
                 self.n_dt[d, topic] += 1
                 self.n_t[topic] += 1
     
+    def _dirichlet_expectation(self, alpha):
+        """
+        For a vector `theta~Dir(alpha)`, compute `E[log(theta)]`.
+        
+        Args:
+            alpha: Dirichlet parameter
+            
+        Returns:
+            Expected value of log(theta)
+        """
+        if len(alpha.shape) == 1:
+            result = psi(alpha) - psi(np.sum(alpha))
+        else:
+            result = psi(alpha) - psi(np.sum(alpha, 1))[:, np.newaxis]
+        return result.astype(alpha.dtype)  # keep the same precision as input
+    
+    def _update_alpha(self, gammat, learning_rate=1.0):
+        """
+        Update parameters for the Dirichlet prior on the per-document
+        topic weights `alpha` using Newton's method.
+        
+        Args:
+            gammat: Matrix of document-topic distributions (n_docs, n_topics)
+            learning_rate: Factor to scale the update (default=1.0)
+            
+        Returns:
+            Updated alpha vector
+        """
+        # Calculate the number of documents
+        N = float(len(gammat))
+        
+        # Calculate the expected log probabilities
+        logphat = np.zeros(self.n_topics)
+        for gamma in gammat:
+            logphat += self._dirichlet_expectation(gamma)
+        logphat /= N
+        
+        # Copy current alpha for updates
+        dalpha = np.copy(self.alpha)
+        
+        # Calculate gradient
+        gradf = N * (psi(np.sum(self.alpha)) - psi(self.alpha) + logphat)
+        
+        # Calculate Hessian coefficients
+        c = N * polygamma(1, np.sum(self.alpha))
+        q = -N * polygamma(1, self.alpha)
+        
+        # Calculate the b coefficient
+        b = np.sum(gradf / q) / (1.0 / c + np.sum(1.0 / q))
+        
+        # Calculate the step size
+        dalpha = -(gradf - b) / q
+        
+        # Apply the step with learning rate if it keeps alpha positive
+        if np.all(learning_rate * dalpha + self.alpha > 0):
+            self.alpha += learning_rate * dalpha
+        
+        return self.alpha
+        
     def run_gibbs_sampling(self) -> None:
         """
         Run Gibbs sampling for the specified number of iterations. 
@@ -233,7 +292,7 @@ class LDAGibbsSampler:
         n_docs = len(self.docs_tokens)
         
         if self.use_cython:
-            print(f"Running Gibbs sampling for {self.iterations} iterations with Cython.")
+            print(f"Running Gibbs sampling for {self.iterations} iterations (Cython implementation).")
         else:
             print(f"Running Gibbs sampling for {self.iterations} iterations (Python implementation).")
         
@@ -242,6 +301,7 @@ class LDAGibbsSampler:
             
             if self.use_cython:
                 # Use the optimized Cython implementation
+                # Make sure to cast beta to float to avoid NoneType errors
                 self.z = self.lda_sampler.run_iteration(
                     self.n_wt, self.n_dt, self.n_t, self.z, 
                     self.docs_tokens, self.alpha, self.beta,
@@ -256,8 +316,25 @@ class LDAGibbsSampler:
                         # Sample a new topic
                         self.z[d, i] = self._sample_topic(d, i, w)
             
+            # Estimate alpha if needed and we're past the first 1/3 of iterations
+            if self.estimate_alpha > 0 and it > 0 and it % self.estimate_alpha == 0:
+                # Calculate diminishing learning rate (from 1.0 to 0.1)
+                # Map the iteration from alpha_start_iter..iterations to 1.0..0.1
+                progress = it / self.iterations
+                learning_rate = 1.0 - 0.9 * progress
+                
+                # Update document-topic distributions for alpha estimation
+                self._update_distributions()
+                
+                # Convert theta to the gamma parameter expected by _update_alpha
+                # gamma = count + alpha, which is n_dt + alpha
+                gamma = self.n_dt + self.alpha
+                
+                # Update alpha with learning rate
+                self._update_alpha(gamma, learning_rate)
+                
             # Calculate perplexity every eval iterations
-            if it > 0 and self.eval_interval and it % self.eval_interval == 0:
+            if it > 0 and self.log_interval and it % self.log_interval == 0:
                 elapsed = time.time() - start_time
                 self._update_distributions()
                 perplexity = self.perplexity()
@@ -305,7 +382,10 @@ class LDAGibbsSampler:
         """Update document-topic and topic-word distributions based on count matrices."""
         # Document-topic distribution (theta) - vectorized
         doc_lengths = np.array([len(doc) for doc in self.docs_tokens])[:, np.newaxis]
-        self.theta = (self.n_dt + self.alpha) / (doc_lengths + self.n_topics * self.alpha)
+        
+        # Ensure proper handling of alpha as an array
+        alpha_sum = np.sum(self.alpha)
+        self.theta = (self.n_dt + self.alpha) / (doc_lengths + alpha_sum)
         
         # Topic-word distribution (phi) - vectorized
         # phi should have shape (n_topics, vocabulary_size)
@@ -494,8 +574,9 @@ class LDAGibbsSampler:
                 z_doc[i] = new_topic
                 n_dt_doc[new_topic] += 1
         
-        # Calculate document-topic distribution
-        theta_doc = (n_dt_doc + self.alpha) / (len(filtered_doc) + self.n_topics * self.alpha)
+        # Calculate document-topic distribution with proper alpha sum
+        alpha_sum = np.sum(self.alpha)
+        theta_doc = (n_dt_doc + self.alpha) / (len(filtered_doc) + alpha_sum)
         return theta_doc
     
     def plot_topic_words(self, n_words: int = 10, figsize: Tuple[int, int] = (12, 8), 
@@ -582,7 +663,8 @@ class LDAGibbsSampler:
             'z': self.z.tolist() if self.z is not None else None,
             'z_shape': self.z_shape,
             'doc_lengths': self.doc_lengths.tolist() if self.doc_lengths is not None else None,
-            'use_cython': self.use_cython  # Save whether Cython was used
+            'use_cython': self.use_cython,  # Save whether Cython was used
+            'estimate_alpha': self.estimate_alpha  # Save alpha estimation settings
         }
         
         np.save(filepath, model_data)
@@ -603,13 +685,17 @@ class LDAGibbsSampler:
         # Get use_cython value from the saved model, default to True if not present
         use_cython = model_data.get('use_cython', True)
         
+        # Get estimate_alpha value from the saved model, default to 0 if not present
+        estimate_alpha = model_data.get('estimate_alpha', 0)
+        
         model = cls(
             n_topics=model_data['n_topics'],
             alpha=model_data['alpha'],
             beta=model_data['beta'],
             min_length=model_data.get('min_length', 1),  # Default to 1 for backward compatibility
             stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None,
-            use_cython=use_cython  # Pass the use_cython parameter from saved model
+            use_cython=use_cython,  # Pass the use_cython parameter from saved model
+            estimate_alpha=estimate_alpha  # Pass the estimate_alpha parameter from saved model
         )
         
         model.vocabulary = model_data['vocabulary']
