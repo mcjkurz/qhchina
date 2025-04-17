@@ -20,7 +20,8 @@ class LDAGibbsSampler:
         n_topics: int = 10,
         alpha: Optional[float] = None,
         beta: Optional[float] = None,
-        iterations: int = 1000,
+        iterations: int = 100,
+        burnin: int = 0,
         random_state: Optional[int] = None,
         log_interval: Optional[int] = None,
         min_count: int = 1,
@@ -39,6 +40,7 @@ class LDAGibbsSampler:
                   If None, uses the heuristic 50/n_topics from Griffiths and Steyvers (2004).
             beta: Dirichlet prior for topic-word distributions (can be float or array of floats)
             iterations: Number of Gibbs sampling iterations
+            burnin: Number of initial iterations to run before hyperparameters estimation (default 0)
             random_state: Random seed for reproducibility
             log_interval: Calculate perplexity and print results every log_interval iterations
             min_count: Minimum count of word to be included in vocabulary
@@ -67,6 +69,7 @@ class LDAGibbsSampler:
             self.alpha = np.asarray(self.alpha)
             
         self.iterations = iterations
+        self.burnin = burnin
         self.random_state = random_state
         self.log_interval = log_interval
         self.min_count = min_count
@@ -290,18 +293,22 @@ class LDAGibbsSampler:
         Uses Cython if available and enabled.
         """
         n_docs = len(self.docs_tokens)
+        total_iterations = self.iterations + self.burnin
         
         if self.use_cython:
-            print(f"Running Gibbs sampling for {self.iterations} iterations (Cython implementation).")
+            print(f"Running Gibbs sampling for {total_iterations} iterations (Cython implementation).")
+            if self.burnin > 0:
+                print(f"First {self.burnin} iterations are burn-in.")
         else:
-            print(f"Running Gibbs sampling for {self.iterations} iterations (Python implementation).")
+            print(f"Running Gibbs sampling for {total_iterations} iterations (Python implementation).")
+            if self.burnin > 0:
+                print(f"First {self.burnin} iterations are burn-in.")
         
-        for it in range(self.iterations):
+        for it in range(total_iterations):
             start_time = time.time()
             
             if self.use_cython:
                 # Use the optimized Cython implementation
-                # Make sure to cast beta to float to avoid NoneType errors
                 self.z = self.lda_sampler.run_iteration(
                     self.n_wt, self.n_dt, self.n_t, self.z, 
                     self.docs_tokens, self.alpha, self.beta,
@@ -316,31 +323,27 @@ class LDAGibbsSampler:
                         # Sample a new topic
                         self.z[d, i] = self._sample_topic(d, i, w)
             
-            # Estimate alpha if needed and we're past the first 1/3 of iterations
-            if self.estimate_alpha > 0 and it > 0 and it % self.estimate_alpha == 0:
-                # Calculate diminishing learning rate (from 1.0 to 0.1)
-                # Map the iteration from alpha_start_iter..iterations to 1.0..0.1
-                progress = it / self.iterations
-                learning_rate = 1.0 - 0.9 * progress
-                
-                # Update document-topic distributions for alpha estimation
-                self._update_distributions()
-                
-                # Convert theta to the gamma parameter expected by _update_alpha
-                # gamma = count + alpha, which is n_dt + alpha
-                gamma = self.n_dt + self.alpha
-                
-                # Update alpha with learning rate
-                self._update_alpha(gamma, learning_rate)
-                
-            # Calculate perplexity every eval iterations
-            if it > 0 and self.log_interval and it % self.log_interval == 0:
-                elapsed = time.time() - start_time
-                self._update_distributions()
-                perplexity = self.perplexity()
-                tokens_per_sec = sum(len(doc) for doc in self.docs_tokens) / elapsed
-                print(f"Iteration {it}: Perplexity = {perplexity:.2f}, Tokens/sec = {tokens_per_sec:.1f}")
-    
+            # Skip alpha updates during burn-in phase
+            is_burnin = it < self.burnin
+            actual_it = it - self.burnin
+            is_hyperparam_estimation = self.estimate_alpha > 0 and actual_it % self.estimate_alpha == 0
+            is_perplexity_estimation = self.log_interval and actual_it % self.log_interval == 0
+
+            if not is_burnin:
+                if is_hyperparam_estimation or is_perplexity_estimation:
+                    self._update_distributions()
+
+                if is_hyperparam_estimation:
+                    learning_rate = 1.0 - 0.9 * (actual_it / self.iterations)
+                    gamma = self.n_dt + self.alpha
+                    self._update_alpha(gamma, learning_rate)
+
+                if is_perplexity_estimation:
+                    elapsed = time.time() - start_time
+                    perplexity = self.perplexity()
+                    tokens_per_sec = sum(len(doc) for doc in self.docs_tokens) / elapsed
+                    print(f"Iteration {actual_it}: Perplexity = {perplexity:.2f}, Tokens/sec = {tokens_per_sec:.1f}")
+            
     def _sample_topic(self, d: int, i: int, w: int) -> int:
         """
         Sample a new topic for word w in document d at position i.
@@ -664,7 +667,8 @@ class LDAGibbsSampler:
             'z_shape': self.z_shape,
             'doc_lengths': self.doc_lengths.tolist() if self.doc_lengths is not None else None,
             'use_cython': self.use_cython,  # Save whether Cython was used
-            'estimate_alpha': self.estimate_alpha  # Save alpha estimation settings
+            'estimate_alpha': self.estimate_alpha,  # Save alpha estimation settings
+            'burnin': self.burnin  # Save burnin value
         }
         
         np.save(filepath, model_data)
@@ -688,6 +692,9 @@ class LDAGibbsSampler:
         # Get estimate_alpha value from the saved model, default to 0 if not present
         estimate_alpha = model_data.get('estimate_alpha', 0)
         
+        # Get burnin value from the saved model, default to 0 if not present
+        burnin = model_data.get('burnin', 0)
+        
         model = cls(
             n_topics=model_data['n_topics'],
             alpha=model_data['alpha'],
@@ -695,7 +702,8 @@ class LDAGibbsSampler:
             min_length=model_data.get('min_length', 1),  # Default to 1 for backward compatibility
             stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None,
             use_cython=use_cython,  # Pass the use_cython parameter from saved model
-            estimate_alpha=estimate_alpha  # Pass the estimate_alpha parameter from saved model
+            estimate_alpha=estimate_alpha,  # Pass the estimate_alpha parameter from saved model
+            burnin=burnin  # Pass the burnin parameter from saved model
         )
         
         model.vocabulary = model_data['vocabulary']

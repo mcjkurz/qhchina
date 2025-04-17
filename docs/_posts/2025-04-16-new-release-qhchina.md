@@ -15,4 +15,4 @@ The package is slowly coming into shape. While a lot of functionality is still i
 pip install qhchina
 ```
 
-Check out our [documentation](/pkg_docs/) for detailed guides on getting started with qhchina. More updates and new features coming soon!
+Check out the [documentation](/pkg_docs/) for detailed guides on getting started with qhchina. More updates and new features coming soon!

@@ -41,8 +41,9 @@ documents = [
 # Note: alpha defaults to 50/n_topics as recommended by Griffiths and Steyvers (2004)
 lda = LDAGibbsSampler(
     n_topics=5,
-    iterations=1000,
-    eval_interval=100
+    iterations=100,
+    burnin=10,            # Number of initial iterations before collecting samples
+    log_interval=10
 )
 lda.fit(documents)
 
@@ -77,6 +78,21 @@ lda = LDAGibbsSampler(
     iterations=1000
 )
 ```
+
+## Automatic Alpha Estimation
+
+The `LDAGibbsSampler` can automatically estimate the alpha parameter during training:
+
+```python
+lda = LDAGibbsSampler(
+    n_topics=5,
+    iterations=1000,
+    estimate_alpha=1,      # Estimate alpha after every iteration (0 to disable)
+    burnin=100             # Run 100 burn-in iterations before alpha estimation
+)
+```
+
+Setting `estimate_alpha=0` disables alpha estimation, while positive values indicate the frequency of updates.
 
 ## Using Stopwords
 
@@ -145,12 +161,6 @@ lda.plot_topic_words(
     separate_files=True,
     dpi=100
 )
-
-# Plot the convergence of the model
-lda.plot_convergence(
-    figsize=(10, 6),
-    filename="convergence.png"
-)
 ```
 
 ## Saving and Loading Models
@@ -193,13 +203,15 @@ lda = LDAGibbsSampler(
     alpha=None,              # Dirichlet prior for document-topic distributions (default: 50/n_topics)
     beta=0.01,               # Dirichlet prior for topic-word distributions
     iterations=2000,         # Number of Gibbs sampling iterations
+    burnin=200,              # Number of initial burn-in iterations
     random_state=42,         # Random seed for reproducibility
-    eval_interval=100,       # Evaluate perplexity every N iterations
+    log_interval=100,        # Evaluate perplexity every N iterations
     min_count=2,             # Minimum word count to include in vocabulary
     max_vocab_size=10000,    # Maximum vocabulary size
     min_length=2,            # Minimum word length to include
     stopwords=stopwords,     # Set of stopwords to exclude
-    use_cython=True          # Whether to use Cython acceleration if available
+    use_cython=True,         # Whether to use Cython acceleration if available
+    estimate_alpha=1         # Frequency for estimating alpha (0 = no estimation)
 )
 ```
 
@@ -253,11 +265,13 @@ for text in texts:
 lda = LDAGibbsSampler(
     n_topics=5,
     iterations=1000,
-    eval_interval=100,
+    burnin=100,
+    log_interval=100,
     stopwords=stopwords,
     min_count=2,
     min_length=2,
-    use_cython=True
+    use_cython=True,
+    estimate_alpha=1
 )
 
 lda.fit(documents)
@@ -286,9 +300,9 @@ lda.save("lda_model.npy")
 ```python
 class LDAGibbsSampler:
     def __init__(self, n_topics=10, alpha=None, beta=0.01, iterations=1000, 
-                 random_state=None, eval_interval=None, min_count=1, 
+                 burnin=0, random_state=None, log_interval=None, min_count=1, 
                  max_vocab_size=None, min_length=1, stopwords=None,
-                 use_cython=True):
+                 use_cython=True, estimate_alpha=1):
         """Initialize the LDA model with Gibbs sampling."""
         
     def fit(self, documents):
@@ -315,9 +329,6 @@ class LDAGibbsSampler:
     def plot_topic_words(self, n_words=10, figsize=(12, 8), fontsize=10, 
                          filename=None, separate_files=False, dpi=72):
         """Plot the top words for each topic as a vertical bar chart."""
-        
-    def plot_convergence(self, figsize=(10, 6), filename=None):
-        """Plot the convergence of the model using perplexity history."""
         
     def save(self, filepath):
         """Save the model to a file."""
