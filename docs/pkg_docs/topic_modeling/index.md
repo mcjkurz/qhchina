@@ -42,7 +42,7 @@ documents = [
 lda = LDAGibbsSampler(
     n_topics=5,
     iterations=100,
-    burnin=10,            # Number of initial iterations before collecting samples
+    burnin=10,            # Number of initial iterations before alpha optimization
     log_interval=10
 )
 lda.fit(documents)
@@ -226,12 +226,13 @@ lda = LDAGibbsSampler(
     n_topics=10,
     use_cython=True
 )
+```
 
 The Cython version typically offers 10-50x better performance than the pure Python implementation, which is particularly valuable for large corpora or many topics.
 
 ## Complete Example
 
-Here's a complete example that demonstrates many features of the `LDAGibbsSampler`:
+Here is a complete example that demonstrates many features of the `LDAGibbsSampler`:
 
 ```python
 from qhchina.analytics.topicmodels import LDAGibbsSampler
@@ -336,3 +337,4 @@ class LDAGibbsSampler:
     @classmethod
     def load(cls, filepath):
         """Load a model from a file.""" 
+```
