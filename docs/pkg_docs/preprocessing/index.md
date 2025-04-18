@@ -84,6 +84,16 @@ Currently, the following segmentation backends are supported:
   - Faster processing speed, especially for large volumes of text
   - Simpler to use with good accuracy for most use cases
 
+- **BERT**: Neural-based Chinese word segmentation using BERT models
+  - Requires installing transformers and torch: `pip install transformers torch`
+  - Offers high accuracy for complex texts using deep learning models
+  - Supports various tagging schemes and pre-trained models
+
+- **LLM**: Large Language Model-based segmentation using API services like OpenAI
+  - Requires installing openai: `pip install openai`
+  - Leverages state-of-the-art LLMs for accurate segmentation
+  - Customizable through prompts and system messages
+
 ### SpacySegmenter
 
 The `SpacySegmenter` class provides Chinese text segmentation using spaCy models:
@@ -132,6 +142,108 @@ segmenter = JiebaSegmenter(
         "stopwords": ["的", "了"],      # Words to exclude
         "min_sentence_length": 3        # Min sentence length to keep
     }
+)
+```
+
+### BertSegmenter
+
+The `BertSegmenter` class provides neural-based Chinese text segmentation using BERT models:
+
+```python
+from qhchina.preprocessing.segmentation import BertSegmenter
+
+# Create a BERT-based segmenter with a fine-tuned model
+segmenter = BertSegmenter(
+    model_name="bert-modern-chinese-segmentation",   # BERT model to use
+    tagging_scheme="bmes",              # Tagging scheme: "be", "bme", or "bmes"
+    batch_size=16,                      # Batch size for processing
+    device="cuda",                      # Use GPU if available
+    filters={
+        "min_token_length": 2,          # Min token length to keep
+        "stopwords": ["的", "了"],      # Words to exclude
+        "min_sentence_length": 3        # Min sentence length to keep
+    }
+)
+
+# Segment text
+text = "中国经济快速发展，人工智能改变世界。"
+tokens = segmenter.segment(text)
+print(tokens)  # Output: ['中国', '经济', '快速', '发展', '，', '人工智能', '改变', '世界', '。']
+
+# Segment to sentences
+sentences = segmenter.segment_to_sentences(text)
+print(sentences)  # Output: [['中国', '经济', '快速', '发展', '，', '人工智能', '改变', '世界', '。']]
+```
+
+#### Tagging Schemes
+
+The BertSegmenter supports several tagging schemes:
+
+| Scheme | Tags | Description |
+|--------|------|-------------|
+| `be` | B, E | Beginning and End of words |
+| `bme` | B, M, E | Beginning, Middle, and End of words |
+| `bmes` | B, M, E, S | Beginning, Middle, End, and Single-character words |
+
+### LLMSegmenter
+
+The `LLMSegmenter` class provides Chinese text segmentation using Large Language Models via API services:
+
+```python
+from qhchina.preprocessing.segmentation import LLMSegmenter
+
+# Create an LLM-based segmenter using OpenAI
+segmenter = LLMSegmenter(
+    api_key="your-openai-api-key",      # API key for the service
+    model="deepseek-chat",              # Model to use
+    endpoint="https://api.deepseek.com", 
+    system_message="你是语言学专家。",
+    temperature=0.1,                    # Lower temperature for more consistent results
+    output_dir="./segmentation_results", # Save results to this directory
+    filters={
+        "min_token_length": 1,          # Min token length to keep
+        "stopwords": ["的", "了"]       # Words to exclude
+    }
+)
+
+# Segment text
+text = "人工智能大模型能够准确分词。"
+tokens = segmenter.segment(text)
+print(tokens)  # Output: ['人工智能', '大', '模型', '能够', '准确', '分词', '。']
+
+# Process multiple texts
+texts = ["中国经济快速发展", "人工智能改变世界"]
+token_lists = segmenter.segment(texts)
+print(token_lists)
+
+# Segment to sentences
+long_text = "今天天气真好，我们去散步吧！这是中文分词的例子。"
+sentences = segmenter.segment_to_sentences(long_text)
+print(sentences)  # Output: [['今天', '天气', '真', '好', '，', '我们', '去', '散步', '吧', '！'], ['这是', '中文', '分词', '的', '例子', '。']]
+```
+
+#### Custom Prompts
+
+You can customize the segmentation prompt for different segmentation styles:
+
+```python
+# Custom prompt for academic-style segmentation
+custom_prompt = """
+请将以下中文文本分词，按照学术标准分词。请用JSON格式回答。
+
+示例:
+输入: "人工智能大模型能够准确分词"
+输出: ["人工智能", "大模型", "能够", "准确", "分词"]
+
+输入: "{text}"
+输出:
+"""
+
+segmenter = LLMSegmenter(
+    api_key="your-openai-api-key",
+    model="gpt-4",
+    prompt=custom_prompt,
+    temperature=0
 )
 ```
 

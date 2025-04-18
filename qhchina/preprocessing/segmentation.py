@@ -3,6 +3,11 @@ from tqdm.auto import tqdm
 from qhchina.helpers.texts import split_into_chunks
 import importlib
 import re
+import json
+import os
+import hashlib
+import time
+from datetime import datetime
 
 
 class SegmentationWrapper:
@@ -310,7 +315,7 @@ class JiebaSegmenter(SegmentationWrapper):
         """
         
         # Simple Chinese sentence-ending punctuation pattern
-        sentence_end_pattern = r"[。！？\.!?]+"
+        sentence_end_pattern = r"[。！？\.!?……]+"
         
         # Split text into passages (non-empty lines)
         passages = self._split_text_into_passages(text)
@@ -663,7 +668,7 @@ class BertSegmenter(SegmentationWrapper):
             A list of lists of tokens, where each inner list represents a tokenized sentence
         """
         # Simple Chinese sentence-ending punctuation pattern
-        sentence_end_pattern = r"[。！？\.!?]+"
+        sentence_end_pattern = r"[。！？\.!?……]+"
         
         # Split text into passages (non-empty lines)
         passages = self._split_text_into_passages(text)
@@ -729,12 +734,337 @@ class BertSegmenter(SegmentationWrapper):
         return all_sentences
 
 
+class LLMSegmenter(SegmentationWrapper):
+    """Segmentation wrapper using Language Model APIs like OpenAI."""
+    
+    DEFAULT_PROMPT = """
+    请将以下中文文本分词。请用JSON格式回答。
+    
+    示例:
+    输入: "今天天气真好，我们去散步吧！"
+    输出: ["今天", "天气", "真", "好", "，", "我们", "去", "散步", "吧", "！"]
+    
+    输入: "{text}"
+    输出:
+    """
+    
+    def __init__(self, 
+                 api_key: str,
+                 model: str = None,
+                 endpoint: str = None,
+                 prompt: str = None,
+                 system_message: str = None,
+                 temperature: float = 1,
+                 max_tokens: int = 2048,
+                 output_dir: str = None,
+                 filters: Dict[str, Any] = None):
+        """Initialize the LLM segmenter.
+        
+        Args:
+            api_key: API key for the language model service
+            model: Model name to use
+            endpoint: API endpoint URL (if None, uses the default OpenAI endpoint)
+            prompt: Custom prompt template with {text} placeholder (if None, uses DEFAULT_PROMPT)
+            system_message: Optional system message to prepend to API calls
+            temperature: Temperature for model sampling (lower for more deterministic output)
+            max_tokens: Maximum tokens in the response
+            output_dir: Directory to save segmentation results as JSON files (created if doesn't exist)
+            filters: Dictionary of filters to apply during segmentation
+        """
+        super().__init__(filters)
+        self.api_key = api_key
+        self.model = model
+        self.endpoint = endpoint
+        self.prompt = prompt or self.DEFAULT_PROMPT
+        self.system_message = system_message
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.output_dir = output_dir
+        
+        # Create output directory if specified and doesn't exist
+        if self.output_dir and not os.path.exists(self.output_dir):
+            try:
+                os.makedirs(self.output_dir)
+            except Exception as e:
+                print(f"Warning: Failed to create output directory {self.output_dir}: {str(e)}")
+                self.output_dir = None
+        
+        # Try to import OpenAI
+        try:
+            import openai
+        except ImportError:
+            raise ImportError("openai is not installed. Please install it with 'pip install openai'")
+        
+        self.openai = openai
+        
+        # Configure OpenAI client
+        if endpoint:
+            # Custom API endpoint
+            self.client = openai.OpenAI(
+                api_key=api_key,
+                base_url=endpoint
+            )
+        else:
+            # Default OpenAI endpoint
+            self.client = openai.OpenAI(api_key=api_key)
+    
+    def _save_segmentation_result(self, original_text: str, segmented_tokens: List[str], sentences: List[List[str]] = None) -> str:
+        """Save segmentation result to a JSON file in the output directory.
+        
+        Args:
+            original_text: The original text that was segmented
+            segmented_tokens: The resulting segmented tokens
+            sentences: Optional list of sentences (each a list of tokens)
+            
+        Returns:
+            Path to the saved file, or empty string if saving failed or output_dir not set
+        """
+        if not self.output_dir:
+            return ""
+            
+        try:
+            # Create a unique filename based on text hash and timestamp
+            text_hash = hashlib.md5(original_text.encode('utf-8')).hexdigest()[:10]
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Use different prefix based on whether this includes sentences
+            prefix = "segment_sentences" if sentences else "segment"
+            filename = f"{prefix}_{text_hash}_{timestamp}.json"
+            file_path = os.path.join(self.output_dir, filename)
+            
+            # Create the JSON data
+            data = {
+                "original": original_text,
+                "segmented": segmented_tokens
+            }
+            
+            # Add sentences if provided
+            if sentences:
+                data["sentences"] = sentences
+            
+            # Write to file
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+            return file_path
+        except Exception as e:
+            print(f"Warning: Failed to save segmentation result: {str(e)}")
+            return ""
+    
+    def _call_llm_api(self, text: str) -> List[str]:
+        """Call the LLM API with the provided text and parse the response as a list of tokens."""
+        prompt_text = self.prompt.format(text=text)
+        
+        try:
+            # Prepare the messages
+            messages = []
+            
+            # Add system message if provided
+            if self.system_message:
+                messages.append({"role": "system", "content": self.system_message})
+                
+            # Add user message with the prompt
+            messages.append({"role": "user", "content": prompt_text})
+            
+            # Call the API
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"}
+            )
+            
+            # Parse the response
+            response_text = response.choices[0].message.content
+            
+            # Try to parse as JSON
+            try:
+                # First check if response is already a list
+                if response_text.strip().startswith('[') and response_text.strip().endswith(']'):
+                    try:
+                        tokens = json.loads(response_text)
+                        if isinstance(tokens, list):
+                            return tokens
+                    except json.JSONDecodeError as je:
+                        print(f"Warning: Response looks like a list but isn't valid JSON: {str(je)}")
+                        print(f"Response text (first 100 chars): {response_text[:100]}...")
+                
+                # Try to extract JSON structure from the response
+                try:
+                    parsed_json = json.loads(response_text)
+                    
+                    # Check for common API response patterns
+                    if isinstance(parsed_json, list):
+                        return parsed_json
+                    elif 'tokens' in parsed_json:
+                        return parsed_json['tokens']
+                    elif 'words' in parsed_json:
+                        return parsed_json['words']
+                    elif 'segments' in parsed_json:
+                        return parsed_json['segments']
+                    elif 'result' in parsed_json:
+                        return parsed_json['result']
+                    elif 'results' in parsed_json:
+                        return parsed_json['results']
+                    else:
+                        # Just return the first list found in the JSON
+                        for value in parsed_json.values():
+                            if isinstance(value, list) and len(value) > 0:
+                                return value
+                        
+                        # If we didn't find any list, log this unusual response
+                        print(f"Warning: No list found in JSON response: {parsed_json}")
+                        # Fallback to raw tokens if no list found
+                        return []
+                except json.JSONDecodeError as je:
+                    # Show detailed error for debugging
+                    print(f"JSON Decode Error: {str(je)}")
+                    print(f"Response text (first 100 chars): {response_text[:100]}...")
+                    return []
+                    
+            except Exception as e:
+                print(f"Error parsing API response: {str(e)}")
+                print(f"Response text (first 100 chars): {response_text[:100]}...")
+                return []
+                
+        except Exception as e:
+            print(f"Error calling LLM API: {str(e)}")
+            return []
+    
+    def _filter_tokens(self, tokens: List[str]) -> List[str]:
+        """Apply filters to the tokens."""
+        min_length = self.filters.get('min_token_length', 1)
+        stopwords = set(self.filters.get('stopwords', []))
+        
+        return [token for token in tokens 
+                if len(token) >= min_length 
+                and token not in stopwords]
+    
+    def segment(self, text: Union[str, List[str]]) -> Union[List[str], List[List[str]]]:
+        """Segment text(s) into tokens using the LLM API.
+        
+        Args:
+            text: Single text or list of texts to segment
+            
+        Returns:
+            A list of tokens for a single text, or a list of lists of tokens for multiple texts
+        """
+        # Handle single text case
+        if isinstance(text, str):
+            if not text.strip():
+                return []
+                
+            # Call the LLM API
+            tokens = self._call_llm_api(text)
+            
+            # Apply filters
+            filtered_tokens = self._filter_tokens(tokens)
+            
+            # Save result if output_dir is specified
+            if self.output_dir:
+                self._save_segmentation_result(text, filtered_tokens)
+            
+            return filtered_tokens
+        
+        # Handle multiple texts case - process one by one
+        results = []
+        
+        for single_text in tqdm(text, desc=f"Segmenting with {self.model}"):
+            if not single_text.strip():
+                results.append([])
+            else:
+                # Call the LLM API for each text individually
+                tokens = self._call_llm_api(single_text)
+                
+                # Apply filters
+                filtered_tokens = self._filter_tokens(tokens)
+                
+                # Save result if output_dir is specified
+                if self.output_dir:
+                    self._save_segmentation_result(single_text, filtered_tokens)
+                
+                results.append(filtered_tokens)
+        
+        return results
+    
+    def segment_to_sentences(self, text: Union[str, List[str]]) -> Union[List[List[str]], List[List[List[str]]]]:
+        """Segment text(s) into sentences, where each sentence is a list of tokens.
+        
+        Args:
+            text: Single text or list of texts to segment
+            
+        Returns:
+            For a single text: A list of lists of tokens, where each inner list represents a tokenized sentence
+            For multiple texts: A list of lists of lists, where each item is the sentence segmentation for one text
+        """
+        # Define sentence-ending punctuation
+        sentence_end_punctuation = ["。", "！", "？", ".", "!", "?", "……"]
+        min_sentence_length = self.filters.get('min_sentence_length', 1)
+        
+        # Helper function to organize tokens into sentences
+        def tokens_to_sentences(tokens):
+            sentences = []
+            current_sentence = []
+            
+            for token in tokens:
+                current_sentence.append(token)
+                
+                # If token is a sentence-ending punctuation, complete the sentence
+                if token in sentence_end_punctuation:
+                    if len(current_sentence) >= min_sentence_length:
+                        sentences.append(current_sentence)
+                    current_sentence = []
+            
+            # Add any remaining tokens as the last sentence
+            if current_sentence and len(current_sentence) >= min_sentence_length:
+                sentences.append(current_sentence)
+                
+            return sentences
+            
+        # Handle single text case
+        if isinstance(text, str):
+                
+            # First, segment the entire text in one API call
+            all_tokens = self._call_llm_api(text)
+            filtered_tokens = self._filter_tokens(all_tokens)
+            
+            # Organize tokens into sentences
+            all_sentences = tokens_to_sentences(filtered_tokens)
+            
+            # Save result if output_dir is specified
+            if self.output_dir:
+                self._save_segmentation_result(text, filtered_tokens, all_sentences)
+                
+            return all_sentences
+        
+        # Handle multiple texts case - process one by one
+        results = []
+        
+        for single_text in tqdm(text, desc=f"Segmenting sentences with {self.model}"):
+            # Call the LLM API for each text individually
+            tokens = self._call_llm_api(single_text)
+            
+            # Apply filters
+            filtered_tokens = self._filter_tokens(tokens)
+            
+            # Organize tokens into sentences
+            sentences = tokens_to_sentences(filtered_tokens)
+            
+            # Save result if output_dir is specified
+            if self.output_dir:
+                self._save_segmentation_result(single_text, filtered_tokens, sentences)
+            
+            results.append(sentences)
+        
+        return results
+
 # Factory function to create appropriate segmenter based on the backend
 def create_segmenter(backend: str = "spacy", **kwargs) -> SegmentationWrapper:
     """Create a segmenter based on the specified backend.
     
     Args:
-        backend: The segmentation backend to use ('spacy', 'jieba', 'bert', etc.)
+        backend: The segmentation backend to use ('spacy', 'jieba', 'bert', 'llm', etc.)
         **kwargs: Additional arguments to pass to the segmenter constructor
         
     Returns:
@@ -749,5 +1079,7 @@ def create_segmenter(backend: str = "spacy", **kwargs) -> SegmentationWrapper:
         return JiebaSegmenter(**kwargs)
     elif backend.lower() == "bert":
         return BertSegmenter(**kwargs)
+    elif backend.lower() == "llm":
+        return LLMSegmenter(**kwargs)
     else:
         raise ValueError(f"Unsupported segmentation backend: {backend}")
