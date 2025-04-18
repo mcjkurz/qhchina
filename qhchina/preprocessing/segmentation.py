@@ -1,12 +1,8 @@
 from typing import List, Dict, Any, Union, Optional, Set
 from tqdm.auto import tqdm
-from qhchina.helpers.texts import split_into_chunks
 import importlib
 import re
 import json
-import os
-import hashlib
-import time
 from datetime import datetime
 
 class SegmentationWrapper:
@@ -559,7 +555,10 @@ class BertSegmenter(SegmentationWrapper):
                     words.append(current_word)
                     current_word = ""
                 else:  # Fallback for any other tag
-                    current_word += token
+                    if current_word:
+                        current_word += token
+                    else:
+                        words.append(token)
             
             # Add the last word if it exists
             if current_word:
@@ -614,7 +613,7 @@ class BertSegmenter(SegmentationWrapper):
                     if current_word:
                         current_word += token
                     else:
-                        current_word = token
+                        words.append(token)
             
             # Add the last word if it exists
             if current_word:
