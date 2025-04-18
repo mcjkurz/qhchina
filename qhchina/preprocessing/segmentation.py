@@ -9,59 +9,165 @@ import hashlib
 import time
 from datetime import datetime
 
-
 class SegmentationWrapper:
     """Base segmentation wrapper class that can be extended for different segmentation tools."""
     
-    def __init__(self, filters: Dict[str, Any] = None):
+    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: Dict[str, Any] = None):
         """Initialize the segmentation wrapper.
         
         Args:
+            strategy (default "whole"): Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+            chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
+                - stopwords: List or set of stopwords to exclude (converted to set internally)
+                - min_length: Minimum length of tokens to include (default 1)
+                - excluded_pos: List or set of POS tags to exclude (converted to set internally)
         """
+        self.strategy = strategy.strip().lower()
+        if self.strategy not in ["line", "sentence", "chunk", "whole"]:
+            raise ValueError(f"Invalid segmentation strategy: {strategy}. Must be one of: line, sentence, chunk, whole")
+        
+        self.chunk_size = chunk_size
         self.filters = filters or {}
-        self.filters.setdefault('stopwords', [])
-        self.filters.setdefault('min_sentence_length', 1)
-        self.filters.setdefault('min_token_length', 1)
-        self.filters.setdefault('excluded_pos', [])
+        self.filters.setdefault('stopwords', set())
+        if not isinstance(self.filters['stopwords'], set):
+            self.filters['stopwords'] = set(self.filters['stopwords'])
+        self.filters.setdefault('min_length', 1)
+        self.filters.setdefault('excluded_pos', set())
+        if not isinstance(self.filters['excluded_pos'], set):
+            self.filters['excluded_pos'] = set(self.filters['excluded_pos'])
     
-    def segment(self, text: Union[str, List[str]]) -> Union[List[str], List[List[str]]]:
-        """Segment text(s) into tokens, removing unwanted tokens.
-        
-        Args:
-            text: Single text or list of texts to segment
-            
-        Returns:
-            A list of tokens for a single text, or a list of lists of tokens for multiple texts
-        """
-        raise NotImplementedError("This method should be implemented by subclasses")
-    
-    def segment_to_sentences(self, text: str) -> List[List[str]]:
-        """Segment text into sentences, where each sentence is a list of tokens.
-        
-        The text is first split into passages (non-empty lines), then each 
-        passage is processed separately, and sentences are extracted.
+    def segment(self, text: str) -> Union[List[str], List[List[str]]]:
+        """Segment text into tokens based on the selected strategy.
         
         Args:
             text: Text to segment
             
         Returns:
-            A list of lists of tokens, where each inner list represents a tokenized sentence
+            If strategy is 'whole': A single list of tokens
+            If strategy is 'line', 'sentence', or 'chunk': A list of lists, where each inner list
+            contains tokens for a line, sentence, or chunk respectively
+        """
+        # Split text based on the strategy
+        units = self._split_text_by_strategy(text)
+        
+        # Process all units
+        processed_results = self._process_all_texts(units)
+        
+        # For 'whole' strategy, merge all results into a single list
+        if self.strategy == "whole" and processed_results:
+            return processed_results[0]
+        
+        return processed_results
+    
+    def _split_text_by_strategy(self, text: str) -> List[str]:
+        """Split text based on the selected strategy.
+        
+        Args:
+            text: The text to split
+            
+        Returns:
+            List of text units (lines, sentences, chunks, or whole text)
+        """
+        if self.strategy == "line":
+            return self._split_into_lines(text)
+        elif self.strategy == "sentence":
+            return self._split_into_sentences(text)
+        elif self.strategy == "chunk":
+            return self._split_into_chunks(text, self.chunk_size)
+        elif self.strategy == "whole":
+            return [text] if text.strip() else []
+        else:
+            raise ValueError(f"Invalid strategy: {self.strategy}")
+    
+    def _split_into_lines(self, text: str) -> List[str]:
+        """Split text into non-empty lines.
+        
+        Args:
+            text: Text to split into lines
+            
+        Returns:
+            List of non-empty lines
+        """
+        return [line.strip() for line in text.split('\n') if line.strip()]
+    
+    def _split_into_chunks(self, text: str, chunk_size: int) -> List[str]:
+        """Split text into chunks of specified size.
+        
+        Args:
+            text: Text to split into chunks
+            chunk_size: Maximum size of each chunk
+            
+        Returns:
+            List of text chunks
+        """
+        # Return empty list for empty text
+        if not text:
+            return []
+            
+        chunks = []
+        for i in range(0, len(text), chunk_size):
+            chunks.append(text[i:i + chunk_size])
+            
+        return chunks
+    
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Split text into sentences.
+        
+        Args:
+            text: Text to split into sentences
+            
+        Returns:
+            List of sentences
+        """
+        # Simple Chinese sentence-ending punctuation pattern
+        sentence_end_pattern = r"([。！？\.!?……]+)"
+        
+        # Split by sentence-ending punctuation, but keep the punctuation
+        raw_splits = re.split(sentence_end_pattern, text)
+        
+        # Combine sentence content with its ending punctuation
+        sentences = []
+        i = 0
+        while i < len(raw_splits):
+            if i + 1 < len(raw_splits) and re.match(sentence_end_pattern, raw_splits[i+1]):
+                sentences.append(raw_splits[i] + raw_splits[i+1])
+                i += 2
+            else:
+                if raw_splits[i].strip():
+                    sentences.append(raw_splits[i])
+                i += 1
+        
+        # If no sentences were found, treat the whole text as one sentence
+        if not sentences and text.strip():
+            sentences = [text]
+        
+        return sentences
+    
+    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+        """Process all text units and return results.
+        
+        Args:
+            texts: List of all text units to process
+            
+        Returns:
+            List of processed results for each text unit
+            
+        Note:
+            This method should be implemented by subclasses
         """
         raise NotImplementedError("This method should be implemented by subclasses")
-        
-    def _split_text_into_passages(self, text: str) -> List[str]:
-        """Split text into passages (non-empty lines)."""
-        return [line.strip() for line in text.split('\n') if line.strip()]
 
 
 class SpacySegmenter(SegmentationWrapper):
     """Segmentation wrapper for spaCy models."""
     
     def __init__(self, model_name: str = "zh_core_web_lg", 
-                 disable: Optional[List[str]] = ["ner", "lemmatizer"],
+                 disable: Optional[List[str]] = None,
                  batch_size: int = 200,
                  user_dict: Union[List[str], str] = None,
+                 strategy: str = "whole", 
+                 chunk_size: int = 512,
                  filters: Dict[str, Any] = None):
         """Initialize the spaCy segmenter.
         
@@ -70,14 +176,16 @@ class SpacySegmenter(SegmentationWrapper):
             disable: List of pipeline components to disable for better performance; default setting is ["ner", "lemmatizer"]
             batch_size: Batch size for processing multiple texts
             user_dict: Custom user dictionary - either a list of words or path to a dictionary file
+            strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+            chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
-                - min_sentence_length: Minimum length of sentences to include (default 1)
-                - min_token_length: Minimum length of tokens to include (default 1)
-                - excluded_pos: Set of POS tags to exclude from token outputs (default: NUM, SYM, SPACE)
+                - min_length: Minimum length of tokens to include (default 1)
+                - excluded_pos: Set of POS tags to exclude from token outputs
+                - stopwords: Set of stopwords to exclude
         """
-        super().__init__(filters)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
         self.model_name = model_name
-        self.disable = disable
+        self.disable = disable or []
         self.batch_size = batch_size
         self.user_dict = user_dict
         
@@ -137,76 +245,35 @@ class SpacySegmenter(SegmentationWrapper):
     
     def _filter_tokens(self, tokens):
         """Filter tokens based on excluded POS tags and minimum length."""
-        min_length = self.filters.get('min_token_length', 1)
+        min_length = self.filters.get('min_length', 1)
         excluded_pos = self.filters.get('excluded_pos', [])
+        stopwords = set(self.filters.get('stopwords', []))
         return [token for token in tokens 
-                if token.pos_ not in excluded_pos and len(token.text) >= min_length]
+                if token.pos_ not in excluded_pos 
+                and len(token.text) >= min_length
+                and token.text not in stopwords]
     
-    def segment(self, text: Union[str, List[str]]) -> Union[List[str], List[List[str]]]:
-        """Segment text(s) into tokens, removing unwanted tokens.
+    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+        """Process all texts with spaCy's pipe and return results.
         
         Args:
-            text: Single text or list of texts to segment
+            texts: List of all text units to process
             
         Returns:
-            A list of tokens for a single text, or a list of lists of tokens for multiple texts
+            List of lists of tokens, one list per text unit
         """
-        # Handle single text case
-        if isinstance(text, str):
-            # Check if the text is longer than the model's max length
-            if len(text) > self.nlp.max_length:
-                # Split text into chunks and process each chunk
-                chunks = split_into_chunks(text, self.nlp.max_length)
-                all_tokens = []
-                
-                for chunk in chunks:
-                    doc = self.nlp(chunk)
-                    tokens = [token.text for token in self._filter_tokens(doc)]
-                    all_tokens.extend(tokens)
-                
-                return all_tokens
-            else:
-                # Process normally if text is within length limits
-                doc = self.nlp(text)
-                return [token.text for token in self._filter_tokens(doc)]
-        
-        # Handle multiple texts case with batching
         results = []
-        for doc in tqdm(self.nlp.pipe(text, batch_size=self.batch_size), 
-                       total=len(text)):
-            tokens = [token.text for token in self._filter_tokens(doc)]
-            results.append(tokens)
+        
+        # Process each doc and add results
+        for doc in tqdm(self.nlp.pipe(texts, batch_size=self.batch_size), 
+                         total=len(texts), desc="Segmenting with spaCy"):
+            # Get filtered tokens for the doc
+            filtered_tokens = [token.text for token in self._filter_tokens(doc)]
+            
+            # Add to results
+            results.append(filtered_tokens)
         
         return results
-    
-    def segment_to_sentences(self, text: str) -> List[List[str]]:
-        """Segment text into sentences, where each sentence is a list of tokens.
-        
-        The text is first split into passages (non-empty lines), then each 
-        passage is processed separately, and sentences are extracted.
-        
-        Args:
-            text: Text to segment
-            
-        Returns:
-            A list of lists of tokens, where each inner list represents a tokenized sentence
-        """
-        # Split text into passages (non-empty lines)
-        passages = self._split_text_into_passages(text)
-        
-        # Process each passage and extract sentences
-        all_sentences = []
-        min_sentence_length = self.filters.get('min_sentence_length', 1)
-        
-        for doc in tqdm(self.nlp.pipe(passages, batch_size=self.batch_size), 
-                        total=len(passages)):
-            for sent in doc.sents:
-                if sent.text.strip():
-                    tokens = [token.text for token in self._filter_tokens(sent)]
-                    if len(tokens) >= min_sentence_length:
-                        all_sentences.append(tokens)
-                    
-        return all_sentences
 
 
 class JiebaSegmenter(SegmentationWrapper):
@@ -215,19 +282,22 @@ class JiebaSegmenter(SegmentationWrapper):
     def __init__(self, 
                  user_dict_path: str = None,
                  pos_tagging: bool = False,
+                 strategy: str = "whole",
+                 chunk_size: int = 512,
                  filters: Dict[str, Any] = None):
         """Initialize the Jieba segmenter.
         
         Args:
             user_dict_path: Path to a user dictionary file for Jieba
             pos_tagging: Whether to include POS tagging in segmentation
+            strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+            chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
-                - min_sentence_length: Minimum length of sentences to include (default 1)
-                - min_token_length: Minimum length of tokens to include (default 1)
+                - min_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
-                - stopwords: List of stopwords to exclude
+                - stopwords: Set of stopwords to exclude
         """
-        super().__init__(filters)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
         self.pos_tagging = pos_tagging
         
         # Try to import jieba
@@ -250,7 +320,7 @@ class JiebaSegmenter(SegmentationWrapper):
     
     def _filter_tokens(self, tokens) -> List[str]:
         """Filter tokens based on filters."""
-        min_length = self.filters.get('min_token_length', 1)
+        min_length = self.filters.get('min_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
         
         # If POS tagging is enabled and we have tokens as (word, flag) tuples
@@ -265,102 +335,34 @@ class JiebaSegmenter(SegmentationWrapper):
                     if len(token) >= min_length 
                     and token not in stopwords]
     
-    def segment(self, text: Union[str, List[str]]) -> Union[List[str], List[List[str]]]:
-        """Segment text(s) into tokens, removing unwanted tokens.
+    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+        """Process all text units with Jieba and return results.
         
         Args:
-            text: Single text or list of texts to segment
+            texts: List of all text units to process
             
         Returns:
-            A list of tokens for a single text, or a list of lists of tokens for multiple texts
+            List of lists of tokens, one list per text unit
         """
-        # Handle single text case
-        if isinstance(text, str):
-            if self.pos_tagging:
-                # With POS tagging
-                tokens = list(self.pseg.cut(text))
-                return self._filter_tokens(tokens)
-            else:
-                # Without POS tagging
-                tokens = list(self.jieba.cut(text))
-                return self._filter_tokens(tokens)
-        
-        # Handle multiple texts case
         results = []
-        for single_text in tqdm(text, desc="Segmenting texts"):
+        for text_to_process in tqdm(texts, desc="Segmenting with Jieba"):
+            # Skip empty text
+            if not text_to_process.strip():
+                results.append([])
+                continue
+                
             if self.pos_tagging:
-                # With POS tagging
-                tokens = list(self.pseg.cut(single_text))
-                filtered_tokens = self._filter_tokens(tokens)
+                tokens = list(self.pseg.cut(text_to_process))
             else:
-                # Without POS tagging
-                tokens = list(self.jieba.cut(single_text))
-                filtered_tokens = self._filter_tokens(tokens)
+                tokens = list(self.jieba.cut(text_to_process))
+
+            # Filter tokens
+            filtered_tokens = self._filter_tokens(tokens)
             
+            # Add to results
             results.append(filtered_tokens)
         
         return results
-    
-    def segment_to_sentences(self, text: str) -> List[List[str]]:
-        """Segment text into sentences, where each sentence is a list of tokens.
-        
-        The text is first split into passages (non-empty lines), then each 
-        passage is split into sentences, and each sentence is tokenized.
-        
-        Args:
-            text: Text to segment
-            
-        Returns:
-            A list of lists of tokens, where each inner list represents a tokenized sentence
-        """
-        
-        # Simple Chinese sentence-ending punctuation pattern
-        sentence_end_pattern = r"[。！？\.!?……]+"
-        
-        # Split text into passages (non-empty lines)
-        passages = self._split_text_into_passages(text)
-        
-        all_sentences = []
-        min_sentence_length = self.filters.get('min_sentence_length', 1)
-        
-        for passage in passages:
-            # Split passage into sentences
-            if not passage:
-                continue
-                
-            # Split by sentence-ending punctuation, but keep the punctuation
-            sentences = re.split(f'({sentence_end_pattern})', passage)
-            
-            # Combine each sentence with its ending punctuation
-            combined_sentences = []
-            for i in range(0, len(sentences) - 1, 2):
-                if i + 1 < len(sentences):
-                    combined_sentences.append(sentences[i] + sentences[i + 1])
-                else:
-                    combined_sentences.append(sentences[i])
-            
-            # If the split didn't work (no punctuation found), use the whole passage
-            if not combined_sentences:
-                combined_sentences = [passage]
-            
-            # Process each sentence
-            for sentence in combined_sentences:
-                if not sentence.strip():
-                    continue
-                    
-                if self.pos_tagging:
-                    # With POS tagging
-                    tokens = list(self.pseg.cut(sentence))
-                    filtered_tokens = self._filter_tokens(tokens)
-                else:
-                    # Without POS tagging
-                    tokens = list(self.jieba.cut(sentence))
-                    filtered_tokens = self._filter_tokens(tokens)
-                
-                if len(filtered_tokens) >= min_sentence_length:
-                    all_sentences.append(filtered_tokens)
-        
-        return all_sentences
 
 
 class BertSegmenter(SegmentationWrapper):
@@ -379,8 +381,11 @@ class BertSegmenter(SegmentationWrapper):
                  tokenizer = None,
                  tagging_scheme: Union[str, List[str]] = "be",
                  batch_size: int = 32,
-                 device: str = None,
+                 device: Optional[str] = None,
                  remove_special_tokens: bool = True,
+                 max_sequence_length: int = 512,
+                 strategy: str = "whole",
+                 chunk_size: int = 512,
                  filters: Dict[str, Any] = None):
         """Initialize the BERT segmenter.
         
@@ -394,11 +399,22 @@ class BertSegmenter(SegmentationWrapper):
             batch_size: Batch size for processing
             device: Device to use ('cpu', 'cuda', etc.)
             remove_special_tokens: Whether to remove special tokens (CLS, SEP) from output, default is True, which works for BERT-based models.
+            max_sequence_length: Maximum sequence length for BERT models (default 512); if the text is longer than this, it will be split into chunks.
+            strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+            chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
+                - min_length: Minimum length of tokens to include (default 1)
+                - excluded_pos: Set of POS tags to exclude from token outputs
+                - stopwords: Set of stopwords to exclude
         """
-        super().__init__(filters)
+        # Use max_sequence_length as chunk_size if not provided separately
+        if not chunk_size and strategy == "chunk":
+            chunk_size = max_sequence_length
+        
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
         self.batch_size = batch_size
         self.remove_special_tokens = remove_special_tokens
+        self.max_sequence_length = max_sequence_length
         
         # Validate that either model_name or both model and tokenizer are provided
         if model_name is None and (model is None or tokenizer is None):
@@ -425,15 +441,16 @@ class BertSegmenter(SegmentationWrapper):
         try:
             import torch
             from transformers import AutoTokenizer, AutoModelForTokenClassification
+            self.torch = torch
+            self.AutoTokenizer = AutoTokenizer
+            self.AutoModelForTokenClassification = AutoModelForTokenClassification
         except ImportError:
             raise ImportError("transformers and torch are not installed. "
                              "Please install them with 'pip install transformers torch'")
         
-        self.torch = torch
-        
         # Set device
         if device is None:
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.device = 'cuda' if self.torch.cuda.is_available() else 'cpu'
         else:
             self.device = device
         
@@ -446,8 +463,8 @@ class BertSegmenter(SegmentationWrapper):
         else:
             # Load model and tokenizer from pretrained
             try:
-                self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-                self.model = AutoModelForTokenClassification.from_pretrained(
+                self.tokenizer = self.AutoTokenizer.from_pretrained(model_name)
+                self.model = self.AutoModelForTokenClassification.from_pretrained(
                     model_name, 
                     num_labels=len(self.labels)
                 ).to(self.device)
@@ -458,10 +475,24 @@ class BertSegmenter(SegmentationWrapper):
         self.model.eval()
         print(f"Using tagging scheme: {self.labels}")
     
+    def _filter_words(self, words: List[str]) -> List[str]:
+        """Filter words based on specified filters.
+        
+        Args:
+            words: List of words to filter
+            
+        Returns:
+            Filtered list of words
+        """
+        min_length = self.filters.get('min_length', 1)
+        stopwords = set(self.filters.get('stopwords', []))
+        
+        return [word for word in words 
+                if len(word) >= min_length 
+                and word not in stopwords]
+    
     def _predict_tags_batch(self, texts: List[str]) -> List[List[str]]:
         """Predict segmentation tags for each character in a batch of texts."""
-        import torch
-        
         # Process each text to character level and store original lengths
         all_tokens = []
         original_lengths = []
@@ -475,26 +506,30 @@ class BertSegmenter(SegmentationWrapper):
         inputs = self.tokenizer(
             texts, 
             return_tensors="pt", 
-            padding=True
+            padding=True,
+            truncation=True,
+            max_length=self.max_sequence_length
         ).to(self.device)
         
         # Get predictions
-        with torch.no_grad():
+        with self.torch.no_grad():
             outputs = self.model(**inputs)
-            predictions = torch.argmax(outputs.logits, dim=2)
+            predictions = self.torch.argmax(outputs.logits, dim=2)
         
         # Process predictions back to tags for each text
         all_tags = []
-        for i, (pred, length) in enumerate(zip(predictions, original_lengths)):
+        for pred, original_length in zip(predictions, original_lengths):
             # Skip special tokens like [CLS] and [SEP] if configured to do so
             if self.remove_special_tokens:
                 # BERT tokenization adds [CLS] at start and [SEP] at end:
                 # [CLS] char1 char2 ... charN [SEP]
-                # So we only need positions 1 to length (inclusive)
-                tags = [self.labels[p.item()] for p in pred[1:length+1]]  # Skip [CLS], include all characters
+                # So we only need positions in range (1, original length+1)
+                pred_length = len(pred)
+                end_idx = min(original_length + 1, pred_length)
+                tags = [self.labels[p.item()] for p in pred[1:end_idx]]  # Skip [CLS], include all characters
             else:
                 # Include special tokens - but still limit to the actual content length
-                tags = [self.labels[p.item()] for p in pred[:length+1]]
+                tags = [self.labels[p.item()] for p in pred[:original_length+1]]
             
             all_tags.append(tags)
         
@@ -557,8 +592,8 @@ class BertSegmenter(SegmentationWrapper):
             if current_word:
                 words.append(current_word)
         
-        # BMES tagging scheme (or other 4-tag scheme)
-        elif len(self.labels) >= 4 and all(tag in self.labels for tag in tags):
+        # BMES tagging scheme
+        elif len(self.labels) == 4 and all(tag in self.labels for tag in tags):
             b_index = self.labels.index("B")
             m_index = self.labels.index("M")
             e_index = self.labels.index("E")
@@ -587,151 +622,43 @@ class BertSegmenter(SegmentationWrapper):
         
         return words
     
-    def segment(self, text: Union[str, List[str]]) -> Union[List[str], List[List[str]]]:
-        """Segment text(s) into tokens using the BERT model.
+    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+        """Process all texts with BERT model and return results.
         
         Args:
-            text: Single text or list of texts to segment
+            texts: List of all text units to process
             
         Returns:
-            A list of tokens for a single text, or a list of lists of tokens for multiple texts
+            List of lists of tokens, one list per text unit
         """
-        # Handle single text case
-        if isinstance(text, str):
-            if not text.strip():
-                return []
-                
-            # Predict tags for each character
-            tags = self._predict_tags(text)
-            
-            # Get tokens (characters) from the input text
-            tokens = list(text)
-            
-            # Merge tokens based on tags
-            words = self._merge_tokens_by_tags(tokens, tags)
-            
-            # Apply filters
-            min_length = self.filters.get('min_token_length', 1)
-            stopwords = set(self.filters.get('stopwords', []))
-            
-            return [word for word in words if len(word) >= min_length and word not in stopwords]
-        
-        # Handle multiple texts case with proper batching
+        # Initialize results list
         results = []
         
-        # Process empty texts first
-        processed_texts = []
-        text_indices = []
-        
-        for i, single_text in enumerate(text):
-            if not single_text.strip():
-                results.append([])
-            else:
-                processed_texts.append(single_text)
-                text_indices.append(i)
-        
-        # Initialize results list with proper length
-        results = [[] for _ in range(len(text))]
-        
-        # Process non-empty texts in batches
-        for i in range(0, len(processed_texts), self.batch_size):
-            batch_texts = processed_texts[i:i + self.batch_size]
-            batch_indices = text_indices[i:i + self.batch_size]
-            
-            # Get tokens and tags for batch
-            batch_tokens = [list(t) for t in batch_texts]
+        # Process in batches
+        for i in range(0, len(texts), self.batch_size):
+            batch_texts = texts[i:i + self.batch_size]
+                
+            # Get tokens and tags for each text in the batch
+            batch_tokens = [list(text) for text in batch_texts]
             batch_tags = self._predict_tags_batch(batch_texts)
             
             # Process each text in the batch
-            for j, (tokens, tags, idx) in enumerate(zip(batch_tokens, batch_tags, batch_indices)):
-                words = self._merge_tokens_by_tags(tokens, tags)
-                
-                # Apply filters
-                min_length = self.filters.get('min_token_length', 1)
-                stopwords = set(self.filters.get('stopwords', []))
-                
-                filtered_words = [word for word in words 
-                                if len(word) >= min_length and word not in stopwords]
-                
-                # Store results at the original index
-                results[idx] = filtered_words
-        
-        return results
-    
-    def segment_to_sentences(self, text: str) -> List[List[str]]:
-        """Segment text into sentences, where each sentence is a list of tokens.
-        
-        Args:
-            text: Text to segment
-            
-        Returns:
-            A list of lists of tokens, where each inner list represents a tokenized sentence
-        """
-        # Simple Chinese sentence-ending punctuation pattern
-        sentence_end_pattern = r"[。！？\.!?……]+"
-        
-        # Split text into passages (non-empty lines)
-        passages = self._split_text_into_passages(text)
-        
-        all_sentences = []
-        min_sentence_length = self.filters.get('min_sentence_length', 1)
-        
-        # Process passages in batches
-        for i in range(0, len(passages), self.batch_size):
-            batch_passages = passages[i:i + self.batch_size]
-            
-            # Extract sentences from each passage
-            all_batch_sentences = []
-            for passage in batch_passages:
-                if not passage:
+            for tokens, tags in zip(batch_tokens, batch_tags):
+                # Make sure tags and tokens match in length
+                if len(tags) != len(tokens):
+                    print(f"Warning: Tags and tokens length mismatch. Tags: {len(tags)}, Tokens: {len(tokens)}")
+                    results.append([])  # Add empty list for this entry
                     continue
                     
-                # Split by sentence-ending punctuation, but keep the punctuation
-                sentences = re.split(f'({sentence_end_pattern})', passage)
-                
-                # Combine each sentence with its ending punctuation
-                combined_sentences = []
-                for i in range(0, len(sentences) - 1, 2):
-                    if i + 1 < len(sentences):
-                        combined_sentences.append(sentences[i] + sentences[i + 1])
-                    else:
-                        combined_sentences.append(sentences[i])
-                
-                # If the split didn't work (no punctuation found), use the whole passage
-                if not combined_sentences:
-                    combined_sentences = [passage]
-                
-                # Keep only non-empty sentences
-                combined_sentences = [s for s in combined_sentences if s.strip()]
-                all_batch_sentences.extend(combined_sentences)
-            
-            # Skip empty batches
-            if not all_batch_sentences:
-                continue
-                
-            # Get tokens for all sentences in the batch
-            batch_tags = self._predict_tags_batch(all_batch_sentences)
-            
-            # Process each sentence
-            for tags, sentence in zip(batch_tags, all_batch_sentences):
-                if not sentence.strip():
-                    continue
-
-                tokens = list(sentence)
-                assert len(tags) == len(tokens)
                 words = self._merge_tokens_by_tags(tokens, tags)
                 
                 # Apply filters
-                min_length = self.filters.get('min_token_length', 1)
-                stopwords = set(self.filters.get('stopwords', []))
+                filtered_words = self._filter_words(words)
                 
-                filtered_words = [word for word in words 
-                               if len(word) >= min_length and word not in stopwords]
-                
-                if len(filtered_words) >= min_sentence_length:
-                    all_sentences.append(filtered_words)
+                # Add to results
+                results.append(filtered_words)
         
-        return all_sentences
+        return results
 
 
 class LLMSegmenter(SegmentationWrapper):
@@ -750,28 +677,33 @@ class LLMSegmenter(SegmentationWrapper):
     
     def __init__(self, 
                  api_key: str,
-                 model: str = None,
-                 endpoint: str = None,
+                 model: str,
+                 endpoint: str,
                  prompt: str = None,
                  system_message: str = None,
                  temperature: float = 1,
                  max_tokens: int = 2048,
-                 output_dir: str = None,
+                 strategy: str = "whole",
+                 chunk_size: int = 512,
                  filters: Dict[str, Any] = None):
         """Initialize the LLM segmenter.
         
         Args:
             api_key: API key for the language model service
             model: Model name to use
-            endpoint: API endpoint URL (if None, uses the default OpenAI endpoint)
+            endpoint: API endpoint URL
             prompt: Custom prompt template with {text} placeholder (if None, uses DEFAULT_PROMPT)
             system_message: Optional system message to prepend to API calls
             temperature: Temperature for model sampling (lower for more deterministic output)
             max_tokens: Maximum tokens in the response
-            output_dir: Directory to save segmentation results as JSON files (created if doesn't exist)
+            strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+            chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
+                - min_length: Minimum length of tokens to include (default 1)
+                - excluded_pos: Set of POS tags to exclude from token outputs
+                - stopwords: Set of stopwords to exclude
         """
-        super().__init__(filters)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
         self.api_key = api_key
         self.model = model
         self.endpoint = endpoint
@@ -779,23 +711,12 @@ class LLMSegmenter(SegmentationWrapper):
         self.system_message = system_message
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.output_dir = output_dir
-        
-        # Create output directory if specified and doesn't exist
-        if self.output_dir and not os.path.exists(self.output_dir):
-            try:
-                os.makedirs(self.output_dir)
-            except Exception as e:
-                print(f"Warning: Failed to create output directory {self.output_dir}: {str(e)}")
-                self.output_dir = None
         
         # Try to import OpenAI
         try:
             import openai
         except ImportError:
             raise ImportError("openai is not installed. Please install it with 'pip install openai'")
-        
-        self.openai = openai
         
         # Configure OpenAI client
         if endpoint:
@@ -807,49 +728,6 @@ class LLMSegmenter(SegmentationWrapper):
         else:
             # Default OpenAI endpoint
             self.client = openai.OpenAI(api_key=api_key)
-    
-    def _save_segmentation_result(self, original_text: str, segmented_tokens: List[str], sentences: List[List[str]] = None) -> str:
-        """Save segmentation result to a JSON file in the output directory.
-        
-        Args:
-            original_text: The original text that was segmented
-            segmented_tokens: The resulting segmented tokens
-            sentences: Optional list of sentences (each a list of tokens)
-            
-        Returns:
-            Path to the saved file, or empty string if saving failed or output_dir not set
-        """
-        if not self.output_dir:
-            return ""
-            
-        try:
-            # Create a unique filename based on text hash and timestamp
-            text_hash = hashlib.md5(original_text.encode('utf-8')).hexdigest()[:10]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Use different prefix based on whether this includes sentences
-            prefix = "segment_sentences" if sentences else "segment"
-            filename = f"{prefix}_{text_hash}_{timestamp}.json"
-            file_path = os.path.join(self.output_dir, filename)
-            
-            # Create the JSON data
-            data = {
-                "original": original_text,
-                "segmented": segmented_tokens
-            }
-            
-            # Add sentences if provided
-            if sentences:
-                data["sentences"] = sentences
-            
-            # Write to file
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-                
-            return file_path
-        except Exception as e:
-            print(f"Warning: Failed to save segmentation result: {str(e)}")
-            return ""
     
     def _call_llm_api(self, text: str) -> List[str]:
         """Call the LLM API with the provided text and parse the response as a list of tokens."""
@@ -934,138 +812,49 @@ class LLMSegmenter(SegmentationWrapper):
     
     def _filter_tokens(self, tokens: List[str]) -> List[str]:
         """Apply filters to the tokens."""
-        min_length = self.filters.get('min_token_length', 1)
+        min_length = self.filters.get('min_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
         
         return [token for token in tokens 
                 if len(token) >= min_length 
                 and token not in stopwords]
     
-    def segment(self, text: Union[str, List[str]]) -> Union[List[str], List[List[str]]]:
-        """Segment text(s) into tokens using the LLM API.
+    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+        """Process all text units with LLM API and return results.
         
         Args:
-            text: Single text or list of texts to segment
+            texts: List of all text units to process
             
         Returns:
-            A list of tokens for a single text, or a list of lists of tokens for multiple texts
+            List of lists of tokens, one list per text unit
         """
-        # Handle single text case
-        if isinstance(text, str):
-            if not text.strip():
-                return []
-                
-            # Call the LLM API
-            tokens = self._call_llm_api(text)
+        # Process each text unit one by one (no batching for API calls)
+        results = []
+        for text_to_process in tqdm(texts, desc=f"Segmenting with {self.model}"):
             
-            # Apply filters
+            # Call the LLM API for this text unit
+            tokens = self._call_llm_api(text_to_process)
             filtered_tokens = self._filter_tokens(tokens)
             
-            # Save result if output_dir is specified
-            if self.output_dir:
-                self._save_segmentation_result(text, filtered_tokens)
-            
-            return filtered_tokens
-        
-        # Handle multiple texts case - process one by one
-        results = []
-        
-        for single_text in tqdm(text, desc=f"Segmenting with {self.model}"):
-            if not single_text.strip():
-                results.append([])
-            else:
-                # Call the LLM API for each text individually
-                tokens = self._call_llm_api(single_text)
+            # Add the tokens to results
+            results.append(filtered_tokens)
                 
-                # Apply filters
-                filtered_tokens = self._filter_tokens(tokens)
-                
-                # Save result if output_dir is specified
-                if self.output_dir:
-                    self._save_segmentation_result(single_text, filtered_tokens)
-                
-                results.append(filtered_tokens)
-        
-        return results
-    
-    def segment_to_sentences(self, text: Union[str, List[str]]) -> Union[List[List[str]], List[List[List[str]]]]:
-        """Segment text(s) into sentences, where each sentence is a list of tokens.
-        
-        Args:
-            text: Single text or list of texts to segment
-            
-        Returns:
-            For a single text: A list of lists of tokens, where each inner list represents a tokenized sentence
-            For multiple texts: A list of lists of lists, where each item is the sentence segmentation for one text
-        """
-        # Define sentence-ending punctuation
-        sentence_end_punctuation = ["。", "！", "？", ".", "!", "?", "……"]
-        min_sentence_length = self.filters.get('min_sentence_length', 1)
-        
-        # Helper function to organize tokens into sentences
-        def tokens_to_sentences(tokens):
-            sentences = []
-            current_sentence = []
-            
-            for token in tokens:
-                current_sentence.append(token)
-                
-                # If token is a sentence-ending punctuation, complete the sentence
-                if token in sentence_end_punctuation:
-                    if len(current_sentence) >= min_sentence_length:
-                        sentences.append(current_sentence)
-                    current_sentence = []
-            
-            # Add any remaining tokens as the last sentence
-            if current_sentence and len(current_sentence) >= min_sentence_length:
-                sentences.append(current_sentence)
-                
-            return sentences
-            
-        # Handle single text case
-        if isinstance(text, str):
-                
-            # First, segment the entire text in one API call
-            all_tokens = self._call_llm_api(text)
-            filtered_tokens = self._filter_tokens(all_tokens)
-            
-            # Organize tokens into sentences
-            all_sentences = tokens_to_sentences(filtered_tokens)
-            
-            # Save result if output_dir is specified
-            if self.output_dir:
-                self._save_segmentation_result(text, filtered_tokens, all_sentences)
-                
-            return all_sentences
-        
-        # Handle multiple texts case - process one by one
-        results = []
-        
-        for single_text in tqdm(text, desc=f"Segmenting sentences with {self.model}"):
-            # Call the LLM API for each text individually
-            tokens = self._call_llm_api(single_text)
-            
-            # Apply filters
-            filtered_tokens = self._filter_tokens(tokens)
-            
-            # Organize tokens into sentences
-            sentences = tokens_to_sentences(filtered_tokens)
-            
-            # Save result if output_dir is specified
-            if self.output_dir:
-                self._save_segmentation_result(single_text, filtered_tokens, sentences)
-            
-            results.append(sentences)
-        
         return results
 
 # Factory function to create appropriate segmenter based on the backend
-def create_segmenter(backend: str = "spacy", **kwargs) -> SegmentationWrapper:
+def create_segmenter(backend: str = "spacy", strategy: str = "line", chunk_size: int = 512, **kwargs) -> SegmentationWrapper:
     """Create a segmenter based on the specified backend.
     
     Args:
         backend: The segmentation backend to use ('spacy', 'jieba', 'bert', 'llm', etc.)
+        strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+        chunk_size: Size of chunks when using 'chunk' strategy
         **kwargs: Additional arguments to pass to the segmenter constructor
+            - filters: Dictionary of filters to apply during segmentation
+                - min_length: Minimum length of tokens to include (default 1)
+                - stopwords: Set of stopwords to exclude
+                - excluded_pos: Set of POS tags to exclude (for backends that support POS tagging)
+            - Other backend-specific arguments
         
     Returns:
         An instance of a SegmentationWrapper subclass
@@ -1073,6 +862,10 @@ def create_segmenter(backend: str = "spacy", **kwargs) -> SegmentationWrapper:
     Raises:
         ValueError: If the specified backend is not supported
     """
+    # Add strategy and chunk_size to kwargs
+    kwargs['strategy'] = strategy
+    kwargs['chunk_size'] = chunk_size
+    
     if backend.lower() == "spacy":
         return SpacySegmenter(**kwargs)
     elif backend.lower() == "jieba":
