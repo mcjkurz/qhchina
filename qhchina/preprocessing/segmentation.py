@@ -8,7 +8,8 @@ from datetime import datetime
 class SegmentationWrapper:
     """Base segmentation wrapper class that can be extended for different segmentation tools."""
     
-    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: Dict[str, Any] = None):
+    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: Dict[str, Any] = None, 
+                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         """Initialize the segmentation wrapper.
         
         Args:
@@ -18,6 +19,7 @@ class SegmentationWrapper:
                 - stopwords: List or set of stopwords to exclude (converted to set internally)
                 - min_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: List or set of POS tags to exclude (converted to set internally)
+            sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
         """
         self.strategy = strategy.strip().lower()
         if self.strategy not in ["line", "sentence", "chunk", "whole"]:
@@ -32,6 +34,7 @@ class SegmentationWrapper:
         self.filters.setdefault('excluded_pos', set())
         if not isinstance(self.filters['excluded_pos'], set):
             self.filters['excluded_pos'] = set(self.filters['excluded_pos'])
+        self.sentence_end_pattern = sentence_end_pattern
     
     def segment(self, text: str) -> Union[List[str], List[List[str]]]:
         """Segment text into tokens based on the selected strategy.
@@ -117,7 +120,7 @@ class SegmentationWrapper:
             List of sentences
         """
         # Simple Chinese sentence-ending punctuation pattern
-        sentence_end_pattern = r"([。！？\.!?……]+)"
+        sentence_end_pattern = self.sentence_end_pattern
         
         # Split by sentence-ending punctuation, but keep the punctuation
         raw_splits = re.split(sentence_end_pattern, text)
@@ -164,7 +167,8 @@ class SpacySegmenter(SegmentationWrapper):
                  user_dict: Union[List[str], str] = None,
                  strategy: str = "whole", 
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None):
+                 filters: Dict[str, Any] = None,
+                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         """Initialize the spaCy segmenter.
         
         Args:
@@ -178,8 +182,10 @@ class SpacySegmenter(SegmentationWrapper):
                 - min_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: Set of POS tags to exclude from token outputs
                 - stopwords: Set of stopwords to exclude
+            sentence_end_pattern: Regular expression pattern for sentence endings
         """
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters, 
+                         sentence_end_pattern=sentence_end_pattern)
         self.model_name = model_name
         self.disable = disable or []
         self.batch_size = batch_size
@@ -280,7 +286,8 @@ class JiebaSegmenter(SegmentationWrapper):
                  pos_tagging: bool = False,
                  strategy: str = "whole",
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None):
+                 filters: Dict[str, Any] = None,
+                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         """Initialize the Jieba segmenter.
         
         Args:
@@ -292,8 +299,10 @@ class JiebaSegmenter(SegmentationWrapper):
                 - min_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
                 - stopwords: Set of stopwords to exclude
+            sentence_end_pattern: Regular expression pattern for sentence endings
         """
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
+                         sentence_end_pattern=sentence_end_pattern)
         self.pos_tagging = pos_tagging
         
         # Try to import jieba
@@ -382,7 +391,8 @@ class BertSegmenter(SegmentationWrapper):
                  max_sequence_length: int = 512,
                  strategy: str = "whole",
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None):
+                 filters: Dict[str, Any] = None,
+                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         """Initialize the BERT segmenter.
         
         Args:
@@ -402,12 +412,14 @@ class BertSegmenter(SegmentationWrapper):
                 - min_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: Set of POS tags to exclude from token outputs
                 - stopwords: Set of stopwords to exclude
+            sentence_end_pattern: Regular expression pattern for sentence endings
         """
         # Use max_sequence_length as chunk_size if not provided separately
         if not chunk_size and strategy == "chunk":
             chunk_size = max_sequence_length
         
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
+                         sentence_end_pattern=sentence_end_pattern)
         self.batch_size = batch_size
         self.remove_special_tokens = remove_special_tokens
         self.max_sequence_length = max_sequence_length
@@ -684,7 +696,8 @@ class LLMSegmenter(SegmentationWrapper):
                  max_tokens: int = 2048,
                  strategy: str = "whole",
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None):
+                 filters: Dict[str, Any] = None,
+                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         """Initialize the LLM segmenter.
         
         Args:
@@ -701,8 +714,10 @@ class LLMSegmenter(SegmentationWrapper):
                 - min_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: Set of POS tags to exclude from token outputs
                 - stopwords: Set of stopwords to exclude
+            sentence_end_pattern: Regular expression pattern for sentence endings
         """
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
+                         sentence_end_pattern=sentence_end_pattern)
         self.api_key = api_key
         self.model = model
         self.endpoint = endpoint
@@ -841,13 +856,15 @@ class LLMSegmenter(SegmentationWrapper):
         return results
 
 # Factory function to create appropriate segmenter based on the backend
-def create_segmenter(backend: str = "spacy", strategy: str = "line", chunk_size: int = 512, **kwargs) -> SegmentationWrapper:
+def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size: int = 512, 
+                  sentence_end_pattern: str = r"([。！？\.!?……]+)", **kwargs) -> SegmentationWrapper:
     """Create a segmenter based on the specified backend.
     
     Args:
         backend: The segmentation backend to use ('spacy', 'jieba', 'bert', 'llm', etc.)
         strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
         chunk_size: Size of chunks when using 'chunk' strategy
+        sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
         **kwargs: Additional arguments to pass to the segmenter constructor
             - filters: Dictionary of filters to apply during segmentation
                 - min_length: Minimum length of tokens to include (default 1)
@@ -864,6 +881,7 @@ def create_segmenter(backend: str = "spacy", strategy: str = "line", chunk_size:
     # Add strategy and chunk_size to kwargs
     kwargs['strategy'] = strategy
     kwargs['chunk_size'] = chunk_size
+    kwargs['sentence_end_pattern'] = sentence_end_pattern
     
     if backend.lower() == "spacy":
         return SpacySegmenter(**kwargs)

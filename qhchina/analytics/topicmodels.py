@@ -48,7 +48,7 @@ class LDAGibbsSampler:
             min_length: Minimum length of word to be included in vocabulary
             stopwords: Set of words to exclude from vocabulary
             use_cython: Whether to use Cython acceleration if available (default: True)
-            estimate_alpha: Frequency for estimating alpha (0 = no estimation; default 1 = after every iteration)
+            estimate_alpha: Frequency for estimating alpha (0 = no estimation; default 1 = after every iteration, 2 = after every 2 iterations, etc.)
         """
         self.n_topics = n_topics
         # Use Griffiths and Steyvers (2004) heuristic if alpha is None
