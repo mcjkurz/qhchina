@@ -360,3 +360,157 @@ topics = lda.get_topics(n_words=5)
 for i, topic in enumerate(topics):
     print(f"Topic {i}: {[word for word, _ in topic]}")
 ```
+
+## Using Original Libraries Directly
+
+### Using spaCy Directly
+
+While qhChina's segmentation wrappers provide convenience and enhanced features, you can also use the underlying libraries directly. Here's how to use spaCy directly for Chinese text segmentation:
+
+```python
+import spacy
+import re
+
+# Download the Chinese model if not already installed
+try:
+    nlp = spacy.load("zh_core_web_sm")
+except OSError:
+    spacy.cli.download("zh_core_web_sm")
+    nlp = spacy.load("zh_core_web_sm")
+
+# Define a function to split text into sentences
+def split_into_sentences(text, pattern=r"([。！？\.!?……]+)"):
+    # Split by sentence-ending punctuation, but keep the punctuation
+    raw_splits = re.split(pattern, text)
+    
+    # Combine sentence content with its ending punctuation
+    sentences = []
+    i = 0
+    while i < len(raw_splits):
+        if i + 1 < len(raw_splits) and re.match(pattern, raw_splits[i+1]):
+            sentences.append(raw_splits[i] + raw_splits[i+1])
+            i += 2
+        else:
+            if raw_splits[i].strip():
+                sentences.append(raw_splits[i])
+            i += 1
+    
+    return sentences
+
+# Process text with different strategies
+text = """量子计算将改变密码学的未来。
+人工智能正在革新医疗诊断技术。
+数据科学帮助解决复杂社会问题。"""
+
+# Strategy 1: Process whole text at once
+doc = nlp(text)
+tokens_whole = [token.text for token in doc if not token.is_space]
+print("Whole text processing:", tokens_whole)
+
+# Strategy 2: Process line by line
+lines = [line.strip() for line in text.split('\n') if line.strip()]
+tokens_by_line = []
+for line in lines:
+    doc = nlp(line)
+    tokens_by_line.append([token.text for token in doc if not token.is_space])
+print("Line-by-line processing:", tokens_by_line)
+
+# Strategy 3: Process sentence by sentence
+sentences = split_into_sentences(text)
+tokens_by_sentence = []
+for sentence in sentences:
+    doc = nlp(sentence)
+    tokens_by_sentence.append([token.text for token in doc if not token.is_space])
+print("Sentence-by-sentence processing:", tokens_by_sentence)
+
+# Strategy 4: Batch processing with nlp.pipe() for efficiency
+batch_texts = ["量子计算研究进展", "自然语言处理应用", "机器学习模型评估"]
+tokens_batch = []
+for doc in nlp.pipe(batch_texts, batch_size=50):
+    tokens_batch.append([token.text for token in doc if not token.is_space])
+print("Batch processing:", tokens_batch)
+
+# Advanced: Filter by POS and length
+filtered_tokens = []
+stopwords = {"的", "了", "和"}
+for doc in nlp.pipe(batch_texts):
+    doc_tokens = [token.text for token in doc 
+                  if not token.is_space 
+                  and token.pos_ not in {"PUNCT", "NUM", "SYM"} 
+                  and len(token.text) >= 2
+                  and token.text not in stopwords]
+    filtered_tokens.append(doc_tokens)
+print("Filtered tokens:", filtered_tokens)
+```
+
+### Using Jieba Directly
+
+Similarly, you can use the Jieba library directly for word segmentation:
+
+```python
+import jieba
+import jieba.posseg as pseg
+import re
+
+# Optional: Add custom words to the dictionary
+jieba.add_word("量子计算")
+jieba.add_word("人工智能")
+
+# Define a function to split text into sentences (same as above)
+def split_into_sentences(text, pattern=r"([。！？\.!?……]+)"):
+    raw_splits = re.split(pattern, text)
+    sentences = []
+    i = 0
+    while i < len(raw_splits):
+        if i + 1 < len(raw_splits) and re.match(pattern, raw_splits[i+1]):
+            sentences.append(raw_splits[i] + raw_splits[i+1])
+            i += 2
+        else:
+            if raw_splits[i].strip():
+                sentences.append(raw_splits[i])
+            i += 1
+    return sentences
+
+# Process text with different strategies
+text = """量子计算将改变密码学的未来。
+人工智能正在革新医疗诊断技术。
+数据科学帮助解决复杂社会问题。"""
+
+# Strategy 1: Process whole text at once
+tokens_whole = list(jieba.cut(text))
+print("Whole text processing:", tokens_whole)
+
+# Strategy 2: Process line by line
+lines = [line.strip() for line in text.split('\n') if line.strip()]
+tokens_by_line = []
+for line in lines:
+    tokens_by_line.append(list(jieba.cut(line)))
+print("Line-by-line processing:", tokens_by_line)
+
+# Strategy 3: Process sentence by sentence
+sentences = split_into_sentences(text)
+tokens_by_sentence = []
+for sentence in sentences:
+    tokens_by_sentence.append(list(jieba.cut(sentence)))
+print("Sentence-by-sentence processing:", tokens_by_sentence)
+
+# With POS tagging
+pos_tagged = []
+stopwords = {"的", "了", "和"}
+excluded_pos = {"x", "m", "r"}  # Exclude certain POS tags
+for sentence in sentences:
+    # Get tokens with POS tags
+    tokens = pseg.cut(sentence)
+    # Filter by POS and length
+    filtered = [word for word, flag in tokens 
+                if len(word) >= 2 
+                and word not in stopwords
+                and flag not in excluded_pos]
+    pos_tagged.append(filtered)
+print("POS-filtered tokens:", pos_tagged)
+
+# Load a user dictionary from file
+# jieba.load_userdict("path/to/dict.txt")
+```
+
+These examples demonstrate how to use spaCy and Jieba directly, but they require more manual coding compared to qhChina's wrappers, especially for handling different processing strategies, filtering, and batching.
