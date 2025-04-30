@@ -4,7 +4,7 @@
 
 <div class="random-quote">
   <blockquote>
-    {% if quote.language == "zh" %}
+    {% if quote.language != "en" %}
     <p class="chinese-text">{{ quote.text }}</p>
     <p class="translation">{{ quote.translation }}</p>
     {% else %}
@@ -18,7 +18,7 @@
       {% if quote.source %}
         <br>
         <cite>
-          {% if quote.language == "zh" %}
+          {% if quote.language != "en" %}
             {{ quote.source }}
             {% if quote.source_translation %}
             <br>
