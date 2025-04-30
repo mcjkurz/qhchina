@@ -89,6 +89,85 @@ def calculate_perplexity_of_tokens(model, tokenizer, sequence, context_size=64, 
             
     return token_perplexities
 
+def calculate_word_perplexity(model, tokenizer, context, target_word, device=None):
+    """
+    Calculate the perplexity of a target word given a context.
+    
+    Args:
+        model: The language model
+        tokenizer: The tokenizer corresponding to the model
+        context: Context text (string) preceding the target word
+        target_word: The word to calculate perplexity for
+        device: Device to run computations on (default: cuda-else-cpu auto-detect)
+        
+    Returns:
+        tuple: (perplexity, token_perplexities)
+            - perplexity: The average perplexity of the target word
+            - token_perplexities: List of tuples (token, token_id, perplexity) for each token in the target word
+    """
+    model.eval()
+
+    # Set device
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    
+    # Tokenize the context
+    context_ids = tokenizer.encode(context, add_special_tokens=False)
+    
+    # Tokenize the target word
+    target_ids = tokenizer.encode(target_word, add_special_tokens=False)
+    
+    if len(target_ids) == 0:
+        return (0.0, [])
+    
+    token_perplexities = []
+    total_loss = 0.0
+    
+    # Process tokens in the target word one by one
+    for i, target_id in enumerate(target_ids):
+        # For each token in the target, we use all previous context plus any preceding tokens in the target
+        current_context_ids = context_ids + target_ids[:i]
+        
+        # Skip if there's no context
+        if len(current_context_ids) == 0:
+            continue
+            
+        # Prepare input for the model
+        input_ids = torch.tensor([current_context_ids]).to(device)
+        attention_mask = torch.tensor([[1] * len(current_context_ids)]).to(device)
+
+        # Run the model to get logits
+        with torch.no_grad():
+            outputs = model(input_ids, attention_mask=attention_mask)
+            logits = outputs.logits
+
+        # Get the logits corresponding to the target token
+        relevant_logits = logits[0, -1, :]  # Logits for the last token in the context
+        relevant_label = torch.tensor([target_id]).to(device)
+
+        # Calculate cross-entropy loss for the target token
+        loss = torch.nn.functional.cross_entropy(
+            relevant_logits.view(1, -1), relevant_label.view(-1)
+        )
+        
+        # Add to total loss
+        total_loss += loss.item()
+
+        # Compute perplexity
+        perplexity = torch.exp(loss).item()
+
+        # Decode the token for readability
+        token = tokenizer.decode([target_id])
+        
+        # Store result
+        token_perplexities.append((token, target_id, perplexity))
+    
+    # Calculate average perplexity across all tokens in the target word
+    avg_perplexity = torch.exp(torch.tensor(total_loss / len(target_ids))).item() if len(target_ids) > 0 else 0.0
+    
+    return (avg_perplexity, token_perplexities)
+
 def visualize_perplexities(perplexities, labels, width=14, height=3.5, color='red', filename=None):
     """
     Visualize perplexities with given labels.
