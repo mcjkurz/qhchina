@@ -9,7 +9,7 @@ permalink: /public/
 ## Presentations
 
 - [AAS in Asia](https://aiasia2025.eventscribe.net/agenda.asp), June 1, 2025  
-  Kathmandu, Nepal
+  Kathmandu, Nepal  
   "The Fictionality of Non-fiction: A Computational Study of the Heroic Reportage in the *People's Liberation Army Daily*, 1956-1989"
 
 - 风格与计量：文学审美客观研究——主題演講（上）, April 23, 2025  
