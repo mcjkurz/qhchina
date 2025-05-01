@@ -10,11 +10,15 @@ permalink: /public/
 
 - 风格与计量：文学审美客观研究——主題演講（上）, April 23, 2025  
   Shandong University at Weihai  
-  基于大语言模型的文学“陌生化”解读  
+  基于大语言模型的文学“陌生化”解读
 
 - 《嶺南學報》學術會議十二：數字人文與古代文史研究, April 13-14, 2025  
   Lingnan University, Hong Kong  
-  文約意廣：數字人文與《詩經》和《古詩十九首》審美特徵的研究  
+  文約意廣：數字人文與《詩經》和《古詩十九首》審美特徵的研究
+
+- [Wiring China: Information, Affect, and Media Technologies](https://www.polyu.edu.hk/chc/news-and-events/events/2025/01/zhang-yu/), February 14-15, 2025  
+  The Hong Kong Polytechnic University  
+  "Do We Need to Study Chinese Literature Chronologically? – On the Polytemporality of Narratives as Technological Artifacts"
 
 - [HKADH 2025](https://2025.hkadh.org/cfp/), January 16-19, 2025  
   "The Fictionality of Non-Fiction: A Computational Study of the Heroic Reportage in the _People's Liberation Army Daily_, 1956-1989"  
