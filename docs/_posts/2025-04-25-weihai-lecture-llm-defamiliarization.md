@@ -13,4 +13,4 @@ Many students showed up and their curiosity was palpable.
 
 Thank you for such a warm reception!
 
-![Group photo with students](/assets/img/weihai-lecture-2.jpg)
+![Lecture poster](/assets/img/weihai-lecture-2.png)
