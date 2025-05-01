@@ -12,7 +12,7 @@ permalink: /public/
   Kathmandu, Nepal  
   "The Fictionality of Non-fiction: A Computational Study of the Heroic Reportage in the *People's Liberation Army Daily*, 1956-1989"
 
-- 风格与计量：文学审美客观研究——主題演講（上）, April 23, 2025  
+- 风格与计量：文学审美客观研究——主题演讲（上）, April 23, 2025  
   Shandong University at Weihai  
   基于大语言模型的文学“陌生化”解读
 
