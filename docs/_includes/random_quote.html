@@ -1,6 +1,5 @@
 {% assign quotes = site.data.quotes.quotes %}
-{% assign random_index = "now" | date: "%N" | modulo: quotes.size %}
-{% assign quote = quotes[random_index] %}
+{% assign quote = quotes | sample %}
 
 <div class="random-quote">
   <blockquote>
