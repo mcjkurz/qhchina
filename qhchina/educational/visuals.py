@@ -37,6 +37,8 @@ def show_vectors(vectors, labels=None, draw_arrows=True, draw_axes=True, colors=
     if colors is None:
         cmap = cm.get_cmap(colormap)
         colors = [cmap(i / len(vectors)) for i in range(len(vectors))]
+    elif isinstance(colors, str):
+        colors = [colors] * len(vectors)
 
     # Calculate plot dimensions and scaling factors for label positioning
     min_x, max_x = min(vectors[:, 0]), max(vectors[:, 0])

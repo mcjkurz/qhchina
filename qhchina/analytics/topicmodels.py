@@ -38,7 +38,8 @@ class LDAGibbsSampler:
             n_topics: Number of topics
             alpha: Dirichlet prior for document-topic distributions (can be float or array of floats).
                   If None, uses the heuristic 50/n_topics from Griffiths and Steyvers (2004).
-            beta: Dirichlet prior for topic-word distributions (can be float or array of floats)
+            beta: Dirichlet prior for topic-word distributions (can be float or array of floats).
+                  If None, uses the heuristic 1/n_topics from Griffiths and Steyvers (2004).
             iterations: Number of Gibbs sampling iterations
             burnin: Number of initial iterations to run before hyperparameters estimation (default 0)
             random_state: Random seed for reproducibility
@@ -128,12 +129,13 @@ class LDAGibbsSampler:
             self.lda_sampler = lda_sampler
             self.use_cython = True
             return True
-        except ImportError:
+        except ImportError as e:
             self.use_cython = False
             warnings.warn(
-                "Cython acceleration for LDA was requested but the extension "
-                "is not available in the current environment. Falling back to Python implementation, "
-                "which will be significantly slower."
+                f"Cython acceleration for LDA was requested but the extension "
+                f"is not available in the current environment. Falling back to Python implementation, "
+                f"which will be significantly slower.\n"
+                f"Error: {e}"
             )
             return False
         
@@ -732,11 +734,12 @@ class LDAGibbsSampler:
             try:
                 from .cython_ext import lda_sampler
                 model.lda_sampler = lda_sampler
-            except ImportError:
+            except ImportError as e:
                 model.use_cython = False
                 warnings.warn(
-                    "The loaded model was trained with Cython acceleration, but the Cython extension " 
-                    "is not available in the current environment. Falling back to Python implementation."
+                    f"The loaded model was trained with Cython acceleration, but the Cython extension " 
+                    f"is not available in the current environment. Falling back to Python implementation.\n"
+                    f"Error: {e}"
                 )
         
         return model

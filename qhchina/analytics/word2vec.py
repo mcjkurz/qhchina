@@ -178,12 +178,13 @@ class Word2Vec:
             self.word2vec_c = word2vec
             self.use_cython = True
             return True
-        except ImportError:
+        except ImportError as e:
             self.use_cython = False
             warnings.warn(
-                "Cython acceleration for Word2Vec was requested but the extension "
-                "is not available in the current environment. Falling back to Python implementation, "
-                "which will be significantly slower."
+                f"Cython acceleration for Word2Vec was requested but the extension "
+                f"is not available in the current environment. Falling back to Python implementation, "
+                f"which will be significantly slower.\n"
+                f"Error: {e}"
             )
             return False
         
@@ -1647,11 +1648,12 @@ class Word2Vec:
             try:
                 from .cython_ext import word2vec
                 model.word2vec_c = word2vec
-            except ImportError:
+            except ImportError as e:
                 model.use_cython = False
                 warnings.warn(
-                    "The loaded model was trained with Cython acceleration, but the Cython extension " 
-                    "is not available in the current environment. Falling back to Python implementation."
+                    f"The loaded model was trained with Cython acceleration, but the Cython extension " 
+                    f"is not available in the current environment. Falling back to Python implementation.\n"
+                    f"Error: {e}"
                 )
                 
         return model

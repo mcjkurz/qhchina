@@ -37,11 +37,6 @@ if platform.system() == "Windows":
 else:
     # Unix-like systems (Linux, macOS)
     extra_compile_args = ["-O3"]
-    
-    # Additional optimizations for non-Windows platforms
-    if platform.system() != "Darwin" or not platform.machine().startswith('arm'):
-        # Fast math can cause issues on Apple Silicon
-        extra_compile_args.append("-ffast-math")
 
 # Use relative paths for all sources
 extensions = [
