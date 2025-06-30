@@ -1,7 +1,7 @@
 ---
 layout: default
 title: The Game of Keys and Queries: A Geometric Interpretation of Parallelism in Classical Chinese Poetry
-permalink: /projects/geometry-parallelism/
+permalink: /projects/parallelism-geometry/
 ---
 
 # The Game of Keys and Queries
