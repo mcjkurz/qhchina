@@ -39,6 +39,7 @@ permalink: /projects/
 <div class="projects-grid">
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/parallelism-geometry/">The Game of Keys and Queries</a></h3>
+        <p>with <strong>Xiaotong Xu</strong> and <strong>Yu Feng</strong></p>
         <p>A Geometric Intepretation of Parallelism in Classical Chinese Poetry</p>
     </div>
     <div class="project-card">
