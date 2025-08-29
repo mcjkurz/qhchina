@@ -1,12 +1,14 @@
 ---
 layout: default
 title: Perplexity Games
-permalink: /projects/perplexity-games/
+permalink: /projects/cognitive-stylometry/
 ---
 
-# Perplexity Games
+# About
 
-## Maoism vs. Literature through the Lens of Cognitive Stylometry
+# Publications
+
+## Perplexity Games: Maoism vs. Literature through the Lens of Cognitive Stylometry
 
 <img src="main.png" alt="Perplexity Games" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
 

@@ -1,12 +1,14 @@
 ---
 layout: default
 title: Brevity and Breadth
-permalink: /projects/brevity-and-breadth/
+permalink: /projects/verbs-chinese-poetry/
 ---
 
-# Brevity and Breadth
+# About
 
-## A Linguistic, Aesthetic, and DH-Assisted Study of the *Book of Poetry* and "Nineteen Old Poems"
+# Publications
+
+## Brevity and Breadth: A Linguistic, Aesthetic, and DH-Assisted Study of the *Book of Poetry* and "Nineteen Old Poems"
 
 <img src="main.png" alt="Brevity and Breadth" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
 

@@ -39,33 +39,26 @@ permalink: /projects/
 <div class="projects-grid">
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/parallelism-geometry/">Parallelism and Geometry</a></h3>
-        <p>with <strong>Xiaotong Xu</strong> and <strong>Yu Feng</strong></p>
-        <p>Classical Chinese Poetry and the Games of Keys and Queries</p>
+        <p>with <strong>Prof. Zong-qi Cai</strong>, <strong>Xiaotong Xu</strong>, and <strong>Yu Feng</strong></p>
     </div>
     <div class="project-card">
-        <h3><a href="{{ site.baseurl }}/projects/poly-temporal-multi-layered/">Poly-Temporal, Multi-Layered</a></h3>
-        <p>A Techno-Cognitive Theory of Narrative Experience in Literature</p>
+        <h3><a href="{{ site.baseurl }}/projects/techno-cognitivism">Techno-Cognitivism</a></h3>
     </div>
     <div class="project-card">
-        <h3><a href="{{ site.baseurl }}/projects/brevity-and-breadth/">Brevity and Breadth</a></h3>
+        <h3><a href="{{ site.baseurl }}/projects/verbs-chinese-poetry/">Verbs of Chinese Poetry</a></h3>
         <p>with <strong>Prof. Zong-qi Cai</strong></p>
-        <p>A Linguistic, Aesthetic, and DH-Assisted Study of the Book of Poetry and "Nineteen Old Poems"</p>
     </div>
     <div class="project-card">
-        <h3><a href="{{ site.baseurl }}/projects/perplexity-games/">Perplexity Games</a></h3>
-        <p>Maoism vs. Literature through the Lens of Cognitive Stylometry</p>
+        <h3><a href="{{ site.baseurl }}/projects/cognitive-stylometry/">Cognitive Stylometry</a></h3>
     </div>
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/vectors-of-violence/">Vectors of Violence</a></h3>
         <p>with <strong>Aaron Gilkison</strong></p>
-        <p>Legitimation and Distribution of State Power in the <i>People's Liberation Army Daily</i>(<i>Jiefangjun Bao</i>), 1956-1989</p>
     </div>
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/words-close-to-heart/">Words Close to Heart</a></h3>
-        <p>A Techno-Cognitive Approach to Interiority in Modern Chinese Literature</p>
     </div>
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/sublime-narrative/">The Sublime as a Narrative Technology</a></h3>
-        <p>A Perspective from Modern Chinese Literature</p>
     </div>
 </div>

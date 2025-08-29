@@ -1,12 +1,14 @@
 ---
 layout: default
 title: Poly-Temporal, Multi-Layered
-permalink: /projects/poly-temporal-multi-layered/
+permalink: /projects/techno-cognitivism/
 ---
 
-# Poly-Temporal, Multi-Layered
+# About
 
-## A Techno-Cognitive Theory of Narrative Experience in Literature
+# Publications
+
+## Poly-Temporal, Multi-Layered: A Techno-Cognitive Theory of Narrative Experience in Literature
 
 <img src="main.png" alt="Poly-Temporal, Multi-Layered" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
 
