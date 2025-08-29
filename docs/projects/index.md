@@ -46,7 +46,8 @@ permalink: /projects/
     </div>
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/verbs-chinese-poetry/">Verbs of Chinese Poetry</a></h3>
-        <p>with <strong>Prof. Zong-qi Cai</strong></p>
+        <p>with <strong>Prof. Zong-qi Cai</strong></p>\
+        <p>Brevity and Breadth: A Linguistic, Aesthetic, and DH-Assisted Study of the *Book of Poetry* and "Nineteen Old Poems"</p>
     </div>
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/cognitive-stylometry/">Cognitive Stylometry</a></h3>
