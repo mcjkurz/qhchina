@@ -46,7 +46,7 @@ permalink: /projects/
     </div>
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/verbs-chinese-poetry/">Verbs of Chinese Poetry</a></h3>
-        <p>with <strong>Prof. Zong-qi Cai</strong></p>\
+        <p>with <strong>Prof. Zong-qi Cai</strong></p>
     </div>
     <div class="project-card">
         <h3><a href="{{ site.baseurl }}/projects/cognitive-stylometry/">Cognitive Stylometry</a></h3>
