@@ -5,7 +5,7 @@ permalink: /projects/parallelism-geometry/
 ---
 # Parallelism and Geometry
 
-# Publications
+## Publications
 
 ### The Game of Keys and Queries: Parallelism and Cognitive Geometry in Chinese Regulated Verse
 
