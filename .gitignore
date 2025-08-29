@@ -38,5 +38,10 @@ dist/
 # Macbook stuff
 .DS_Store
 
+# Local automation scripts (keep these local, don't commit)
+download_wheels.sh
+upload_to_pypi.sh
+release_to_pypi.sh
+
 # gitignore
 .gitignore
