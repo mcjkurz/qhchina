@@ -14,7 +14,6 @@ This repository contains:
 - **Collocation Analysis**: Find significant word co-occurrences in text
 - **Corpus Comparison**: Statistically compare different corpora
 - **Word Embeddings**: Work with Word2Vec and other embedding models
-- **Text Classification**: BERT-based classification and analysis
 - **Topic Modeling**: Fast LDA implementation with Cython acceleration
 
 ## Installation

@@ -43,13 +43,14 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
     
     # Flatten corpora if they are lists of sentences
     corpusA = flatten(corpusA)
-    corpusB = flatten(corpusB)
-    
-    # Count word frequencies in each corpus
     abs_freqA = Counter(corpusA)
-    abs_freqB = Counter(corpusB)
     totalA = sum(abs_freqA.values())
+    del corpusA
+    
+    corpusB = flatten(corpusB)
+    abs_freqB = Counter(corpusB)
     totalB = sum(abs_freqB.values())
+    del corpusB
     
     # Create a union of all words
     all_words = set(abs_freqA.keys()).union(abs_freqB.keys())

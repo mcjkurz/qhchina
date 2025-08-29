@@ -19,6 +19,8 @@ env/
 #tests and data
 tests
 tests/*
+test
+test/*
 
 # Jupyter Notebook
 .ipynb_checkpoints

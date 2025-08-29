@@ -42,27 +42,6 @@ title: Home
 - **Multidisciplinarity**: combining natural language processing with cognitive neuroscience and traditional humanistic methodologies: close reading, genealogy, structuralism, aesthetic theory, etc.
 - **Limits of computation**: identifying what stories can tell us about the world and ourselves that matrix multiplications cannot
 
-## Latest Updates
-
-<div class="posts-list">
-  {% for post in site.posts limit:5 %}
-    <div class="post-preview">
-      <h3>
-        <a href="{{ post.url | relative_url }}">{{ post.title }}</a>
-      </h3>
-      <span class="post-date">{{ post.date | date: "%B %d, %Y" }}</span>
-      <p>{{ post.excerpt }}</p>
-      <a href="{{ post.url | relative_url }}" class="read-more">Read more</a>
-    </div>
-  {% endfor %}
-</div>
-
-{% if site.posts.size > 0 %}
-<div class="all-posts">
-  <a href="{{ "/posts" | relative_url }}">View all posts</a>
-</div>
-{% endif %} 
-
 ## Random Quote
 
 {% include random_quote.html %}

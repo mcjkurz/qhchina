@@ -25,7 +25,7 @@ Key optimizations:
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport exp, log, fmax, fmin
+from libc.math cimport exp, log, fmax, fmin, sqrt
 from libc.stdlib cimport rand, RAND_MAX, srand
 from libc.time cimport time
 from cython cimport floating
@@ -423,10 +423,33 @@ cdef inline int sample_from_distribution() noexcept:
     # Use the alias method for O(1) sampling
     return alias_sample()
 
-# Clip gradient to prevent explosion
-cdef inline real_t clip_gradient(real_t grad) noexcept:
-    """Clip gradient to prevent explosion"""
-    return fmax(-GRADIENT_CLIP, fmin(GRADIENT_CLIP, grad))
+# Clip gradient norm to prevent explosion while preserving direction
+cdef inline void clip_gradient_norm(real_t* grad_vector, int size, real_t max_norm) noexcept:
+    """
+    Clip gradient by L2 norm to prevent explosion while preserving direction
+    
+    Args:
+        grad_vector: Gradient vector to clip in-place
+        size: Dimension of the vector
+        max_norm: Maximum allowed L2 norm
+    """
+    # Declare all variables at the beginning
+    cdef real_t norm_squared, norm, scale
+    
+    # Calculate L2 norm of gradient
+    norm_squared = our_dot(grad_vector, grad_vector, size)
+    
+    # Skip if gradient is zero or very small
+    if norm_squared <= 1e-12:
+        return
+    
+    norm = sqrt(norm_squared)
+    
+    # Only clip if norm exceeds threshold
+    if norm > max_norm:
+        # Scale down the entire gradient vector to have norm = max_norm
+        scale = max_norm / norm
+        our_scal(grad_vector, scale, size)
 
 # Single-example skipgram training function
 cdef real_t train_skipgram_single(
@@ -474,7 +497,7 @@ cdef real_t train_skipgram_single(
     prediction = fast_sigmoid(score)
     
     # Compute gradient for positive example (target = 1)
-    gradient = clip_gradient(prediction - 1.0)
+    gradient = prediction - 1.0
     
     # Accumulate gradients for positive example
     our_axpy(&W_prime[output_idx, 0], &input_grad[0], gradient, vector_size)
@@ -503,7 +526,7 @@ cdef real_t train_skipgram_single(
         prediction = fast_sigmoid(score)
         
         # Compute gradient for negative example (target = 0)
-        gradient = clip_gradient(prediction)
+        gradient = prediction
         
         # Accumulate gradients for negative examples
         our_axpy(&W_prime[neg_idx, 0], &input_grad[0], gradient, vector_size)
@@ -518,12 +541,17 @@ cdef real_t train_skipgram_single(
     
     # Apply all accumulated gradients at the end
     
+    # Clip accumulated gradients by norm before applying
+    clip_gradient_norm(&input_grad[0], vector_size, GRADIENT_CLIP)
+    
     # Update input word vector
     our_axpy(&input_grad[0], &W[input_idx, 0], -LEARNING_RATE, vector_size)
     
     # Update output word vectors (both positive and negative)
     for j in range(vocab_size):
         if output_mask[j] == 1:  # Only update vectors that were used
+            # Clip accumulated output gradients by norm before applying
+            clip_gradient_norm(&output_grads[j, 0], vector_size, GRADIENT_CLIP)
             our_axpy(&output_grads[j, 0], &W_prime[j, 0], -LEARNING_RATE, vector_size)
     
     return loss
@@ -580,7 +608,7 @@ def train_skipgram_batch(
         prediction = fast_sigmoid(score)
         
         # Compute gradient for positive example (target = 1)
-        gradient = clip_gradient(prediction - 1.0)
+        gradient = prediction - 1.0
         
         # Accumulate gradients for input vector
         our_axpy(&W_prime[out_idx, 0], &input_grad[0], gradient, vector_size)
@@ -607,7 +635,7 @@ def train_skipgram_batch(
             prediction = fast_sigmoid(score)
             
             # Compute gradient (target = 0)
-            gradient = clip_gradient(prediction)
+            gradient = prediction
             
             # Accumulate gradients for input vector
             our_axpy(&W_prime[neg_idx, 0], &input_grad[0], gradient, vector_size)
@@ -620,6 +648,8 @@ def train_skipgram_batch(
             total_loss -= fast_log_sigmoid(-score)
         
         # Update input word vector after processing all negatives
+        # Clip accumulated input gradients by norm before applying
+        clip_gradient_norm(&input_grad[0], vector_size, GRADIENT_CLIP)
         our_axpy(&input_grad[0], &W[in_idx, 0], neg_lr, vector_size)
     
     return total_loss
@@ -697,7 +727,7 @@ cdef real_t train_cbow_single(
     prediction = fast_sigmoid(score)
     
     # Compute gradient for positive example (target = 1)
-    gradient = clip_gradient(prediction - 1.0)
+    gradient = prediction - 1.0
     
     # Accumulate gradient for center word
     our_axpy(&combined_input[0], &center_grad[0], gradient, vector_size)
@@ -734,7 +764,7 @@ cdef real_t train_cbow_single(
         prediction = fast_sigmoid(score)
         
         # Compute gradient for negative example (target = 0)
-        gradient = clip_gradient(prediction)
+        gradient = prediction
         
         # Accumulate gradient for negative word
         our_axpy(&combined_input[0], &neg_grads[neg_idx, 0], gradient, vector_size)
@@ -758,17 +788,22 @@ cdef real_t train_cbow_single(
     
     # Apply all accumulated gradients at the end
     
+    # Clip accumulated gradients by norm before applying
+    clip_gradient_norm(&center_grad[0], vector_size, GRADIENT_CLIP)
+    
     # Update center word vector
     our_axpy(&center_grad[0], &W_prime[center_idx, 0], -LEARNING_RATE, vector_size)
     
     # Update negative sample vectors
     for j in range(vocab_size):
         if neg_mask[j] == 1: # Only update vectors that were used
+            clip_gradient_norm(&neg_grads[j, 0], vector_size, GRADIENT_CLIP)
             our_axpy(&neg_grads[j, 0], &W_prime[j, 0], -LEARNING_RATE, vector_size)
     
     # Update context word vectors
     for j in range(vocab_size):
         if context_mask[j] == 1: # Only update context words
+            clip_gradient_norm(&context_grads[j, 0], vector_size, GRADIENT_CLIP)
             our_axpy(&context_grads[j, 0], &W[j, 0], -LEARNING_RATE, vector_size)
         
     return loss
@@ -842,7 +877,7 @@ def train_cbow_batch(
         prediction = fast_sigmoid(score)
         
         # Compute gradient for positive example (target = 1)
-        gradient = clip_gradient(prediction - 1.0)
+        gradient = prediction - 1.0
         
         # Update center word vector directly (for positive)
         for j in range(vector_size):
@@ -878,7 +913,7 @@ def train_cbow_batch(
             prediction = fast_sigmoid(score)
             
             # Compute gradient for negative example (target = 0)
-            gradient = clip_gradient(prediction)
+            gradient = prediction
             
             # Update negative center word vector directly
             for j in range(vector_size):
@@ -897,6 +932,8 @@ def train_cbow_batch(
             total_loss -= fast_log_sigmoid(-score)
         
         # After processing all examples, update all context word vectors
+        # Clip accumulated context gradients by norm before applying
+        clip_gradient_norm(&context_grad[0], vector_size, GRADIENT_CLIP)
         for j in range(context_size):
             ctx_idx = context_indices[j]
             our_axpy(&context_grad[0], &W[ctx_idx, 0], neg_lr, vector_size)

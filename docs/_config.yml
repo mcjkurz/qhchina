@@ -10,7 +10,6 @@ kramdown:
   input: GFM
   syntax_highlighter: rouge
 plugins:
-  - jekyll-feed
   - jekyll-seo-tag
   - jekyll-include-cache
 
@@ -28,9 +27,6 @@ header_pages:
 
 # Collections
 collections:
-  posts:
-    output: true
-    permalink: /:collection/:year/:month/:day/:title/
   projects:
     output: true
     permalink: /:collection/:name/
@@ -41,10 +37,6 @@ defaults:
       path: ""
     values:
       layout: "default"
-  - scope:
-      path: "_posts"
-    values:
-      layout: "post"
 
 # GitHub metadata
 github_username: mcjkurz

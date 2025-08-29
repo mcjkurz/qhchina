@@ -161,73 +161,26 @@ The `TempRefWord2Vec` model works by:
 ### Analyzing Semantic Change
 
 ```python
-def calculate_semantic_change(model, target_word, labels, limit_top_similar=200, min_length=2):
-    """
-    Calculate semantic change by comparing cosine similarities across time periods.
-    
-    Parameters:
-    -----------
-    model: Trained TempRefWord2Vec model
-    target_word: Target word to analyze
-    labels: Time period labels
-    limit_top_similar: Number of most similar words to consider
-    min_length: Minimum word length to include
-    
-    Returns:
-    --------
-    Dict mapping transition names to lists of (word, change) tuples
-    """
-    results = {}
-    
-    # Get all words in vocabulary (excluding temporal variants)
-    all_words = [word for word in model.vocab.keys() 
-                if word not in model.reverse_temporal_map]
-    
-    # Get embeddings for all words
-    all_word_vectors = np.array([model.get_vector(word) for word in all_words])
-
-    # For each adjacent pair of time periods
-    for i in range(len(labels) - 1):
-        from_period = labels[i]
-        to_period = labels[i+1]
-        transition = f"{from_period}_to_{to_period}"
-        
-        # Get temporal variants for the target word
-        from_variant = f"{target_word}_{from_period}"
-        to_variant = f"{target_word}_{to_period}"
-        
-        # Get vectors for the target word in each period
-        from_vector = model.get_vector(from_variant).reshape(1, -1)
-        to_vector = model.get_vector(to_variant).reshape(1, -1)
-        
-        # Calculate cosine similarity for all words with the target word in each period
-        from_sims = cosine_similarity(from_vector, all_word_vectors)[0]
-        to_sims = cosine_similarity(to_vector, all_word_vectors)[0]
-        
-        # Calculate differences in similarity
-        sim_diffs = to_sims - from_sims
-        
-        # Create word-change pairs and sort by change
-        word_changes = [(all_words[i], float(sim_diffs[i])) for i in range(len(all_words))]
-        word_changes.sort(key=lambda x: x[1], reverse=True)
-        
-        # Consider only words that were among the most similar in either period
-        most_similar_from = model.most_similar(from_variant, topn=limit_top_similar)
-        most_similar_to = model.most_similar(to_variant, topn=limit_top_similar)
-        
-        considered_words = set(word for word, _ in most_similar_from) | set(word for word, _ in most_similar_to)
-        
-        # Filter results based on considered words and length
-        word_changes = [change for change in word_changes 
-                      if change[0] in considered_words and len(change[0]) >= min_length]
-        
-        results[transition] = word_changes
-    
-    return results
-
-# Example usage
+# Calculate semantic change using the built-in method
 target_word = "人民"
-changes = calculate_semantic_change(model, target_word, time_labels)
+changes = model.calculate_semantic_change(target_word)
+
+# Apply filtering as needed by the user
+filtered_changes = {}
+for transition, word_changes in changes.items():
+    # Filter by minimum word length
+    min_length = 2
+    filtered_words = [change for change in word_changes if len(change[0]) >= min_length]
+    
+    # Filter by word frequency/count (requires access to corpus statistics)
+    # min_count = 5
+    # filtered_words = [change for change in filtered_words if corpus_word_count[change[0]] >= min_count]
+    
+    # Take only top N most changed words
+    top_n = 50
+    filtered_words = filtered_words[:top_n]
+    
+    filtered_changes[transition] = filtered_words
 
 # Display words that became more associated with "人民"
 for transition, word_changes in changes.items():

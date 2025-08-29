@@ -14,7 +14,7 @@ Our package includes several modules, each focusing on specific computational ap
 
 - [Word Embeddings]({{ site.baseurl }}/pkg_docs/word_embeddings/) - Tools for creating and analyzing word embeddings for Chinese texts
 - [Topic Modeling]({{ site.baseurl }}/pkg_docs/topic_modeling/) - Methods for topic modeling with Chinese-specific preprocessing
-- [BERT Classifier]({{ site.baseurl }}/pkg_docs/bert_classifier/) - BERT-based text classification for Chinese documents
+
 - [Collocations]({{ site.baseurl }}/pkg_docs/collocations/) - Analysis of word collocations in Chinese texts
 - [Corpora]({{ site.baseurl }}/pkg_docs/corpora/) - Tools for managing and processing Chinese text corpora
 - [Preprocessing]({{ site.baseurl }}/pkg_docs/preprocessing/) - Text segmentation and tokenization for Chinese texts

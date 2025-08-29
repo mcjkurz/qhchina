@@ -7,7 +7,6 @@ This module provides utilities for text analytics and topic modeling.
 - **Collocation Analysis**: Find significant word co-occurrences in text
 - **Corpus Comparison**: Statistically compare different corpora
 - **Vector Operations**: Project and manipulate word embeddings
-- **BERT-based Modeling**: Text classification and embedding with BERT
 - **Topic Modeling**: Fast LDA implementation with Cython acceleration
 
 ## Installation

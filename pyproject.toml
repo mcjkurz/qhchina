@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.0.49"
+version = "0.0.50"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -32,10 +32,11 @@ dependencies = [
     "matplotlib >= 3.10.0",
     "scikit-learn >= 1.6.1",
     "tqdm",
+    "pandas"
 ]
 
 [tool.setuptools.packages.find]
-exclude = ["tests"]
+exclude = ["tests", "test"]
 
 [tool.setuptools]
 include-package-data = true
@@ -48,6 +49,6 @@ zip-safe = false
 "*" = ["*.c", "*.so", "*.pyd"]
 
 [project.urls]
-"Homepage" = "https://github.com/mcjkurz/qhchina"
-"Documentation" = "https://mcjkurz.github.io/qhchina/"
+"Homepage" = "https://www.qhchina.org/"
+"Documentation" = "https://www.qhchina.org/pkg_docs"
 "Bug Tracker" = "https://github.com/mcjkurz/qhchina/issues"

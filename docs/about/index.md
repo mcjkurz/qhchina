@@ -50,9 +50,9 @@ permalink: /about/
     <img src="{{ site.baseurl }}/assets/img/kurzynski_pic.png" alt="Maciej Kurzynski" />
   </div>
   <div class="bio-text">
-    <p>My name is Maciej Kurzynski (馬傑 / 马杰), and I am a Postdoctoral Fellow (Research Assistant Professor) at the Advanced Institute for Global Chinese Studies, Lingnan University, Hong Kong.</p>
+    <p>My name is Maciej Kurzynski (馬傑 / 马杰), and I am an Assistant Professor of Chinese and Digital Humanities at Lingnan University, Hong Kong.</p>
 
-    <p>Originally from Wrocław, Poland, I have received my PhD from Stanford University in modern Chinese literature and culture. Prior to that, I had also studied at the University of Warsaw (BA), Université Paris 1 Panthéon-Sorbonne (Erasmus), and Zhejiang University (MA).</p>
+    <p>Originally from Wrocław, Poland, I have received my PhD from Stanford University in modern Chinese literature and culture. I had also studied at the University of Warsaw (BA), Université Paris 1 Panthéon-Sorbonne (Erasmus), and Zhejiang University (MA).</p>
 
     <p>I am the single author of this website, but my dream is to develop it into a collaborative endeavor in the near future (i.e., I hope that there will be a list of faces here rather than just mine). I call this virtual space a "lab" even now, since I think of this project as a series of experiments rather than attempts to confirm what we already know about Chinese culture and history.</p>
 

@@ -3,6 +3,21 @@ from scipy.stats import fisher_exact
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
+from typing import Dict, List, Optional, Union, TypedDict
+
+class FilterOptions(TypedDict, total=False):
+    """Type definition for filter options in collocation analysis."""
+    max_p: float
+    stopwords: List[str]
+    min_length: int
+    min_exp_local: float
+    max_exp_local: float
+    min_obs_local: int
+    max_obs_local: int
+    min_ratio_local: float
+    max_ratio_local: float
+    min_obs_global: int
+    max_obs_global: int
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5):
     total_tokens = 0  # Total number of token positions in the corpus
@@ -126,15 +141,22 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words):
 
     return results
 
-def find_collocates(sentences, target_words, method='window', horizon=5, filters=None, as_dataframe=True):
+def find_collocates(
+    sentences: List[List[str]], 
+    target_words: Union[str, List[str]], 
+    method: str = 'window', 
+    horizon: int = 5, 
+    filters: Optional[FilterOptions] = None, 
+    as_dataframe: bool = True
+) -> Union[List[Dict], pd.DataFrame]:
     """
     Find collocates for target words within a corpus of sentences.
     
     Parameters:
     -----------
-    sentences : list
+    sentences : List[List[str]]
         List of tokenized sentences, where each sentence is a list of tokens.
-    target_words : str or list
+    target_words : Union[str, List[str]]
         Target word(s) to find collocates for.
     method : str, default='window'
         Method to use for calculating collocations. Either 'window' or 'sentence'.
@@ -142,17 +164,25 @@ def find_collocates(sentences, target_words, method='window', horizon=5, filters
         - 'sentence': Considers whole sentences as context units
     horizon : int, default=5
         Size of the context window on each side (only used if method='window').
-    filters : dict, optional
+    filters : Optional[FilterOptions], optional
         Dictionary of filters to apply to results, AFTER computation is done:
         - 'max_p': float - Maximum p-value threshold for statistical significance
-        - 'stopwords': list - Words to exclude from results
+        - 'stopwords': List[str] - Words to exclude from results
         - 'min_length': int - Minimum character length for collocates
-    as_dataframe : bool, default=False
+        - 'min_exp_local': float - Minimum expected local frequency
+        - 'max_exp_local': float - Maximum expected local frequency
+        - 'min_obs_local': int - Minimum observed local frequency
+        - 'max_obs_local': int - Maximum observed local frequency
+        - 'min_ratio_local': float - Minimum local frequency ratio (obs/exp)
+        - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
+        - 'min_obs_global': int - Minimum global frequency
+        - 'max_obs_global': int - Maximum global frequency
+    as_dataframe : bool, default=True
         If True, return results as a pandas DataFrame.
     
     Returns:
     --------
-    list or DataFrame
+    Union[List[Dict], pd.DataFrame]
         List of dictionaries or DataFrame containing collocation statistics.
     """
     if not isinstance(target_words, list):
@@ -168,17 +198,89 @@ def find_collocates(sentences, target_words, method='window', horizon=5, filters
 
     # Apply filters if specified
     if filters:
+        # Validate filter keys
+        valid_keys = {
+            'max_p', 'stopwords', 'min_length', 'min_exp_local', 'max_exp_local',
+            'min_obs_local', 'max_obs_local', 'min_ratio_local', 'max_ratio_local',
+            'min_obs_global', 'max_obs_global'
+        }
+        invalid_keys = set(filters.keys()) - valid_keys
+        if invalid_keys:
+            raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_keys}")
+        
         # Filter by p-value threshold
         if 'max_p' in filters:
-            results = [result for result in results if result["p_value"] <= filters['max_p']]
+            max_p = filters['max_p']
+            if not isinstance(max_p, (int, float)) or max_p < 0 or max_p > 1:
+                raise ValueError("max_p must be a number between 0 and 1")
+            results = [result for result in results if result["p_value"] <= max_p]
         
         # Filter out stopwords
         if 'stopwords' in filters:
-            results = [result for result in results if result["collocate"] not in filters['stopwords']]
+            stopwords = filters['stopwords']
+            if not isinstance(stopwords, (list, set)):
+                raise ValueError("stopwords must be a list or set of strings")
+            stopwords_set = set(stopwords)
+            results = [result for result in results if result["collocate"] not in stopwords_set]
         
         # Filter by minimum length
         if 'min_length' in filters:
-            results = [result for result in results if len(result["collocate"]) >= filters['min_length']]
+            min_length = filters['min_length']
+            if not isinstance(min_length, int) or min_length < 1:
+                raise ValueError("min_length must be a positive integer")
+            results = [result for result in results if len(result["collocate"]) >= min_length]
+        
+        # Filter by expected local frequency
+        if 'min_exp_local' in filters:
+            min_exp = filters['min_exp_local']
+            if not isinstance(min_exp, (int, float)) or min_exp < 0:
+                raise ValueError("min_exp_local must be a non-negative number")
+            results = [result for result in results if result["exp_local"] >= min_exp]
+        
+        if 'max_exp_local' in filters:
+            max_exp = filters['max_exp_local']
+            if not isinstance(max_exp, (int, float)) or max_exp < 0:
+                raise ValueError("max_exp_local must be a non-negative number")
+            results = [result for result in results if result["exp_local"] <= max_exp]
+        
+        # Filter by observed local frequency
+        if 'min_obs_local' in filters:
+            min_obs = filters['min_obs_local']
+            if not isinstance(min_obs, int) or min_obs < 0:
+                raise ValueError("min_obs_local must be a non-negative integer")
+            results = [result for result in results if result["obs_local"] >= min_obs]
+        
+        if 'max_obs_local' in filters:
+            max_obs = filters['max_obs_local']
+            if not isinstance(max_obs, int) or max_obs < 0:
+                raise ValueError("max_obs_local must be a non-negative integer")
+            results = [result for result in results if result["obs_local"] <= max_obs]
+        
+        # Filter by local frequency ratio
+        if 'min_ratio_local' in filters:
+            min_ratio = filters['min_ratio_local']
+            if not isinstance(min_ratio, (int, float)) or min_ratio < 0:
+                raise ValueError("min_ratio_local must be a non-negative number")
+            results = [result for result in results if result["ratio_local"] >= min_ratio]
+        
+        if 'max_ratio_local' in filters:
+            max_ratio = filters['max_ratio_local']
+            if not isinstance(max_ratio, (int, float)) or max_ratio < 0:
+                raise ValueError("max_ratio_local must be a non-negative number")
+            results = [result for result in results if result["ratio_local"] <= max_ratio]
+        
+        # Filter by global frequency
+        if 'min_obs_global' in filters:
+            min_global = filters['min_obs_global']
+            if not isinstance(min_global, int) or min_global < 0:
+                raise ValueError("min_obs_global must be a non-negative integer")
+            results = [result for result in results if result["obs_global"] >= min_global]
+        
+        if 'max_obs_global' in filters:
+            max_global = filters['max_obs_global']
+            if not isinstance(max_global, int) or max_global < 0:
+                raise ValueError("max_obs_global must be a non-negative integer")
+            results = [result for result in results if result["obs_global"] <= max_global]
 
     if as_dataframe:
         results = pd.DataFrame(results)
