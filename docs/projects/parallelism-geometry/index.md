@@ -15,7 +15,7 @@ Language models represent word meanings as vectors in a multidimensional space. 
 
 Kurzynski, Maciej, Xiaotong Xu, and Yu Feng, "[The Game of Keys and Queries: Parallelism and Cognitive Geometry in Chinese Regulated Verse](#)," *International Journal of Humanities and Arts Computing (IJHAC)* 19, 2025(2), forthcoming.
 
-<img src="{{ site.baseurl }}/assets/separator.png" alt="Separator" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" style="width: 200px; height: auto; margin: 2rem auto; display: block;">
 
 ## Good Things Come in Pairs: A Computational Study of Poetic Parallelism in the Six Dynasties
 
@@ -23,7 +23,7 @@ This article outlines the computational methodology for a multipart study on poe
 
 Cai, Zong-qi, Maciej Kurzynski, and Xiaotong Xu, ["Good Things Come in Pairs: A Computational Study of Poetic Parallelism in the Six Dynasties"](#), *Journal of Chinese Literature and Culture* (*JCLC*), 2025(2), forthcoming.
 
-<img src="{{ site.baseurl }}/assets/separator.png" alt="Separator" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" style="width: 200px; height: auto; margin: 2rem auto; display: block;">
 
 ## Vector Poetics: Parallel Couplet Detection in Classical Chinese Poetry
 
