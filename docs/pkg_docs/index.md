@@ -10,11 +10,10 @@ Welcome to the documentation for the qhChina Python package, a toolkit designed 
 
 ## Package Components
 
-Our package includes several modules, each focusing on specific computational approaches to Chinese text analysis:
+The package includes several modules, each focusing on specific computational approaches to Chinese text analysis:
 
 - [Word Embeddings]({{ site.baseurl }}/pkg_docs/word_embeddings/) - Tools for creating and analyzing word embeddings for Chinese texts
 - [Topic Modeling]({{ site.baseurl }}/pkg_docs/topic_modeling/) - Methods for topic modeling with Chinese-specific preprocessing
-
 - [Collocations]({{ site.baseurl }}/pkg_docs/collocations/) - Analysis of word collocations in Chinese texts
 - [Corpora]({{ site.baseurl }}/pkg_docs/corpora/) - Tools for managing and processing Chinese text corpora
 - [Preprocessing]({{ site.baseurl }}/pkg_docs/preprocessing/) - Text segmentation and tokenization for Chinese texts
