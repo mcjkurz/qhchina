@@ -6,7 +6,9 @@ permalink: /projects/vectors-of-violence/
 
 # Vectors of Violence
 
-## Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989
+## Publications
+
+### Vectors of Violence: Legitimation and Distribution of State Power in the *People's Liberation Army Daily* (*Jiefangjun Bao*), 1956-1989
 
 <img src="main.png" alt="Vectors of Violence" style="max-width: 100%; height: auto; margin: 2rem auto; display: block;">
 
@@ -14,9 +16,15 @@ From personal memoirs and cooking recipes to revolutionary agitation and war cov
 
 Our article engages with the current scholarship on military and affective violence in the PRC. Whereas sociologists and political scientists have identified all-out war mobilization as the primary means through which the Communist Party grasped power and ultimately took over China in 1949, literary scholars and art historians have focused on formal mechanisms which harnessed political energy for the dual purpose of proletarian revolution and nation making. We propose a way of bridging the two paradigms by reconsidering the mechanisms of affective distribution underlying the institutional legitimation of violence in modern China. We show how quantitative approaches to texts offer unique perspectives not only on the problem of violence and its representation in the journal, but also on the Maoist mode of writing more generally; how the distribution of violence, legitimacy, and agency can be traced, measured, and visualized; and how state-directed sentiments complemented political propaganda, enhancing the impact and reach of this important official publication.
 
-[Gilkison, Aaron, and Maciej Kurzynski. "Vectors of Violence: Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989," *Journal of Cultural Analytics* 9(1), 2024.](https://culturalanalytics.org/article/115481-vectors-of-violence-legitimation-and-distribution-of-state-power-in-the-_people-s-liberation-army-daily_-_jiefangjun-bao_-1956-1989)
+Gilkison, Aaron, and Maciej Kurzynski, ["Vectors of Violence: Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989"](https://culturalanalytics.org/article/115481-vectors-of-violence-legitimation-and-distribution-of-state-power-in-the-_people-s-liberation-army-daily_-_jiefangjun-bao_-1956-1989), *Journal of Cultural Analytics* 9(1), 2024.
 
-[Kurzynski, Maciej and Aaron Gilkison. "Revolution + Love: Measuring the Entanglements of State Violence and Emotions in Early PRC," Proceedings of the *Computational Humanities Research Conference* 2024 (CHR 2024), Aarhus, Denmark. CEUR-WS, vol. 38, pp. 1012-1022](https://ceur-ws.org/Vol-3834/paper94.pdf)
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
+
+### Revolution + Love: Measuring the Entanglements of State Violence and Emotions in Early PRC
+
+This paper examines the relationship between violent discourse and emotional intensity in the early revolutionary rhetoric of the People's Republic of China (PRC). Using two fine-tuned bert-base-chinese models—one for detecting violent content in texts and another for assessing their affective charge—we analyze over 185,000 articles published between 1956 and 1989 in the *People's Liberation Army Daily* ( Jiefangjun Bao ), the official journal of China's armed forces. We find a statistically significant correlation between violent discourse and emotional expression throughout the analyzed period. This strong alignment between violence and affect in official texts provides a valuable context for appreciating how other forms of writing, such as novels and poetry, can disentangle personal emotions from state power.
+
+Kurzynski, Maciej and Aaron Gilkison, ["Revolution + Love: Measuring the Entanglements of State Violence and Emotions in Early PRC"](https://ceur-ws.org/Vol-3834/paper94.pdf), Proceedings of the *Computational Humanities Research Conference* 2024 (CHR 2024), Aarhus, Denmark. CEUR-WS, vol. 38, pp. 1012-1022.
 
 ## Resources
 
