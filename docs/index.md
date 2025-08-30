@@ -28,8 +28,9 @@ title: Home
 <div class="welcome-section">
   <h1>Welcome to qh · china</h1>
   <p class="lead">A place where quantitative conceptuality meets Chinese humanities.</p>
-  <p class="status">[under construction]</p>
 </div>
+
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
 
 ## What is qh?
 
@@ -39,8 +40,10 @@ title: Home
 - **Text-centrism**: considering literary artifacts as more than mere anecdotes reflecting extra-textual forces and ideologies
 - **Quantification**: reinterpreting narrative phenomena as vectors, frequencies, distances, and networks
 - **Big Data & Small Data**: reading large corpora, single novels, and tiny paragraphs
-- **Multidisciplinarity**: combining natural language processing with cognitive neuroscience and traditional humanistic methodologies: close reading, genealogy, structuralism, aesthetic theory, etc.
+- **Multidisciplinarity**: combining natural language processing with cognitive neuroscience and traditional humanistic methodologies: close reading, genealogy, structuralism, aesthetic theory, narratology, etc.
 - **Limits of computation**: identifying what stories can tell us about the world and ourselves that matrix multiplications cannot
+
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
 
 ## Random Quote
 

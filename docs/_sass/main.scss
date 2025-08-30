@@ -373,4 +373,12 @@ main {
   .social-link {
     margin: 0 calc(0.5 * var(--spacing-unit));
   }
+}
+
+/* Separator image styling */
+.separator {
+  width: 25%;
+  height: auto;
+  margin: 2rem auto;
+  display: block;
 } 
