@@ -376,10 +376,10 @@ main {
 }
 
 /* Separator image styling */
-.separator {
-  width: 25%;
-  max-width: 150px;
-  height: auto;
-  margin: 2rem auto 2rem auto;
-  display: block;
+img.separator {
+  width: 25% !important;
+  max-width: 150px !important;
+  height: auto !important;
+  margin: 2rem auto !important;
+  display: block !important;
 } 
