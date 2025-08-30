@@ -29,6 +29,8 @@ Cai, Zong-qi, Maciej Kurzynski, and Xiaotong Xu, ["Good Things Come in Pairs: A 
 
 ### Vector Poetics: Parallel Couplet Detection in Classical Chinese Poetry
 
+<img src="parallel_couplets_pca.png" alt="Geometry of Parallelism" style="max-width: 80%; height: auto; margin: 2rem auto; display: block;">
+
 This paper explores computational approaches for detecting parallelism in classical Chinese poetry, a rhetorical device where two verses mirror each other in syntax, meaning, tone, and rhythm. We experiment with five classification methods: (1) verb position matching, (2) integrated semantic, syntactic, and word-segmentation analysis, (3) difference-based character embeddings, (4) structured examples (inner/outer couplets), and (5) GPT-guided classification. We use a manually annotated dataset, containing 6,125 pentasyllabic couplets, to evaluate performance. The results indicate that parallelism detection poses a significant challenge even for powerful LLMs such as GPT-4o, with the highest F1 score below 0.72. Nevertheless, each method contributes valuable insights into the art of parallelism in Chinese poetry, suggesting a new understanding of parallelism as a verbal expression of principal components in a culturally defined vector space.
 
 Kurzynski, Maciej, Xiaotong Xu, and Yu Feng, "[Vector Poetics: Parallel Couplet Detection in Classical Chinese Poetry](https://aclanthology.org/2024.nlp4dh-1.19/)," *Proceedings of the 4th International Conference on Natural Language Processing for Digital Humanities*, Miami (USA): Association for Computational Linguistics (ACL), pp. 200-208. 
