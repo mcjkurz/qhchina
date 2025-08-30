@@ -30,8 +30,6 @@ title: Home
   <p class="lead">A place where quantitative conceptuality meets Chinese humanities.</p>
 </div>
 
-<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
-
 ## What is qh?
 
 "Quantitative Humanities" is a set of scholarly disciplines which can be characterized by the following keywords:
