@@ -43,6 +43,10 @@ title: Home
 
 <img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
 
+## What is china?
+
+Some people are "obsessed with China" (情迷中國). This project is not. It seeks disciplinary misalignments in order to probe the limitations inherent in identity-based scholarship. Dominant chronologies persist only so long as the comfort of familiar answers remains unquestioned; the future, however, arrives in the form of monstrosity.
+
 ## Random Quote
 
 {% include random_quote.html %}
