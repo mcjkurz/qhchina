@@ -43,7 +43,7 @@ title: Home
 
 ## What is china?
 
-Some people are "obsessed with China" (情迷中國). This project is not. It seeks disciplinary misalignments in order to probe the limitations inherent in identity-based scholarship. Dominant chronologies persist only as long as the comfort of familiar answers remains unquestioned; the future, however, arrives always in the form of monstrosity.
+Some people are "obsessed with China" (情迷中國). This project is not. It seeks disciplinary misalignments in order to probe the limitations of identity-based scholarship. Dominant chronologies persist only as long as the comfort of familiar answers remains unquestioned; the future arrives always in the form of monstrosity.
 
 <img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
 
