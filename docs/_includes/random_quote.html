@@ -1,34 +1,82 @@
-{% assign quotes = site.data.quotes.quotes %}
-{% assign quote = quotes | sample %}
-
 <div class="random-quote">
   <blockquote>
-    <p>{{ quote.text }}</p>
-    {% if quote.translation %}
-    <p class="translation">{{ quote.translation }}</p>
-    {% endif %}
+    <p id="quote-text"></p>
+    <p id="quote-translation" class="translation" style="display: none;"></p>
     
-    <footer>
-      {% if quote.author %}
-        — {{ quote.author }}
-      {% endif %}
-      {% if quote.source %}
+    <footer id="quote-footer">
+      <span id="quote-author"></span>
+      <br>
+      <cite id="quote-source">
+        <span id="quote-source-text"></span>
         <br>
-        <cite>
-          {{ quote.source }}
-          {% if quote.source_translation %}
-          <br>
-          <span class="source-translation">{{ quote.source_translation }}</span>
-          {% endif %}
-          {% if quote.source_detail %}
-          <br>
-          <span class="source-detail">{{ quote.source_detail }}</span>
-          {% endif %}
-        </cite>
-      {% endif %}
+        <span id="quote-source-translation" class="source-translation"></span>
+        <br>
+        <span id="quote-source-detail" class="source-detail"></span>
+      </cite>
     </footer>
   </blockquote>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const quotes = {{ site.data.quotes.quotes | jsonify }};
+  
+  function displayRandomQuote() {
+    const randomIndex = Math.floor(Math.random() * quotes.length);
+    const quote = quotes[randomIndex];
+    
+    // Set quote text
+    document.getElementById('quote-text').textContent = quote.text;
+    
+    // Set translation if available
+    const translationElement = document.getElementById('quote-translation');
+    if (quote.translation) {
+      translationElement.textContent = quote.translation;
+      translationElement.style.display = 'block';
+    } else {
+      translationElement.style.display = 'none';
+    }
+    
+    // Set author if available
+    const authorElement = document.getElementById('quote-author');
+    if (quote.author) {
+      authorElement.textContent = '— ' + quote.author;
+    } else {
+      authorElement.textContent = '';
+    }
+    
+    // Set source information
+    const sourceElement = document.getElementById('quote-source');
+    const sourceTextElement = document.getElementById('quote-source-text');
+    const sourceTranslationElement = document.getElementById('quote-source-translation');
+    const sourceDetailElement = document.getElementById('quote-source-detail');
+    
+    if (quote.source) {
+      sourceTextElement.textContent = quote.source;
+      sourceElement.style.display = 'block';
+      
+      if (quote.source_translation) {
+        sourceTranslationElement.textContent = quote.source_translation;
+        sourceTranslationElement.style.display = 'block';
+      } else {
+        sourceTranslationElement.style.display = 'none';
+      }
+      
+      if (quote.source_detail) {
+        sourceDetailElement.textContent = quote.source_detail;
+        sourceDetailElement.style.display = 'block';
+      } else {
+        sourceDetailElement.style.display = 'none';
+      }
+    } else {
+      sourceElement.style.display = 'none';
+    }
+  }
+  
+  // Display a random quote when the page loads
+  displayRandomQuote();
+});
+</script>
 
 <style>
 .random-quote {
