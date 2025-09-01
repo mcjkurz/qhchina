@@ -43,7 +43,7 @@ title: Home
 
 ## What is china?
 
-How to write about "China" (中國) without being "obsessed" (情迷) by it? This project seeks disciplinary misalignments as sites where the limitations of identity-based scholarship come into unconcealment. Dominant chronologies, indeed any chronology, persist only so long as the comfort of safe questions and familiar answers remains unquestioned. The future to come awaits always in the form of monstrosity.
+How to write about "China" (中國) without being "obsessed" (情迷) by it? This project pursues disciplinary misalignments as sites where the limitations of identity-based scholarship come into unconcealment. Dominant chronologies, indeed any chronology, persist only so long as the comfort of safe questions and familiar answers remains unquestioned. The future to come awaits always in the form of monstrosity.
 
 <img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
 
