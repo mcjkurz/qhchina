@@ -43,7 +43,7 @@ title: Home
 
 ## What is china?
 
-How to write about "China" (中國) without being "obsessed" (情迷) by it? How to think about the modern world without invoking "modernity"? Events that defined national histories and academic fields, however significant they might appear from certain perspectives, might, from others, look like storms in a teacup.
+How to write about "China" (中國) without being "obsessed" (情迷) by it? How to think about the present without invoking "modernity"? Events that defined national histories and academic fields, however significant they might appear from certain perspectives, might, from others, look like storms in a teacup.
 
 This project pursues disciplinary misalignments as sites where the limitations of identity-based scholarship come into view. Dominant chronologies, in fact any chronology, persist only so long as the comfort of safe questions and familiar answers remains unquestioned.
 
