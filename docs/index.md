@@ -41,7 +41,7 @@ title: Home
 - **Multidisciplinarity**: combining natural language processing with cognitive neuroscience and traditional humanistic methodologies: close reading, genealogy, structuralism, aesthetic theory, narratology, etc.
 - **Limits of computation**: identifying what stories can tell us about the world and ourselves that matrix multiplications cannot
 
-## What is china?
+## What is China?
 
 How to write about "China" (中國) without being "obsessed" (情迷) by it? How to think about the present moment without invoking "modernity"? Events that defined national histories and academic fields, however significant they might appear from certain perspectives, might, from others, look like storms in a teacup.
 
