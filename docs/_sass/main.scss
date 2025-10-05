@@ -484,6 +484,7 @@ aside.docs-sidebar {
     width: 100% !important;
     min-width: 100% !important;
     max-width: 100% !important;
+    flex-basis: auto !important;
     position: sticky !important;
     top: 0 !important;
     margin-bottom: calc(1.5 * var(--spacing-unit)) !important;
