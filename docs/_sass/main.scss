@@ -487,17 +487,20 @@ aside.docs-sidebar {
     position: sticky !important;
     top: 0 !important;
     margin-bottom: calc(1.5 * var(--spacing-unit)) !important;
-    padding: calc(0.75 * var(--spacing-unit)) 0 !important;
+    padding: calc(0.5 * var(--spacing-unit)) 0 !important;
     background-color: white !important;
     border-bottom: 2px solid var(--border-color) !important;
     z-index: 100 !important;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    text-align: center !important;
   }
   
   .docs-nav h3 {
     font-size: 0.85rem !important;
-    margin-bottom: calc(0.5 * var(--spacing-unit)) !important;
-    padding-bottom: calc(0.25 * var(--spacing-unit)) !important;
+    margin-bottom: calc(0.4 * var(--spacing-unit)) !important;
+    padding-bottom: 0 !important;
+    border-bottom: none !important;
+    text-align: center !important;
   }
   
   .docs-nav ul {
@@ -506,6 +509,7 @@ aside.docs-sidebar {
     gap: calc(0.5 * var(--spacing-unit)) !important;
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
+    justify-content: center !important;
   }
   
   .docs-nav li {
