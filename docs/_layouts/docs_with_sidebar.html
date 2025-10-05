@@ -8,52 +8,6 @@
     <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
     <link rel="icon" href="{{ '/assets/img/icon.png' | relative_url }}">
     {% include head-custom.html %}
-    <script>
-      // Smart scroll behavior for documentation navigation
-      document.addEventListener('DOMContentLoaded', function() {
-        // Store scroll position and context before navigation
-        var docsSidebarLinks = document.querySelectorAll('.docs-nav a');
-        docsSidebarLinks.forEach(function(link) {
-          link.addEventListener('click', function() {
-            var docsContent = document.querySelector('.docs-content');
-            var docsContentTop = docsContent ? docsContent.getBoundingClientRect().top + window.scrollY : 0;
-            var currentScrollPos = window.scrollY;
-            
-            // Check if user is scrolled below the content headline
-            var isBelowHeadline = currentScrollPos > docsContentTop;
-            
-            sessionStorage.setItem('docsScrollPos', currentScrollPos);
-            sessionStorage.setItem('docsBelowHeadline', isBelowHeadline ? 'true' : 'false');
-          });
-        });
-        
-        // Restore appropriate scroll position on new page
-        var savedScrollPos = sessionStorage.getItem('docsScrollPos');
-        var wasBelowHeadline = sessionStorage.getItem('docsBelowHeadline') === 'true';
-        
-        if (savedScrollPos !== null) {
-          if (wasBelowHeadline) {
-            // User was reading content, scroll to the new page's headline
-            setTimeout(function() {
-              var docsContent = document.querySelector('.docs-content');
-              if (docsContent) {
-                var contentTop = docsContent.getBoundingClientRect().top + window.scrollY;
-                window.scrollTo({
-                  top: contentTop,
-                  behavior: 'smooth'
-                });
-              }
-            }, 50);
-          } else {
-            // User was at the top area, preserve scroll position
-            window.scrollTo(0, parseInt(savedScrollPos));
-          }
-          
-          sessionStorage.removeItem('docsScrollPos');
-          sessionStorage.removeItem('docsBelowHeadline');
-        }
-      });
-    </script>
   </head>
   <body>
     <div class="wrapper">
