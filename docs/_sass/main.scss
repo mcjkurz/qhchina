@@ -401,8 +401,8 @@ img.separator {
 }
 
 .docs-sidebar {
-  width: 220px;
-  min-width: 220px;
+  width: 200px;
+  min-width: 200px;
   flex-shrink: 0;
   position: sticky;
   top: calc(2 * var(--spacing-unit));
@@ -459,14 +459,15 @@ img.separator {
 }
 
 /* Responsive docs layout */
-@media (max-width: 992px) {
+@media (max-width: 768px) {
   .docs-container {
     width: 90%;
-    flex-direction: column;
+    flex-direction: column !important;
   }
   
   .docs-sidebar {
     width: 100%;
+    min-width: 100%;
     position: static;
     margin-bottom: calc(2 * var(--spacing-unit));
     border-bottom: 1px solid var(--border-color);
