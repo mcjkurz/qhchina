@@ -8,6 +8,22 @@
     <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
     <link rel="icon" href="{{ '/assets/img/icon.png' | relative_url }}">
     {% include head-custom.html %}
+    <script>
+      // Prevent page from jumping when navigating within docs
+      document.addEventListener('DOMContentLoaded', function() {
+        // Store scroll position before navigation
+        window.addEventListener('beforeunload', function() {
+          sessionStorage.setItem('docsScrollPos', window.scrollY);
+        });
+        
+        // Restore scroll position or scroll to top of content area
+        var savedScrollPos = sessionStorage.getItem('docsScrollPos');
+        if (savedScrollPos !== null) {
+          window.scrollTo(0, parseInt(savedScrollPos));
+          sessionStorage.removeItem('docsScrollPos');
+        }
+      });
+    </script>
   </head>
   <body>
     <div class="wrapper">
