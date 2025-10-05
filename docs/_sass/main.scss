@@ -385,27 +385,40 @@ img.separator {
 }
 
 /* Documentation with sidebar layout */
-.docs-main {
-  width: 100%;
-  padding: calc(1.5 * var(--spacing-unit)) 0;
+/* Override theme styles that might interfere */
+main.docs-main {
+  width: 100% !important;
+  padding: calc(1.5 * var(--spacing-unit)) 0 !important;
+  display: block !important;
+  float: none !important;
+  clear: both !important;
 }
 
 .docs-container {
   width: 80%;
   max-width: 1400px;
-  margin: 0 auto;
+  margin: 0 auto !important;
+  padding: 0 !important;
   display: flex !important;
   flex-direction: row !important;
-  gap: calc(2 * var(--spacing-unit));
-  align-items: flex-start;
+  flex-wrap: nowrap !important;
+  gap: calc(2 * var(--spacing-unit)) !important;
+  align-items: flex-start !important;
+  justify-content: flex-start !important;
 }
 
-.docs-sidebar {
-  width: 200px;
-  min-width: 200px;
-  flex-shrink: 0;
-  position: sticky;
-  top: calc(2 * var(--spacing-unit));
+aside.docs-sidebar {
+  width: 200px !important;
+  min-width: 200px !important;
+  max-width: 200px !important;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
+  flex-basis: 200px !important;
+  position: sticky !important;
+  top: calc(2 * var(--spacing-unit)) !important;
+  order: 1 !important;
+  float: none !important;
+  display: block !important;
 }
 
 .docs-nav h3 {
@@ -453,9 +466,11 @@ img.separator {
 }
 
 .docs-content {
-  flex: 1;
-  min-width: 0;
-  max-width: 100%;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  order: 2 !important;
+  width: auto !important;
 }
 
 /* Responsive docs layout */
