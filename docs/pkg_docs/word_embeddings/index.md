@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: docs_with_sidebar
 title: Word Embeddings
 permalink: /pkg_docs/word_embeddings/
 ---
@@ -20,7 +20,7 @@ from qhchina.analytics.word2vec import Word2Vec
 model = Word2Vec(
     vector_size=100,  # Dimensionality of word vectors
     window=5,         # Context window size
-    min_count=5,      # Minimum word frequency threshold
+    min_word_count=5, # Minimum word frequency threshold
     sg=1,             # 1 for Skip-gram; 0 for CBOW
     negative=5,       # Number of negative samples
     alpha=0.025,      # Initial learning rate
@@ -65,7 +65,7 @@ skipgram_model = Word2Vec(sg=1)
 |-----------|-------------|
 | `vector_size` | Dimensionality of word vectors (default: 100) |
 | `window` | Maximum distance between target and context words (default: 5) |
-| `min_count` | Ignores words with frequency below this threshold (default: 5) |
+| `min_word_count` | Ignores words with frequency below this threshold (default: 5) |
 | `alpha` | Initial learning rate (default: 0.025) |
 | `min_alpha` | Final learning rate (default: None) |
 | `negative` | Number of negative samples for each positive sample (default: 5) |
@@ -131,7 +131,7 @@ model = TempRefWord2Vec(
     targets=target_words,     # Words to track for semantic change
     vector_size=256,
     window=5,
-    min_count=5,
+    min_word_count=5,
     sg=1,                     # Use Skip-gram model
     negative=10,
     seed=42
@@ -296,7 +296,7 @@ vector2 = model2.get_vector("电影")
 model = Word2Vec(
     vector_size=200,
     window=10,
-    min_count=10,
+    min_word_count=10,
     sg=1,
     negative=10
 )

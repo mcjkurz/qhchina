@@ -50,7 +50,7 @@ lda = LDAGibbsSampler(
     alpha=0.1,           # Document-topic prior
     beta=0.01,           # Topic-word prior
     iterations=500,      # Number of Gibbs sampling iterations
-    min_count=2,         # Minimum word count to include in vocab
+    min_word_count=2,    # Minimum word count to include in vocab
     stopwords={"a", "the", "and"}  # Words to exclude
 )
 

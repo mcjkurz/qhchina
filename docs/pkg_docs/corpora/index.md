@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: docs_with_sidebar
 title: Corpus Analysis
 permalink: /pkg_docs/corpora/
 ---
@@ -26,7 +26,7 @@ results = compare_corpora(
     corpusA=corpus_a, 
     corpusB=corpus_b, 
     method="fisher",
-    filters={"min_count": 10},
+    filters={"min_word_count": 10},
     as_dataframe=True
 )
 
@@ -50,10 +50,10 @@ The `filters` parameter accepts a dictionary with the following options:
 
 | Filter | Description |
 |--------|-------------|
-| `min_count` | Minimum count for a word to be included (int or tuple of two ints) |
+| `min_word_count` | Minimum count for a word to be included (int or tuple of two ints) |
 | `max_p` | Maximum p-value threshold for statistical significance |
 | `stopwords` | List of words to exclude from results |
-| `min_length` | Minimum character length for words |
+| `min_word_length` | Minimum character length for words |
 
 ### Results Interpretation
 
@@ -78,10 +78,10 @@ filtered_results = compare_corpora(
     corpusB=corpus_b,
     method="fisher",
     filters={
-        "min_count": 3,       # Minimum count in both corpora
+        "min_word_count": 3,  # Minimum count in both corpora
         "max_p": 0.05,        # Only statistically significant differences
         "stopwords": ["的", "了", "和"],  # Exclude common words
-        "min_length": 2       # Only include words with at least 2 characters
+        "min_word_length": 2  # Only include words with at least 2 characters
     }
 )
 
@@ -219,7 +219,7 @@ model = TempRefWord2Vec(
     balance=True,             # Balance corpus sizes
     vector_size=100,
     window=5,
-    min_count=5,
+    min_word_count=5,
     sg=1                      # Use Skip-gram model
 )
 
@@ -244,7 +244,7 @@ from qhchina.analytics.word2vec import Word2Vec
 from qhchina.analytics.corpora import compare_corpora
 
 # Train Word2Vec model on your corpus
-model = Word2Vec(vector_size=100, window=5, min_count=5)
+model = Word2Vec(vector_size=100, window=5, min_word_count=5)
 model.build_vocab(all_sentences)
 model.train(all_sentences, epochs=5)
 
@@ -252,7 +252,7 @@ model.train(all_sentences, epochs=5)
 comparison = compare_corpora(
     corpusA=corpus_a, 
     corpusB=corpus_b,
-    filters={"min_count": 5, "max_p": 0.05}
+    filters={"min_word_count": 5, "max_p": 0.05}
 )
 significant_words = comparison[comparison["p_value"] < 0.05]["word"].tolist()
 
@@ -313,7 +313,7 @@ economy_comparison = compare_corpora(
 
 ## Performance Considerations
 
-- For very large corpora, consider using `min_count` to filter out rare words
+- For very large corpora, consider using `min_word_count` to filter out rare words
 - When creating co-occurrence matrices for large vocabularies, use `use_sparse=True`
 - The `compare_corpora` function stores results in memory, so for extremely large corpora, consider processing in batches
 

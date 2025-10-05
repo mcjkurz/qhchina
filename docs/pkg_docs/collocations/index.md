@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: docs_with_sidebar
 title: Collocation Analysis
 permalink: /pkg_docs/collocations/
 ---
@@ -117,7 +117,7 @@ The `filters` parameter allows you to apply multiple filters to the results:
 filters = {
     'max_p': 0.05,              # Maximum p-value threshold
     'stopwords': ["的", "了", "在", "是", "和", "有", "被"],  # Words to exclude
-    'min_length': 2             # Minimum character length
+    'min_word_length': 2        # Minimum character length
 }
 
 # Find collocates with filters
@@ -134,7 +134,7 @@ filtered_collocates = find_collocates(
 |--------|-------------|
 | `max_p` | Maximum p-value threshold for statistical significance |
 | `stopwords` | List of words to exclude from results |
-| `min_length` | Minimum character length for collocates |
+| `min_word_length` | Minimum character length for collocates |
 
 ### Filtering After Results
 

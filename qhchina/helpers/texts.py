@@ -121,6 +121,32 @@ def load_stopwords(language: str = "zh_sim") -> set:
     except FileNotFoundError:
         print(f"Warning: Stopwords file not found for language '{language}' at path {stopwords_path}")
         return set()
+
+def get_stopword_languages() -> list:
+    """
+    Get all available stopword language codes.
+    
+    Returns:
+        List of available language codes (e.g., ['zh_sim', 'zh_cl_sim', 'zh_cl_tr'])
+    """
+    import os
+    
+    # Get the current file's directory (helpers)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Go up one level to the qhchina package root and construct the path to stopwords
+    package_root = os.path.abspath(os.path.join(current_dir, '..'))
+    stopwords_dir = os.path.join(package_root, 'data', 'stopwords')
+    
+    # List all .txt files in the stopwords directory
+    try:
+        files = os.listdir(stopwords_dir)
+        # Filter for .txt files and remove the extension
+        stopword_lists = [f[:-4] for f in files if f.endswith('.txt')]
+        return sorted(stopword_lists)
+    except FileNotFoundError:
+        print(f"Warning: Stopwords directory not found at path {stopwords_dir}")
+        return []
     
 def split_into_chunks(sequence, chunk_size, overlap=0.0):
     """

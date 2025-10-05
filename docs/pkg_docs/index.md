@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: docs_with_sidebar
 title: Documentation
 permalink: /pkg_docs/
 ---

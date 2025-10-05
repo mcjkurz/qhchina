@@ -68,7 +68,7 @@ class Word2Vec:
         self,
         vector_size: int = 100,
         window: int = 5,
-        min_count: int = 5,
+        min_word_count: int = 5,
         negative: int = 5,
         ns_exponent: float = 0.75,
         cbow_mean: bool = True,
@@ -92,7 +92,7 @@ class Word2Vec:
         -----------
         vector_size: Dimensionality of the word vectors
         window: Maximum distance between the current and predicted word
-        min_count: Ignores all words with frequency lower than this
+        min_word_count: Ignores all words with frequency lower than this
         negative: Number of negative samples for negative sampling
         ns_exponent: Exponent used to shape the negative sampling distribution
         cbow_mean: If True, use mean of context word vectors, else use sum
@@ -106,14 +106,14 @@ class Word2Vec:
         exp_table_size: Size of sigmoid lookup table for precomputation
         max_exp: Range of values for sigmoid precomputation [-max_exp, max_exp]
         max_vocab_size: Maximum vocabulary size to keep, keeping the most frequent words.
-                        None means no limit (keep all words above min_count).
+                        None means no limit (keep all words above min_word_count).
         use_double_precision: Whether to use float64 precision for better stability. Default is False.
         use_cython: Whether to use Cython acceleration if available. Default is True.
         gradient_clip: Maximum absolute value for gradients when using Cython. Default is 1.0.
         """
         self.vector_size = vector_size
         self.window = window
-        self.min_count = min_count
+        self.min_word_count = min_word_count
         self.negative = negative
         self.ns_exponent = ns_exponent
         self.cbow_mean = cbow_mean
@@ -271,14 +271,14 @@ class Word2Vec:
         for sentence in sentences:
             self.word_counts.update(sentence)
         
-        # Filter words by min_count and create vocabulary
-        retained_words = {word for word, count in self.word_counts.items() if count >= self.min_count}
+        # Filter words by min_word_count and create vocabulary
+        retained_words = {word for word, count in self.word_counts.items() if count >= self.min_word_count}
         
         # If max_vocab_size is set, keep only the most frequent words
         if self.max_vocab_size is not None and len(retained_words) > self.max_vocab_size:
             # Sort words by frequency (highest first) and take the top max_vocab_size
             top_words = [word for word, _ in self.word_counts.most_common(self.max_vocab_size)]
-            # Intersect with words that meet min_count criteria
+            # Intersect with words that meet min_word_count criteria
             retained_words = {word for word in top_words if word in retained_words}
             
         # Create mappings
@@ -1635,7 +1635,7 @@ class Word2Vec:
             'word_counts': dict(self.word_counts),
             'vector_size': self.vector_size,
             'window': self.window,
-            'min_count': self.min_count,
+            'min_word_count': self.min_word_count,
             'negative': self.negative,
             'ns_exponent': self.ns_exponent,
             'cbow_mean': self.cbow_mean,
@@ -1677,7 +1677,7 @@ class Word2Vec:
         model = cls(
             vector_size=model_data['vector_size'],
             window=model_data['window'],
-            min_count=model_data['min_count'],
+            min_word_count=model_data.get('min_word_count', model_data.get('min_count', 5)),  # Backward compatibility
             negative=model_data['negative'],
             ns_exponent=model_data['ns_exponent'],
             cbow_mean=model_data['cbow_mean'],
@@ -2167,7 +2167,7 @@ class TempRefWord2Vec(Word2Vec):
             'word_counts': dict(self.word_counts),
             'vector_size': self.vector_size,
             'window': self.window,
-            'min_count': self.min_count,
+            'min_word_count': self.min_word_count,
             'negative': self.negative,
             'ns_exponent': self.ns_exponent,
             'cbow_mean': self.cbow_mean,
@@ -2259,7 +2259,7 @@ class TempRefWord2Vec(Word2Vec):
             targets=targets,
             vector_size=model_data['vector_size'],
             window=model_data['window'],
-            min_count=model_data['min_count'],
+            min_word_count=model_data.get('min_word_count', model_data.get('min_count', 5)),  # Backward compatibility
             negative=model_data['negative'],
             ns_exponent=model_data['ns_exponent'],
             cbow_mean=model_data['cbow_mean'],

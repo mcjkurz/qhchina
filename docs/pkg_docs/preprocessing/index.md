@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: docs_with_sidebar
 title: Text Preprocessing
 permalink: /pkg_docs/preprocessing/
 ---
@@ -96,7 +96,7 @@ segmenter = create_segmenter(
     strategy="chunk",                   # Process sentence by sentence
     chunk_size=512,                     # Chunk size (for "chunk" strategy)
     filters={
-        "min_length": 2,                # Minimum token length to include
+        "min_word_length": 2,           # Minimum token length to include
         "excluded_pos": ["NUM", "SYM"], # POS tags to exclude
         "stopwords": ["的", "了"]       # Stopwords to exclude
     }
@@ -108,7 +108,7 @@ jieba_segmenter = create_segmenter(
     pos_tagging=True,                   # Enable POS tagging
     strategy="line",                    # Process line by line
     filters={
-        "min_length": 2,                # Minimum token length to include
+        "min_word_length": 2,           # Minimum token length to include
         "excluded_pos": ["m", "x"],     # POS tags to exclude
         "stopwords": ["的", "了"]       # Stopwords to exclude
     }
@@ -156,7 +156,7 @@ segmenter = SpacySegmenter(
     user_dict=["量子物理", "深度学习"], # Custom user dictionary
     strategy="sentence",                # Process sentence by sentence
     filters={
-        "min_length": 2,                # Min token length to keep
+        "min_word_length": 2,                # Min token length to keep
         "excluded_pos": ["NUM", "SYM", "SPACE"],  # POS tags to exclude
         "stopwords": ["的", "了"]       # Stopwords to exclude 
     }
@@ -186,7 +186,7 @@ segmenter = JiebaSegmenter(
     user_dict_path="path/to/dict.txt",  # Custom user dictionary
     strategy="line",                    # Process line by line
     filters={
-        "min_length": 2,                # Min token length to keep
+        "min_word_length": 2,                # Min token length to keep
         "excluded_pos": ["m", "x"],     # POS tags to exclude (Jieba's POS tags)
         "stopwords": ["的", "了"],      # Words to exclude
     }
@@ -209,7 +209,7 @@ segmenter = BertSegmenter(
     strategy="chunk",                   # Process in fixed-size chunks
     chunk_size=512,                     # Max sequence length for BERT
     filters={
-        "min_length": 2,                # Min token length to keep
+        "min_word_length": 2,                # Min token length to keep
         "stopwords": ["的", "了"],      # Words to exclude
     }
 )
@@ -247,7 +247,7 @@ segmenter = LLMSegmenter(
     strategy="chunk",                   # Process in chunks to reduce API costs
     chunk_size=1000,                    # Size of each chunk in characters
     filters={
-        "min_length": 1,                # Min token length to keep
+        "min_word_length": 1,           # Min token length to keep
         "stopwords": ["的", "了"]       # Words to exclude
     }
 )
@@ -298,7 +298,7 @@ All segmenters support filtering options that can be passed during initializatio
 
 | Filter | Description |
 |--------|-------------|
-| `min_length` | Minimum length of tokens to include (default: 1) |
+| `min_word_length` | Minimum length of tokens to include (default: 1) |
 | `excluded_pos` | Set of POS tags to exclude (requires POS tagging support) |
 | `stopwords` | List of words to exclude from results |
 
@@ -319,7 +319,7 @@ segmenter = create_segmenter(
     strategy="sentence",       # Process sentence by sentence
     filters={
         "stopwords": stopwords, 
-        "min_length": 2
+        "min_word_length": 2
     }
 )
 

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: "en-US" }}">
+  <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% if page.title %}{{ page.title }} | {{ site.title }}{% else %}{{ site.title }}{% endif %}</title>
+    <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+    <link rel="icon" href="{{ '/assets/img/icon.png' | relative_url }}">
+    {% include head-custom.html %}
+  </head>
+  <body>
+    <div class="wrapper">
+      <header>
+        <div class="logo-section">
+          {% if site.logo %}
+            <a href="{{ "/" | relative_url }}" class="logo-link">
+              <img src="{{site.logo | relative_url}}" alt="{{ site.title }}" class="site-logo"/>
+            </a>
+          {% else %}
+            <h1><a href="{{ "/" | relative_url }}">{{ site.title }}</a></h1>
+          {% endif %}
+        </div>
+
+        <div class="nav-section">
+            {% include navigation.html %}
+        </div>
+      </header>
+      
+      <main class="docs-main">
+        <div class="docs-container">
+          <aside class="docs-sidebar">
+            <nav class="docs-nav">
+              <h3>Package Documentation</h3>
+              <ul>
+                <li><a href="{{ site.baseurl }}/pkg_docs/" {% if page.url == '/pkg_docs/' %}class="active"{% endif %}>Overview</a></li>
+                <li><a href="{{ site.baseurl }}/pkg_docs/preprocessing/" {% if page.url contains '/pkg_docs/preprocessing/' %}class="active"{% endif %}>Preprocessing</a></li>
+                <li><a href="{{ site.baseurl }}/pkg_docs/word_embeddings/" {% if page.url contains '/pkg_docs/word_embeddings/' %}class="active"{% endif %}>Word Embeddings</a></li>
+                <li><a href="{{ site.baseurl }}/pkg_docs/topic_modeling/" {% if page.url contains '/pkg_docs/topic_modeling/' %}class="active"{% endif %}>Topic Modeling</a></li>
+                <li><a href="{{ site.baseurl }}/pkg_docs/collocations/" {% if page.url contains '/pkg_docs/collocations/' %}class="active"{% endif %}>Collocations</a></li>
+                <li><a href="{{ site.baseurl }}/pkg_docs/corpora/" {% if page.url contains '/pkg_docs/corpora/' %}class="active"{% endif %}>Corpora</a></li>
+              </ul>
+            </nav>
+          </aside>
+          
+          <div class="docs-content">
+            {{ content }}
+          </div>
+        </div>
+      </main>
+      
+      <footer>
+        <div class="container">
+          {% include footer.html %}
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>
+

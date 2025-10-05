@@ -1,5 +1,5 @@
 ---
-layout: default
+layout: docs_with_sidebar
 title: Topic Modeling
 permalink: /pkg_docs/topic_modeling/
 ---
@@ -57,20 +57,19 @@ for i, topic in enumerate(topics):
 
 ## Hyperparameter Selection
 
-### Alpha Parameter
+### Alpha and Beta Parameters
 
-The alpha parameter controls the document-topic prior distribution. By default, the `LDAGibbsSampler` uses the heuristic recommended by Griffiths and Steyvers (2004) of:
+The `LDAGibbsSampler` uses default values for hyperparameters based on Griffiths and Steyvers (2004):
 
-```
-alpha = 50 / n_topics
-```
+- **alpha**: Controls document-topic distributions (default: `50 / n_topics`)
+- **beta**: Controls topic-word distributions (default: `1 / n_topics`)
 
-This heuristic has been found to work well in many applications. A higher alpha value makes documents more similar in terms of their topic compositions, while a lower alpha creates more distinct topic mixtures per document.
+A higher alpha makes documents more similar in their topic mixtures, while a lower alpha creates more distinct topic distributions per document.
 
-You can explicitly set alpha if you want to override this default:
+You can override these defaults:
 
 ```python
-# Override the default alpha
+# Override the default alpha and beta
 lda = LDAGibbsSampler(
     n_topics=5,
     alpha=0.1,
@@ -81,18 +80,18 @@ lda = LDAGibbsSampler(
 
 ## Automatic Alpha Estimation
 
-The `LDAGibbsSampler` can automatically estimate the alpha parameter during training:
+The `LDAGibbsSampler` can automatically estimate the alpha parameter during training. Use the `burnin` parameter to specify initial iterations before estimation begins:
 
 ```python
 lda = LDAGibbsSampler(
     n_topics=5,
     iterations=1000,
-    estimate_alpha=1,      # Estimate alpha after every iteration (0 to disable)
-    burnin=100             # Run 100 burn-in iterations before alpha estimation
+    burnin=100,            # Run 100 initial iterations before alpha estimation
+    estimate_alpha=1       # Estimate alpha every 1 iteration (0 to disable)
 )
 ```
 
-Setting `estimate_alpha=0` disables alpha estimation, while positive values indicate the frequency of updates.
+Set `estimate_alpha=0` to disable alpha estimation, or use higher values (e.g., `estimate_alpha=10`) to estimate less frequently.
 
 ## Using Stopwords
 
@@ -125,7 +124,7 @@ for word, prob in top_words:
 
 # Get topic distribution for a specific document
 doc_id = 0
-doc_topics = lda.get_document_topics(doc_id=doc_id)
+doc_topics = lda.get_document_topics(doc_id=doc_id, sort_by_prob=True)
 print(f"Topic distribution for document {doc_id}:")
 for topic_id, prob in doc_topics:
     print(f"  Topic {topic_id}: {prob:.4f}")
@@ -143,12 +142,13 @@ for doc_id, prob in top_docs:
 Visualize the top words for each topic using the built-in plotting functions:
 
 ```python
-# Plot top words for all topics in a single figure
+# Plot top words for all topics in a single figure (horizontal bars)
 lda.plot_topic_words(
     n_words=10,
     figsize=(12, 20),
     fontsize=12,
     filename="topics.png",
+    orientation="horizontal",  # or "vertical"
     dpi=100
 )
 
@@ -193,6 +193,29 @@ for i, prob in enumerate(topic_dist):
     print(f"  Topic {i}: {prob:.4f}")
 ```
 
+## Measuring Similarity
+
+Calculate similarity between topics or documents:
+
+```python
+# Compare two topics
+similarity = lda.topic_similarity(topic_i=0, topic_j=1, metric='jsd')
+print(f"Topic similarity: {similarity:.4f}")
+
+# Get similarity matrix for all topics
+topic_matrix = lda.topic_correlation_matrix(metric='cosine')
+
+# Compare two documents
+doc_sim = lda.document_similarity(doc_i=0, doc_j=1, metric='jsd')
+print(f"Document similarity: {doc_sim:.4f}")
+
+# Get similarity matrix for specific documents
+doc_ids = [0, 1, 2, 3]
+doc_matrix = lda.document_similarity_matrix(doc_ids=doc_ids, metric='cosine')
+```
+
+Available metrics: `'jsd'` (Jensen-Shannon divergence), `'hellinger'` (Hellinger distance), `'cosine'` (cosine similarity), or `'kl'` (KL divergence).
+
 ## Advanced Configuration
 
 The `LDAGibbsSampler` offers several parameters for fine-tuning:
@@ -200,18 +223,18 @@ The `LDAGibbsSampler` offers several parameters for fine-tuning:
 ```python
 lda = LDAGibbsSampler(
     n_topics=10,             # Number of topics
-    alpha=None,              # Dirichlet prior for document-topic distributions (default: 50/n_topics)
-    beta=0.01,               # Dirichlet prior for topic-word distributions
+    alpha=None,              # Document-topic prior (default: 50/n_topics)
+    beta=None,               # Topic-word prior (default: 1/n_topics)
     iterations=2000,         # Number of Gibbs sampling iterations
-    burnin=200,              # Number of initial burn-in iterations
+    burnin=200,              # Number of burn-in iterations before estimation
     random_state=42,         # Random seed for reproducibility
-    log_interval=100,        # Evaluate perplexity every N iterations
-    min_count=2,             # Minimum word count to include in vocabulary
+    log_interval=100,        # Print perplexity every N iterations
+    min_word_count=2,        # Minimum word count to include in vocabulary
     max_vocab_size=10000,    # Maximum vocabulary size
-    min_length=2,            # Minimum word length to include
+    min_word_length=2,       # Minimum word length to include
     stopwords=stopwords,     # Set of stopwords to exclude
-    use_cython=True,         # Whether to use Cython acceleration if available
-    estimate_alpha=1         # Frequency for estimating alpha (0 = no estimation)
+    use_cython=True,         # Use Cython acceleration if available
+    estimate_alpha=1         # Estimate alpha every N iterations (0 = disable)
 )
 ```
 
@@ -269,8 +292,8 @@ lda = LDAGibbsSampler(
     burnin=100,
     log_interval=100,
     stopwords=stopwords,
-    min_count=2,
-    min_length=2,
+    min_word_count=2,
+    min_word_length=2,
     use_cython=True,
     estimate_alpha=1
 )
@@ -300,9 +323,9 @@ lda.save("lda_model.npy")
 
 ```python
 class LDAGibbsSampler:
-    def __init__(self, n_topics=10, alpha=None, beta=0.01, iterations=1000, 
-                 burnin=0, random_state=None, log_interval=None, min_count=1, 
-                 max_vocab_size=None, min_length=1, stopwords=None,
+    def __init__(self, n_topics=10, alpha=None, beta=None, iterations=1000, 
+                 burnin=0, random_state=None, log_interval=None, min_word_count=1, 
+                 max_vocab_size=None, min_word_length=1, stopwords=None,
                  use_cython=True, estimate_alpha=1):
         """Initialize the LDA model with Gibbs sampling."""
         
@@ -315,7 +338,7 @@ class LDAGibbsSampler:
     def get_topic_words(self, topic_id, n_words=10):
         """Get the top n words for a specific topic."""
         
-    def get_document_topics(self, doc_id):
+    def get_document_topics(self, doc_id, sort_by_prob=False):
         """Get topic distribution for a specific document."""
         
     def get_top_documents(self, topic_id, n_docs=10):
@@ -326,10 +349,23 @@ class LDAGibbsSampler:
         
     def inference(self, new_doc, inference_iterations=100):
         """Infer topic distribution for a new document."""
+    
+    def topic_similarity(self, topic_i, topic_j, metric='jsd'):
+        """Calculate similarity between two topics."""
+    
+    def topic_correlation_matrix(self, metric='jsd'):
+        """Calculate pairwise similarity between all topics."""
+    
+    def document_similarity(self, doc_i, doc_j, metric='jsd'):
+        """Calculate similarity between two documents."""
+    
+    def document_similarity_matrix(self, doc_ids=None, metric='jsd'):
+        """Calculate pairwise similarity between documents."""
         
     def plot_topic_words(self, n_words=10, figsize=(12, 8), fontsize=10, 
-                         filename=None, separate_files=False, dpi=72):
-        """Plot the top words for each topic as a vertical bar chart."""
+                         filename=None, separate_files=False, dpi=72, 
+                         orientation='horizontal'):
+        """Plot the top words for each topic as a bar chart."""
         
     def save(self, filepath):
         """Save the model to a file."""

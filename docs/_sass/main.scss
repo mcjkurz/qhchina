@@ -382,4 +382,112 @@ img.separator {
   height: auto !important;
   margin: 3rem auto !important;
   display: block !important;
+}
+
+/* Documentation with sidebar layout */
+.docs-main {
+  width: 100%;
+  padding: calc(1.5 * var(--spacing-unit)) 0;
+}
+
+.docs-container {
+  width: 80%;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  gap: calc(2 * var(--spacing-unit));
+  align-items: flex-start;
+}
+
+.docs-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  position: sticky;
+  top: calc(2 * var(--spacing-unit));
+}
+
+.docs-nav h3 {
+  margin-top: 0;
+  font-size: 1rem;
+  color: var(--text-color);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  margin-bottom: calc(var(--spacing-unit));
+  padding-bottom: calc(0.5 * var(--spacing-unit));
+  border-bottom: 2px solid var(--primary-color);
+}
+
+.docs-nav ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.docs-nav li {
+  margin-bottom: calc(0.5 * var(--spacing-unit));
+}
+
+.docs-nav a {
+  display: block;
+  padding: calc(0.5 * var(--spacing-unit)) calc(0.75 * var(--spacing-unit));
+  text-decoration: none;
+  color: var(--text-color);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.docs-nav a:hover {
+  background-color: var(--secondary-color);
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.docs-nav a.active {
+  background-color: var(--primary-color);
+  color: white;
+  font-weight: 600;
+}
+
+.docs-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Responsive docs layout */
+@media (max-width: 992px) {
+  .docs-container {
+    width: 90%;
+    flex-direction: column;
+  }
+  
+  .docs-sidebar {
+    width: 100%;
+    position: static;
+    margin-bottom: calc(2 * var(--spacing-unit));
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: calc(var(--spacing-unit));
+  }
+  
+  .docs-nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(0.5 * var(--spacing-unit));
+  }
+  
+  .docs-nav li {
+    margin-bottom: 0;
+  }
+}
+
+@media (max-width: 576px) {
+  .docs-container {
+    width: 95%;
+  }
+  
+  .docs-nav ul {
+    flex-direction: column;
+  }
 } 
