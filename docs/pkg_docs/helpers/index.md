@@ -22,6 +22,7 @@ Load CJK fonts into matplotlib and set a default font.
 - `target_font` (str): Font name or alias to set as default. Options: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
 - `verbose` (bool): Print detailed loading information
 
+
 ```python
 set_font(font='Noto Sans CJK TC')
 ```
@@ -31,6 +32,7 @@ Set the matplotlib font for Chinese text rendering.
 **Parameters:**
 - `font` (str): Font name or alias (same options as `load_fonts`)
 
+
 ```python
 current_font()
 ```
@@ -39,6 +41,7 @@ Get the currently active font name.
 
 **Returns:** (str) Current font name
 
+
 ```python
 list_available_fonts()
 ```
@@ -46,6 +49,7 @@ list_available_fonts()
 Get dictionary of bundled font files and their internal names.
 
 **Returns:** (dict) Mapping of font file names to font names
+
 
 ```python
 list_font_aliases()
@@ -57,11 +61,54 @@ Get dictionary of font aliases and their corresponding names.
 
 ### Available Fonts
 
-| Font File | Font Name | Aliases | Description |
-|-----------|-----------|---------|-------------|
-| `NotoSansTCSC-Regular.otf` | Noto Sans CJK TC | `'sans'`, `'sans-tc'`, `'sans-sc'` | Sans-serif font with Traditional and Simplified Chinese |
-| `NotoSerifTC-Regular.otf` | Noto Serif TC | `'serif-tc'` | Serif font for Traditional Chinese |
-| `NotoSerifSC-Regular.otf` | Noto Serif SC | `'serif-sc'` | Serif font for Simplified Chinese |
+<style>
+.bordered-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.bordered-table th,
+.bordered-table td {
+  border: 1px solid black;
+  padding: 8px;
+  text-align: left;
+}
+.bordered-table th {
+  background-color: #f2f2f2;
+}
+</style>
+
+<div markdown="0">
+<table class="bordered-table">
+  <thead>
+    <tr>
+      <th>Font File</th>
+      <th>Font Name</th>
+      <th>Aliases</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>NotoSansTCSC-Regular.otf</code></td>
+      <td>Noto Sans CJK TC</td>
+      <td><code>'sans'</code>, <code>'sans-tc'</code>, <code>'sans-sc'</code></td>
+      <td>Sans-serif font with Traditional and Simplified Chinese</td>
+    </tr>
+    <tr>
+      <td><code>NotoSerifTC-Regular.otf</code></td>
+      <td>Noto Serif TC</td>
+      <td><code>'serif-tc'</code></td>
+      <td>Serif font for Traditional Chinese</td>
+    </tr>
+    <tr>
+      <td><code>NotoSerifSC-Regular.otf</code></td>
+      <td>Noto Serif SC</td>
+      <td><code>'serif-sc'</code></td>
+      <td>Serif font for Simplified Chinese</td>
+    </tr>
+  </tbody>
+</table>
+</div>
 
 ## Text Loading
 
@@ -79,6 +126,7 @@ Load text from a single file.
 
 **Returns:** (str) Text content of the file
 
+
 ```python
 load_texts(filepaths, encoding='utf-8')
 ```
@@ -91,6 +139,7 @@ Load text from multiple files.
 
 **Returns:** (list) List of text contents
 
+
 ```python
 load_stopwords(language='zh_sim')
 ```
@@ -102,6 +151,7 @@ Load stopwords for filtering.
 
 **Returns:** (set) Set of stopwords
 
+
 ```python
 get_stopword_languages()
 ```
@@ -109,6 +159,7 @@ get_stopword_languages()
 Get all available stopword language codes.
 
 **Returns:** (list) List of available language codes
+
 
 ```python
 split_into_chunks(sequence, chunk_size, overlap=0.0)

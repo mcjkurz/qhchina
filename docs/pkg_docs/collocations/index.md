@@ -47,6 +47,7 @@ Find words that co-occur with target words more frequently than expected by chan
 - `obs_global`: Total frequency of the collocate
 - `p_value`: Statistical significance of the association
 
+
 ```python
 cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, 
             vocab_size=None, binary=False, as_dataframe=True, vocab=None, 

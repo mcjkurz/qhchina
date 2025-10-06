@@ -46,6 +46,7 @@ Fit the LDA model to documents.
 **Parameters:**
 - `documents` (list): List of tokenized documents (each document is a list of tokens)
 
+
 ```python
 get_topics(n_words=10)
 ```
@@ -56,6 +57,7 @@ Get top words for all topics.
 - `n_words` (int): Number of words per topic
 
 **Returns:** (list) List of lists containing (word, probability) tuples
+
 
 ```python
 get_topic_words(topic_id, n_words=10)
@@ -69,6 +71,7 @@ Get top words for a specific topic.
 
 **Returns:** (list) List of (word, probability) tuples
 
+
 ```python
 get_document_topics(doc_id, sort_by_prob=False)
 ```
@@ -80,6 +83,7 @@ Get topic distribution for a document.
 - `sort_by_prob` (bool): Sort topics by probability
 
 **Returns:** (list) List of (topic_id, probability) tuples
+
 
 ```python
 get_top_documents(topic_id, n_docs=10)
@@ -93,6 +97,7 @@ Get top documents for a topic.
 
 **Returns:** (list) List of (doc_id, probability) tuples
 
+
 ```python
 get_topic_distribution()
 ```
@@ -100,6 +105,7 @@ get_topic_distribution()
 Get overall topic distribution across the corpus.
 
 **Returns:** (numpy.ndarray) Topic distribution
+
 
 ```python
 inference(new_doc, inference_iterations=100)
@@ -112,6 +118,7 @@ Infer topic distribution for a new document.
 - `inference_iterations` (int): Number of inference iterations
 
 **Returns:** (numpy.ndarray) Topic distribution
+
 
 ```python
 topic_similarity(topic_i, topic_j, metric='jsd')
@@ -126,6 +133,7 @@ Calculate similarity between two topics.
 
 **Returns:** (float) Similarity score
 
+
 ```python
 topic_correlation_matrix(metric='jsd')
 ```
@@ -136,6 +144,7 @@ Calculate pairwise similarity between all topics.
 - `metric` (str): Similarity metric
 
 **Returns:** (numpy.ndarray) Similarity matrix
+
 
 ```python
 document_similarity(doc_i, doc_j, metric='jsd')
@@ -150,6 +159,7 @@ Calculate similarity between two documents.
 
 **Returns:** (float) Similarity score
 
+
 ```python
 document_similarity_matrix(doc_ids=None, metric='jsd')
 ```
@@ -161,6 +171,7 @@ Calculate pairwise similarity between documents.
 - `metric` (str): Similarity metric
 
 **Returns:** (numpy.ndarray) Similarity matrix
+
 
 ```python
 plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, 
@@ -177,6 +188,7 @@ Plot top words for topics as bar charts.
 - `separate_files` (bool): Create separate file for each topic
 - `dpi` (int): Resolution
 - `orientation` (str): Bar orientation ('horizontal' or 'vertical')
+
 
 ```python
 save(filepath)

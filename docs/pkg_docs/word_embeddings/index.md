@@ -47,6 +47,7 @@ Build vocabulary from tokenized sentences.
 - `sentences` (list): List of tokenized sentences
 - `update` (bool): Update existing vocabulary instead of replacing
 
+
 ```python
 train(sentences, epochs=5, batch_size=None)
 ```
@@ -58,6 +59,7 @@ Train the Word2Vec model.
 - `epochs` (int): Number of training epochs
 - `batch_size` (int): Batch size for training (optional)
 
+
 ```python
 get_vector(word)
 ```
@@ -68,6 +70,7 @@ Get the vector representation of a word.
 - `word` (str): The word to get vector for
 
 **Returns:** (numpy.ndarray) Word vector
+
 
 ```python
 most_similar(word, topn=10)
@@ -81,6 +84,7 @@ Find the most similar words.
 
 **Returns:** (list) List of (word, similarity) tuples
 
+
 ```python
 similarity(word1, word2)
 ```
@@ -92,6 +96,7 @@ Calculate cosine similarity between two words.
 - `word2` (str): Second word
 
 **Returns:** (float) Cosine similarity score
+
 
 ```python
 save(filepath)
@@ -132,11 +137,13 @@ train(calculate_loss=True, batch_size=64)
 
 Train the temporal reference model.
 
+
 ```python
 get_vector(word)
 ```
 
 Get vector for a word (including temporal variants like "word_1980").
+
 
 ```python
 calculate_semantic_change(target_word)
@@ -167,6 +174,7 @@ Project word vectors to 2D space for visualization.
 - `adjust_text_labels` (bool): Adjust text labels to avoid overlap
 - `perplexity` (int): Perplexity for t-SNE (if using t-SNE)
 
+
 ```python
 calculate_bias(dimension_pairs, target_words, model)
 ```
@@ -179,6 +187,7 @@ Calculate bias scores along a semantic dimension.
 - `model`: Word2Vec model
 
 **Returns:** (dict) Mapping of target words to bias scores
+
 
 ```python
 align_vectors(model1, model2)
