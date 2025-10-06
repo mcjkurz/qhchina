@@ -8,15 +8,6 @@ permalink: /pkg_docs/
 
 A Python toolkit for computational analysis of Chinese texts in humanities research.
 
-## Modules
-
-- **[Word Embeddings]({{ site.baseurl }}/pkg_docs/word_embeddings/)** - Word2Vec implementations for Chinese text analysis, including temporal semantic change tracking
-- **[Topic Modeling]({{ site.baseurl }}/pkg_docs/topic_modeling/)** - LDA with Gibbs sampling for discovering thematic structure
-- **[Collocations]({{ site.baseurl }}/pkg_docs/collocations/)** - Statistical analysis of word co-occurrences
-- **[Corpora]({{ site.baseurl }}/pkg_docs/corpora/)** - Tools for comparing and analyzing text corpora
-- **[Preprocessing]({{ site.baseurl }}/pkg_docs/preprocessing/)** - Chinese text segmentation with multiple backends
-- **[Helpers]({{ site.baseurl }}/pkg_docs/helpers/)** - Font management and text loading utilities
-
 ## Installation
 
 ```bash
