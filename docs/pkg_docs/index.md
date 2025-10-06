@@ -17,6 +17,7 @@ The package includes several modules, each focusing on specific computational ap
 - [Collocations]({{ site.baseurl }}/pkg_docs/collocations/) - Analysis of word collocations in Chinese texts
 - [Corpora]({{ site.baseurl }}/pkg_docs/corpora/) - Tools for managing and processing Chinese text corpora
 - [Preprocessing]({{ site.baseurl }}/pkg_docs/preprocessing/) - Text segmentation and tokenization for Chinese texts
+- [Helpers]({{ site.baseurl }}/pkg_docs/helpers/) - Font management and text loading utilities
 
 ## Package Structure
 

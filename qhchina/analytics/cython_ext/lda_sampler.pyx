@@ -129,8 +129,9 @@ cdef inline void normalize_to_cumsum(double* probs, int length, double p_sum):
     probs[0] /= p_sum
     
     # Convert to cumulative probabilities
-    for k in range(1, length):
+    for k in range(1, length - 1):
         probs[k] = probs[k-1] + (probs[k] / p_sum)
+    probs[length - 1] = 1.0
 
 def sample_topic(np.ndarray[INT_t, ndim=2] n_wt, 
                 np.ndarray[INT_t, ndim=2] n_dt, 
@@ -202,11 +203,6 @@ def run_iteration(np.ndarray[INT_t, ndim=2] n_wt,
                  int n_topics, int vocab_size):
     """
     Run a full iteration of Gibbs sampling over all documents and words.
-    
-    This is highly optimized by combining the iteration loop with the sampling
-    logic in Cython.
-    
-    Note: RNG should be seeded once before calling this function (using seed_rng).
     """
     global PROB_BUFFER, TOPIC_NORMALIZERS, VOCAB_SIZE_BETA
     cdef int d, i, w, doc_len, num_docs, k
@@ -357,6 +353,11 @@ def run_inference(
     for i in range(doc_len):
         n_dt_doc[z_doc[i]] += 1
     
+    # Precompute alpha sum (used for final theta calculation)
+    alpha_sum = 0.0
+    for k in range(n_topics):
+        alpha_sum += alpha[k]
+    
     # Run Gibbs sampling for inference iterations
     for iteration in range(inference_iterations):
         for i in range(doc_len):
@@ -383,11 +384,6 @@ def run_inference(
             # Update assignment
             z_doc[i] = new_topic
             n_dt_doc[new_topic] += 1
-    
-    # Calculate document-topic distribution
-    alpha_sum = 0.0
-    for k in range(n_topics):
-        alpha_sum += alpha[k]
     
     theta_doc = np.empty(n_topics, dtype=np.float64)
     for k in range(n_topics):

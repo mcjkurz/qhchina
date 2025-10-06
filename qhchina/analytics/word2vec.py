@@ -1712,6 +1712,73 @@ class Word2Vec:
                 
         return model
 
+
+# Helper functions for TempRefWord2Vec
+def sample_sentences_to_token_count(corpus, target_tokens):
+    """
+    Samples sentences from a corpus until the target token count is reached.
+    
+    This function randomly selects sentences from the corpus until the total number
+    of tokens reaches or slightly exceeds the target count. This is useful for balancing
+    corpus sizes when comparing different time periods or domains.
+    
+    Parameters:
+    -----------
+    corpus : List[List[str]]
+        A list of sentences, where each sentence is a list of tokens
+    target_tokens : int
+        The target number of tokens to sample
+        
+    Returns:
+    --------
+    List[List[str]]
+        A list of sampled sentences with token count close to target_tokens
+    """
+    sampled_sentences = []
+    current_tokens = 0
+    sentence_indices = list(range(len(corpus)))
+    random.shuffle(sentence_indices)
+    
+    for idx in sentence_indices:
+        sentence = corpus[idx]
+        if current_tokens + len(sentence) <= target_tokens:
+            sampled_sentences.append(sentence)
+            current_tokens += len(sentence)
+        if current_tokens >= target_tokens:
+            break
+    return sampled_sentences
+
+
+def add_corpus_tags(corpora, labels, target_words):
+    """
+    Add corpus-specific tags to target words in all corpora at once.
+    
+    Args:
+        corpora: List of corpora (each corpus is list of tokenized sentences)
+        labels: List of corpus labels
+        target_words: List of words to tag
+    
+    Returns:
+        List of processed corpora where target words have been tagged with their corpus label
+    """
+    processed_corpora = []
+    target_words_set = set(target_words)
+    
+    for corpus, label in zip(corpora, labels):
+        processed_corpus = []
+        for sentence in corpus:
+            processed_sentence = []
+            for token in sentence:
+                if token in target_words_set:
+                    processed_sentence.append(f"{token}_{label}")
+                else:
+                    processed_sentence.append(token)
+            processed_corpus.append(processed_sentence)
+        processed_corpora.append(processed_corpus)
+    
+    return processed_corpora
+
+
 class TempRefWord2Vec(Word2Vec):
     """
     Implementation of Word2Vec with Temporal Referencing (TR) for tracking semantic change.
@@ -1776,9 +1843,6 @@ class TempRefWord2Vec(Word2Vec):
         targets: List of target words to trace semantic change
         **kwargs: Arguments passed to Word2Vec parent class (vector_size, window, etc.)
         """
-        # Import the sampling function
-        from qhchina.helpers.texts import sample_sentences_to_token_count, add_corpus_tags
-        
         # Check that corpora and labels have the same length
         if len(corpora) != len(labels):
             raise ValueError(f"Number of corpora ({len(corpora)}) must match number of labels ({len(labels)})")
@@ -2313,3 +2377,4 @@ class TempRefWord2Vec(Word2Vec):
         print(f"  - Period vocab counts: {len(model.period_vocab_counts)} periods")
         
         return model
+
