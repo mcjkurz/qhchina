@@ -11,7 +11,8 @@ The `qhchina.analytics.corpora` module provides tools for comparing corpora and 
 ## Functions
 
 ```python
-compare_corpora(corpusA, corpusB, method='fisher', filters=None, as_dataframe=True)
+compare_corpora(corpusA, corpusB, method='fisher', filters=None, 
+                as_dataframe=True)
 ```
 
 Identify statistically significant differences in word usage between two corpora.

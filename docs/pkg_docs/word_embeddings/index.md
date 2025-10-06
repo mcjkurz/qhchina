@@ -154,7 +154,8 @@ Calculate semantic change for a target word across time periods.
 From `qhchina.analytics.vectors`:
 
 ```python
-project_2d(vectors, method='pca', title=None, adjust_text_labels=True, perplexity=30, **kwargs)
+project_2d(vectors, method='pca', title=None, adjust_text_labels=True, 
+           perplexity=30, **kwargs)
 ```
 
 Project word vectors to 2D space for visualization.

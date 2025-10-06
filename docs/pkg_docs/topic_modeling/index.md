@@ -163,7 +163,8 @@ Calculate pairwise similarity between documents.
 **Returns:** (numpy.ndarray) Similarity matrix
 
 ```python
-plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, separate_files=False, dpi=72, orientation='horizontal')
+plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, 
+                 separate_files=False, dpi=72, orientation='horizontal')
 ```
 
 Plot top words for topics as bar charts.

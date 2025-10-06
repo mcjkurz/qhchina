@@ -11,7 +11,8 @@ The `qhchina.analytics.collocations` module provides tools for identifying words
 ## Functions
 
 ```python
-find_collocates(sentences, target_words, method='window', horizon=5, filters=None, as_dataframe=True)
+find_collocates(sentences, target_words, method='window', horizon=5, filters=None, 
+                as_dataframe=True)
 ```
 
 Find words that co-occur with target words more frequently than expected by chance.
@@ -47,7 +48,9 @@ Find words that co-occur with target words more frequently than expected by chan
 - `p_value`: Statistical significance of the association
 
 ```python
-cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, vocab_size=None, binary=False, as_dataframe=True, vocab=None, use_sparse=False)
+cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, 
+            vocab_size=None, binary=False, as_dataframe=True, vocab=None, 
+            use_sparse=False)
 ```
 
 Create a co-occurrence matrix from a collection of documents.
