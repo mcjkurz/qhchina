@@ -4,78 +4,115 @@ title: Helper Utilities
 permalink: /pkg_docs/helpers/
 ---
 
-# Helper Utilities in qhChina
+# Helper Utilities
 
-The qhChina package provides helper utilities for common tasks when working with Chinese texts, including font management for matplotlib visualizations and text loading utilities.
+The `qhchina.helpers` module provides utilities for font management and text loading when working with Chinese texts.
 
 ## Font Management
 
-When creating visualizations with Chinese text in matplotlib, you need to configure fonts that support Chinese characters. The `qhchina.helpers` module provides convenient functions for loading and managing CJK (Chinese, Japanese, Korean) fonts.
+### Functions
 
-### Quick Start
+#### `load_fonts(target_font='Noto Sans CJK TC', verbose=False)`
 
-```python
-from qhchina.helpers import load_fonts
+Load CJK fonts into matplotlib and set a default font.
 
-# Load all bundled CJK fonts and set default to sans-serif
-load_fonts()
+**Parameters:**
+- `target_font` (str): Font name or alias to set as default. Options: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
+- `verbose` (bool): Print detailed loading information
 
-# Or use a convenient alias to load and set a specific font
-load_fonts('serif-tc')  # Traditional Chinese serif
-load_fonts('serif-sc')  # Simplified Chinese serif
-load_fonts('sans')      # Sans-serif (default)
-```
+#### `set_font(font='Noto Sans CJK TC')`
+
+Set the matplotlib font for Chinese text rendering.
+
+**Parameters:**
+- `font` (str): Font name or alias (same options as `load_fonts`)
+
+#### `current_font()`
+
+Get the currently active font name.
+
+**Returns:** (str) Current font name
+
+#### `list_available_fonts()`
+
+Get dictionary of bundled font files and their internal names.
+
+**Returns:** (dict) Mapping of font file names to font names
+
+#### `list_font_aliases()`
+
+Get dictionary of font aliases and their corresponding names.
+
+**Returns:** (dict) Mapping of aliases to full font names
 
 ### Available Fonts
 
-The package includes three Noto fonts for Chinese text:
-
-| Font File | Font Name | Alias | Description |
-|-----------|-----------|-------|-------------|
-| `NotoSansTCSC-Regular.otf` | Noto Sans CJK TC | `'sans'`, `'sans-tc'`, `'sans-sc'` | Sans-serif font with both Traditional and Simplified Chinese |
+| Font File | Font Name | Aliases | Description |
+|-----------|-----------|---------|-------------|
+| `NotoSansTCSC-Regular.otf` | Noto Sans CJK TC | `'sans'`, `'sans-tc'`, `'sans-sc'` | Sans-serif font with Traditional and Simplified Chinese |
 | `NotoSerifTC-Regular.otf` | Noto Serif TC | `'serif-tc'` | Serif font for Traditional Chinese |
 | `NotoSerifSC-Regular.otf` | Noto Serif SC | `'serif-sc'` | Serif font for Simplified Chinese |
 
-### Font Styles: Sans-Serif vs. Serif
+## Text Loading
 
-**Sans-serif** fonts (like Noto Sans) are clean and modern without decorative strokes:
-- Best for: UI elements, presentations, digital displays
-- Characteristics: Clean lines, contemporary appearance
+### Functions
 
-**Serif** fonts (like Noto Serif) have small decorative strokes at the ends of characters:
-- Best for: Books, formal documents, traditional texts
-- Characteristics: Classical appearance, traditional feel
+#### `load_text(filepath, encoding='utf-8')`
 
-### Loading Fonts
+Load text from a single file.
 
-The `load_fonts()` function copies the bundled fonts into matplotlib's font directory and registers them:
+**Parameters:**
+- `filepath` (str): Path to the text file
+- `encoding` (str): File encoding
+
+**Returns:** (str) Text content of the file
+
+#### `load_texts(filepaths, encoding='utf-8')`
+
+Load text from multiple files.
+
+**Parameters:**
+- `filepaths` (list): List of file paths
+- `encoding` (str): File encoding
+
+**Returns:** (list) List of text contents
+
+#### `load_stopwords(language='zh_sim')`
+
+Load stopwords for filtering.
+
+**Parameters:**
+- `language` (str): Language code (`'zh_sim'` for Simplified Chinese, `'zh_tr'` for Traditional Chinese)
+
+**Returns:** (set) Set of stopwords
+
+#### `get_stopword_languages()`
+
+Get all available stopword language codes.
+
+**Returns:** (list) List of available language codes
+
+#### `split_into_chunks(sequence, chunk_size, overlap=0.0)`
+
+Split text or a list of tokens into chunks with optional overlap.
+
+**Parameters:**
+- `sequence` (str or list): Text string or list of tokens to split
+- `chunk_size` (int): Size of each chunk (characters for text, items for lists)
+- `overlap` (float): Fraction of overlap between consecutive chunks (0.0 to 1.0)
+
+**Returns:** (list) List of chunks
+
+## Examples
+
+### Basic Font Setup
 
 ```python
 from qhchina.helpers import load_fonts
-
-# Basic usage - load fonts and set sans-serif as default
-load_fonts()
-
-# Load fonts and set serif font for Traditional Chinese
-load_fonts('serif-tc')
-
-# Use full font name instead of alias
-load_fonts('Noto Serif SC')
-
-# Verbose mode to see what's happening
-load_fonts('serif-tc', verbose=True)
-```
-
-### Switching Fonts
-
-You can change fonts at any time using `set_font()`:
-
-```python
-from qhchina.helpers import set_font
 import matplotlib.pyplot as plt
 
-# Set to Traditional Chinese serif
-set_font('serif-tc')
+# Load fonts and set Traditional Chinese serif as default
+load_fonts('serif-tc')
 
 # Create a plot with Chinese text
 plt.figure(figsize=(8, 6))
@@ -83,160 +120,22 @@ plt.title('中國古典詩歌分析')
 plt.xlabel('時間')
 plt.ylabel('頻率')
 plt.show()
-
-# Switch to Simplified Chinese sans-serif
-set_font('sans-sc')
-
-# Create another plot
-plt.figure(figsize=(8, 6))
-plt.title('中国古典诗歌分析')
-plt.show()
 ```
 
-### Checking Current Font
+### Loading Texts and Stopwords
 
 ```python
-from qhchina.helpers import current_font
-
-# Get the currently active font
-font = current_font()
-print(f"Current font: {font}")  # e.g., "Noto Serif TC"
-```
-
-### Discovering Available Fonts
-
-Use `list_available_fonts()` to see all bundled fonts and their names:
-
-```python
-from qhchina.helpers import list_available_fonts
-
-# Get dictionary of font files and their internal names
-fonts = list_available_fonts()
-
-for filename, fontname in fonts.items():
-    print(f"{filename} → {fontname}")
-
-# Output:
-# NotoSansTCSC-Regular.otf → Noto Sans CJK TC
-# NotoSerifTC-Regular.otf → Noto Serif TC
-# NotoSerifSC-Regular.otf → Noto Serif SC
-```
-
-Use `list_font_aliases()` to see all available aliases:
-
-```python
-from qhchina.helpers import list_font_aliases
-
-# Get dictionary of aliases and their corresponding font names
-aliases = list_font_aliases()
-
-for alias, fontname in aliases.items():
-    print(f"{alias} → {fontname}")
-
-# Output:
-# sans → Noto Sans CJK TC
-# sans-tc → Noto Sans CJK TC
-# sans-sc → Noto Sans CJK TC
-# serif-tc → Noto Serif TC
-# serif-sc → Noto Serif SC
-```
-
-### Complete Example
-
-```python
-import matplotlib.pyplot as plt
-from qhchina.helpers import load_fonts, set_font, current_font
-
-# Load fonts and set Traditional Chinese serif as default
-load_fonts('serif-tc')
-print(f"Loaded font: {current_font()}")
-
-# Create a figure with Traditional Chinese
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-
-# Left plot with serif font
-ax1.text(0.5, 0.5, '古典詩詞研究', 
-         fontsize=24, ha='center', va='center')
-ax1.set_title(f'襯線字體 (Serif)\n{current_font()}')
-ax1.axis('off')
-
-# Switch to sans-serif for right plot
-set_font('sans')
-ax2.text(0.5, 0.5, '古典詩詞研究', 
-         fontsize=24, ha='center', va='center')
-ax2.set_title(f'無襯線字體 (Sans-Serif)\n{current_font()}')
-ax2.axis('off')
-
-plt.tight_layout()
-plt.show()
-```
-
-## Text Loading Utilities
-
-The helpers module also provides utilities for loading Chinese texts from files:
-
-```python
-from qhchina.helpers import load_text, load_texts, load_stopwords
+from qhchina.helpers import load_text, load_texts, load_stopwords, split_into_chunks
 
 # Load a single text file
-text = load_text('path/to/document.txt')
+text = load_text('document.txt')
 
-# Load multiple text files
+# Load multiple files
 texts = load_texts(['file1.txt', 'file2.txt', 'file3.txt'])
 
-# Load stopwords for filtering
-stopwords_simplified = load_stopwords('zh_sim')  # Simplified Chinese
-stopwords_traditional = load_stopwords('zh_tr')  # Traditional Chinese
+# Load stopwords
+stopwords = load_stopwords('zh_sim')
+
+# Split long text into chunks
+chunks = split_into_chunks(text, chunk_size=1000, overlap=0.1)
 ```
-
-### Splitting Text into Chunks
-
-For processing large texts, you can split them into manageable chunks:
-
-```python
-from qhchina.helpers import split_into_chunks
-
-long_text = "很长的文本内容..."
-
-# Split into chunks of approximately 1000 characters
-chunks = split_into_chunks(long_text, chunk_size=1000)
-
-for i, chunk in enumerate(chunks):
-    print(f"Chunk {i}: {len(chunk)} characters")
-```
-
-## API Reference
-
-### Font Management Functions
-
-- **`load_fonts(target_font='Noto Sans CJK TC', verbose=False)`**: Load CJK fonts into matplotlib
-  - `target_font`: Font name or alias to set as default
-  - `verbose`: Print detailed loading information
-
-- **`set_font(font='Noto Sans CJK TC')`**: Set the matplotlib font
-  - `font`: Font name or alias (e.g., 'serif-tc', 'sans', 'Noto Serif SC')
-
-- **`current_font()`**: Get the currently active font name
-
-- **`list_available_fonts()`**: Get dictionary of bundled font files and their names
-
-- **`list_font_aliases()`**: Get dictionary of font aliases and their corresponding names
-
-### Text Loading Functions
-
-- **`load_text(filepath)`**: Load text from a single file
-  - Returns: String containing the file contents
-
-- **`load_texts(filepaths)`**: Load text from multiple files
-  - `filepaths`: List of file paths
-  - Returns: List of strings
-
-- **`load_stopwords(language)`**: Load stopwords for filtering
-  - `language`: 'zh_sim' (Simplified) or 'zh_tr' (Traditional)
-  - Returns: Set of stopwords
-
-- **`split_into_chunks(text, chunk_size=1000)`**: Split text into chunks
-  - `text`: Text to split
-  - `chunk_size`: Approximate size of each chunk in characters
-  - Returns: List of text chunks
-

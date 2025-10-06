@@ -4,288 +4,184 @@ title: Topic Modeling
 permalink: /pkg_docs/topic_modeling/
 ---
 
-# Topic Modeling with qhChina
+# Topic Modeling
 
-Topic modeling is a technique used to discover the hidden thematic structure in document collections. qhChina provides powerful topic modeling capabilities through the `LDAGibbsSampler` class, which implements Latent Dirichlet Allocation (LDA) with Gibbs sampling.
+The `qhchina.analytics.topicmodels` module provides Latent Dirichlet Allocation (LDA) with Gibbs sampling for discovering thematic structure in document collections.
 
-## Basic Usage
+## LDAGibbsSampler
 
-The `LDAGibbsSampler` class provides a simple interface for topic modeling:
-
-```python
-from qhchina.preprocessing.segmentation import create_segmenter
-from qhchina.analytics.topicmodels import LDAGibbsSampler
-from qhchina.helpers import load_stopwords
-import numpy as np
-import matplotlib.pyplot as plt
-
-# Example tokenized documents after Chinese word segmentation
-documents = [
-    # Technology document
-    ["人工智能", "正在", "改变", "我们", "的", "生活", "方式", "和", "工作", "效率"],
-    
-    # Healthcare document
-    ["医生", "建议", "患者", "多", "喝", "水", "每天", "适当", "运动"],
-    
-    # Cultural document
-    ["中国", "传统", "文化", "源远流长", "需要", "年轻人", "传承"],
-    
-    # Economic document
-    ["经济", "发展", "需要", "创新", "驱动", "和", "人才", "支撑"],
-    
-    # Education document
-    ["在", "大学", "里", "学习", "不仅", "是", "获取", "知识", "更是", "培养", "能力"]
-]
-
-# Create and fit the model
-# Note: alpha defaults to 50/n_topics as recommended by Griffiths and Steyvers (2004)
-lda = LDAGibbsSampler(
-    n_topics=5,
-    iterations=100,
-    burnin=10,            # Number of initial iterations before alpha optimization
-    log_interval=10
-)
-lda.fit(documents)
-
-# Get all topics with their top words
-topics = lda.get_topics(n_words=10)
-for i, topic in enumerate(topics):
-    print(f"Topic {i}:")
-    for word, prob in topic:
-        print(f"  {word}: {prob:.4f}")
-```
-
-## Hyperparameter Selection
-
-### Alpha and Beta Parameters
-
-The `LDAGibbsSampler` uses default values for hyperparameters based on Griffiths and Steyvers (2004):
-
-- **alpha**: Controls document-topic distributions (default: `50 / n_topics`)
-- **beta**: Controls topic-word distributions (default: `1 / n_topics`)
-
-A higher alpha makes documents more similar in their topic mixtures, while a lower alpha creates more distinct topic distributions per document.
-
-You can override these defaults:
+### Initialization
 
 ```python
-# Override the default alpha and beta
-lda = LDAGibbsSampler(
-    n_topics=5,
-    alpha=0.1,
-    beta=0.01,
-    iterations=1000
-)
+LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=1000, burnin=0, 
+                random_state=None, log_interval=None, min_word_count=1, 
+                max_vocab_size=None, min_word_length=1, stopwords=None, 
+                use_cython=True, estimate_alpha=1)
 ```
 
-## Automatic Alpha Estimation
+### Parameters
 
-The `LDAGibbsSampler` can automatically estimate the alpha parameter during training. Use the `burnin` parameter to specify initial iterations before estimation begins:
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `n_topics` | Number of topics | 10 |
+| `alpha` | Document-topic prior. If None, uses `50/n_topics` (Griffiths & Steyvers, 2004) | None |
+| `beta` | Topic-word prior. If None, uses `1/n_topics` (Griffiths & Steyvers, 2004) | None |
+| `iterations` | Number of Gibbs sampling iterations | 1000 |
+| `burnin` | Initial iterations before alpha optimization | 0 |
+| `random_state` | Random seed for reproducibility | None |
+| `log_interval` | Calculate and print perplexity every N iterations | None |
+| `min_word_count` | Minimum word count to include in vocabulary | 1 |
+| `max_vocab_size` | Maximum vocabulary size | None |
+| `min_word_length` | Minimum word length to include | 1 |
+| `stopwords` | Set of words to exclude | None |
+| `use_cython` | Use Cython acceleration if available | True |
+| `estimate_alpha` | Estimate alpha every N iterations (0 = disable) | 1 |
 
-```python
-lda = LDAGibbsSampler(
-    n_topics=5,
-    iterations=1000,
-    burnin=100,            # Run 100 initial iterations before alpha estimation
-    estimate_alpha=1       # Estimate alpha every 1 iteration (0 to disable)
-)
-```
+### Main Methods
 
-Set `estimate_alpha=0` to disable alpha estimation, or use higher values (e.g., `estimate_alpha=10`) to estimate less frequently.
+#### `fit(documents)`
 
-## Using Stopwords
+Fit the LDA model to documents.
 
-You can improve topic quality by removing common stopwords:
+**Parameters:**
+- `documents` (list): List of tokenized documents (each document is a list of tokens)
 
-```python
-# Load simplified Chinese stopwords
-stopwords = load_stopwords(language="zh_sim")
+#### `get_topics(n_words=10)`
 
-# Create model with stopwords filtering
-lda = LDAGibbsSampler(
-    n_topics=5, 
-    iterations=1000,
-    stopwords=stopwords
-)
-lda.fit(documents)
-```
+Get top words for all topics.
 
-## Analyzing Topics and Documents
+**Parameters:**
+- `n_words` (int): Number of words per topic
 
-The `LDAGibbsSampler` provides several methods to analyze topics and documents:
+**Returns:** (list) List of lists containing (word, probability) tuples
 
-```python
-# Get the top words for a specific topic
-topic_id = 0
-top_words = lda.get_topic_words(topic_id=topic_id, n_words=10)
-print(f"Top words for Topic {topic_id}:")
-for word, prob in top_words:
-    print(f"  {word}: {prob:.4f}")
+#### `get_topic_words(topic_id, n_words=10)`
 
-# Get topic distribution for a specific document
-doc_id = 0
-doc_topics = lda.get_document_topics(doc_id=doc_id, sort_by_prob=True)
-print(f"Topic distribution for document {doc_id}:")
-for topic_id, prob in doc_topics:
-    print(f"  Topic {topic_id}: {prob:.4f}")
+Get top words for a specific topic.
 
-# Get the top documents for a specific topic
-topic_id = 0
-top_docs = lda.get_top_documents(topic_id=topic_id, n_docs=5)
-print(f"Top documents for Topic {topic_id}:")
-for doc_id, prob in top_docs:
-    print(f"  Document {doc_id}: {prob:.4f}")
-```
+**Parameters:**
+- `topic_id` (int): Topic ID
+- `n_words` (int): Number of words to return
 
-## Visualizing Topics
+**Returns:** (list) List of (word, probability) tuples
 
-Visualize the top words for each topic using the built-in plotting functions:
+#### `get_document_topics(doc_id, sort_by_prob=False)`
 
-```python
-# Plot top words for all topics in a single figure (horizontal bars)
-lda.plot_topic_words(
-    n_words=10,
-    figsize=(12, 20),
-    fontsize=12,
-    filename="topics.png",
-    orientation="horizontal",  # or "vertical"
-    dpi=100
-)
+Get topic distribution for a document.
 
-# Create separate plot files for each topic
-lda.plot_topic_words(
-    n_words=10,
-    figsize=(8, 6),
-    fontsize=12,
-    filename="topic.png",
-    separate_files=True,
-    dpi=100
-)
-```
+**Parameters:**
+- `doc_id` (int): Document ID
+- `sort_by_prob` (bool): Sort topics by probability
 
-## Saving and Loading Models
+**Returns:** (list) List of (topic_id, probability) tuples
 
-You can save your trained model and load it later:
+#### `get_top_documents(topic_id, n_docs=10)`
 
-```python
-# Save the trained model
-lda.save("lda_model.npy")
+Get top documents for a topic.
 
-# Load the model later
-loaded_lda = LDAGibbsSampler.load("lda_model.npy")
+**Parameters:**
+- `topic_id` (int): Topic ID
+- `n_docs` (int): Number of documents to return
 
-# Use the loaded model
-topics = loaded_lda.get_topics(n_words=5)
-```
+**Returns:** (list) List of (doc_id, probability) tuples
 
-## Inference on New Documents
+#### `get_topic_distribution()`
 
-Infer topic distributions for new documents:
+Get overall topic distribution across the corpus.
 
-```python
-# New document
-new_doc = ["人工智能", "技术", "在", "医疗", "领域", "大有", "可为"]
+**Returns:** (numpy.ndarray) Topic distribution
 
-# Infer topic distribution
-topic_dist = lda.inference(new_doc, inference_iterations=50)
-print("Topic distribution for new document:")
-for i, prob in enumerate(topic_dist):
-    print(f"  Topic {i}: {prob:.4f}")
-```
+#### `inference(new_doc, inference_iterations=100)`
 
-## Measuring Similarity
+Infer topic distribution for a new document.
 
-Calculate similarity between topics or documents:
+**Parameters:**
+- `new_doc` (list): Tokenized document
+- `inference_iterations` (int): Number of inference iterations
 
-```python
-# Compare two topics
-similarity = lda.topic_similarity(topic_i=0, topic_j=1, metric='jsd')
-print(f"Topic similarity: {similarity:.4f}")
+**Returns:** (numpy.ndarray) Topic distribution
 
-# Get similarity matrix for all topics
-topic_matrix = lda.topic_correlation_matrix(metric='cosine')
+#### `topic_similarity(topic_i, topic_j, metric='jsd')`
 
-# Compare two documents
-doc_sim = lda.document_similarity(doc_i=0, doc_j=1, metric='jsd')
-print(f"Document similarity: {doc_sim:.4f}")
+Calculate similarity between two topics.
 
-# Get similarity matrix for specific documents
-doc_ids = [0, 1, 2, 3]
-doc_matrix = lda.document_similarity_matrix(doc_ids=doc_ids, metric='cosine')
-```
+**Parameters:**
+- `topic_i` (int): First topic ID
+- `topic_j` (int): Second topic ID
+- `metric` (str): Similarity metric ('jsd', 'hellinger', 'cosine', or 'kl')
 
-Available metrics: `'jsd'` (Jensen-Shannon divergence), `'hellinger'` (Hellinger distance), `'cosine'` (cosine similarity), or `'kl'` (KL divergence).
+**Returns:** (float) Similarity score
 
-## Advanced Configuration
+#### `topic_correlation_matrix(metric='jsd')`
 
-The `LDAGibbsSampler` offers several parameters for fine-tuning:
+Calculate pairwise similarity between all topics.
 
-```python
-lda = LDAGibbsSampler(
-    n_topics=10,             # Number of topics
-    alpha=None,              # Document-topic prior (default: 50/n_topics)
-    beta=None,               # Topic-word prior (default: 1/n_topics)
-    iterations=2000,         # Number of Gibbs sampling iterations
-    burnin=200,              # Number of burn-in iterations before estimation
-    random_state=42,         # Random seed for reproducibility
-    log_interval=100,        # Print perplexity every N iterations
-    min_word_count=2,        # Minimum word count to include in vocabulary
-    max_vocab_size=10000,    # Maximum vocabulary size
-    min_word_length=2,       # Minimum word length to include
-    stopwords=stopwords,     # Set of stopwords to exclude
-    use_cython=True,         # Use Cython acceleration if available
-    estimate_alpha=1         # Estimate alpha every N iterations (0 = disable)
-)
-```
+**Parameters:**
+- `metric` (str): Similarity metric
 
-## Performance Optimization
+**Returns:** (numpy.ndarray) Similarity matrix
 
-The `LDAGibbsSampler` can use optimized Cython implementations for faster sampling. By default, the module automatically checks for Cython availability and uses it when possible. If Cython is not available, a warning will be issued, and the pure Python implementation will be used.
+#### `document_similarity(doc_i, doc_j, metric='jsd')`
 
-You can control Cython usage with the `use_cython` parameter:
+Calculate similarity between two documents.
 
-```python
-lda = LDAGibbsSampler(
-    n_topics=10,
-    use_cython=True
-)
-```
+**Parameters:**
+- `doc_i` (int): First document ID
+- `doc_j` (int): Second document ID
+- `metric` (str): Similarity metric
 
-The Cython version typically offers 10-50x better performance than the pure Python implementation, which is particularly valuable for large corpora or many topics.
+**Returns:** (float) Similarity score
 
-## Complete Example
+#### `document_similarity_matrix(doc_ids=None, metric='jsd')`
 
-Here is a complete example that demonstrates many features of the `LDAGibbsSampler`:
+Calculate pairwise similarity between documents.
+
+**Parameters:**
+- `doc_ids` (list): List of document IDs (None for all)
+- `metric` (str): Similarity metric
+
+**Returns:** (numpy.ndarray) Similarity matrix
+
+#### `plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, separate_files=False, dpi=72, orientation='horizontal')`
+
+Plot top words for topics as bar charts.
+
+**Parameters:**
+- `n_words` (int): Number of words per topic
+- `figsize` (tuple): Figure size
+- `fontsize` (int): Font size
+- `filename` (str): Output filename (None for display)
+- `separate_files` (bool): Create separate file for each topic
+- `dpi` (int): Resolution
+- `orientation` (str): Bar orientation ('horizontal' or 'vertical')
+
+#### `save(filepath)` / `load(filepath)`
+
+Save or load model to/from file.
+
+**Parameters:**
+- `filepath` (str): Path to save/load model
+
+## Examples
+
+### Basic Topic Modeling
 
 ```python
 from qhchina.analytics.topicmodels import LDAGibbsSampler
-from qhchina.helpers import load_stopwords, load_texts
-import jieba
-import re
+from qhchina.helpers import load_stopwords
 
 # Load stopwords
 stopwords = load_stopwords("zh_sim")
 
-# Load and preprocess text data
-texts = load_texts([
-    "data/texts/新闻报道.txt", 
-    "data/texts/学术论文.txt", 
-    "data/texts/网络评论.txt", 
-    "data/texts/政府公告.txt"
-])
-documents = []
+# Example tokenized documents
+documents = [
+    ["人工智能", "正在", "改变", "我们", "的", "生活", "方式"],
+    ["医生", "建议", "患者", "多", "喝", "水", "每天", "运动"],
+    ["中国", "传统", "文化", "源远流长", "需要", "传承"],
+    # More documents...
+]
 
-for text in texts:
-    # Basic cleaning
-    text = re.sub(r'[^\w\s]', '', text)
-    
-    # Tokenize with jieba
-    tokens = jieba.cut(text)
-    
-    # Add to documents
-    documents.append(tokens)
-
-# Train the LDA model with default alpha=50/n_topics
+# Create and fit model
 lda = LDAGibbsSampler(
     n_topics=5,
     iterations=1000,
@@ -293,84 +189,39 @@ lda = LDAGibbsSampler(
     log_interval=100,
     stopwords=stopwords,
     min_word_count=2,
-    min_word_length=2,
-    use_cython=True,
     estimate_alpha=1
 )
-
 lda.fit(documents)
 
-# Analyze the model
-print("Topic distribution across corpus:")
-print(lda.get_topic_distribution())
+# Get topics
+topics = lda.get_topics(n_words=10)
+for i, topic in enumerate(topics):
+    print(f"Topic {i}:")
+    for word, prob in topic:
+        print(f"  {word}: {prob:.4f}")
 
 # Visualize topics
-lda.plot_topic_words(
-    n_words=10,
-    figsize=(12, 20),
-    fontsize=12,
-    filename="topics.png",
-    dpi=100
-)
+lda.plot_topic_words(n_words=10, figsize=(12, 20), filename="topics.png")
 
-# Save the model
+# Save model
 lda.save("lda_model.npy")
 ```
 
-## API Reference
-
-### LDAGibbsSampler
+### Analyzing Documents and Topics
 
 ```python
-class LDAGibbsSampler:
-    def __init__(self, n_topics=10, alpha=None, beta=None, iterations=1000, 
-                 burnin=0, random_state=None, log_interval=None, min_word_count=1, 
-                 max_vocab_size=None, min_word_length=1, stopwords=None,
-                 use_cython=True, estimate_alpha=1):
-        """Initialize the LDA model with Gibbs sampling."""
-        
-    def fit(self, documents):
-        """Fit the LDA model to the given documents."""
-        
-    def get_topics(self, n_words=10):
-        """Get the top words for each topic along with their probabilities."""
-        
-    def get_topic_words(self, topic_id, n_words=10):
-        """Get the top n words for a specific topic."""
-        
-    def get_document_topics(self, doc_id, sort_by_prob=False):
-        """Get topic distribution for a specific document."""
-        
-    def get_top_documents(self, topic_id, n_docs=10):
-        """Get the top n documents for a specific topic."""
-        
-    def get_topic_distribution(self):
-        """Get overall topic distribution across the corpus."""
-        
-    def inference(self, new_doc, inference_iterations=100):
-        """Infer topic distribution for a new document."""
-    
-    def topic_similarity(self, topic_i, topic_j, metric='jsd'):
-        """Calculate similarity between two topics."""
-    
-    def topic_correlation_matrix(self, metric='jsd'):
-        """Calculate pairwise similarity between all topics."""
-    
-    def document_similarity(self, doc_i, doc_j, metric='jsd'):
-        """Calculate similarity between two documents."""
-    
-    def document_similarity_matrix(self, doc_ids=None, metric='jsd'):
-        """Calculate pairwise similarity between documents."""
-        
-    def plot_topic_words(self, n_words=10, figsize=(12, 8), fontsize=10, 
-                         filename=None, separate_files=False, dpi=72, 
-                         orientation='horizontal'):
-        """Plot the top words for each topic as a bar chart."""
-        
-    def save(self, filepath):
-        """Save the model to a file."""
-        
-    @classmethod
-    def load(cls, filepath):
-        """Load a model from a file.""" 
+# Get topic distribution for a specific document
+doc_topics = lda.get_document_topics(doc_id=0, sort_by_prob=True)
+print(f"Document 0 topics:")
+for topic_id, prob in doc_topics:
+    print(f"  Topic {topic_id}: {prob:.4f}")
+
+# Infer topics for a new document
+new_doc = ["人工智能", "技术", "医疗", "领域"]
+topic_dist = lda.inference(new_doc, inference_iterations=50)
+print("New document topic distribution:", topic_dist)
+
+# Calculate topic similarity
+similarity = lda.topic_similarity(topic_i=0, topic_j=1, metric='jsd')
+print(f"Topic similarity: {similarity:.4f}")
 ```

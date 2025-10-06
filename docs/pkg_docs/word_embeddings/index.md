@@ -4,28 +4,176 @@ title: Word Embeddings
 permalink: /pkg_docs/word_embeddings/
 ---
 
-# Word Embeddings in qhChina
+# Word Embeddings
 
-This page documents the word embeddings functionality in the qhChina package, with a focus on the customized Word2Vec implementation.
+The `qhchina.analytics.word2vec` module provides Word2Vec implementations for Chinese text analysis, including standard Word2Vec and TempRefWord2Vec for tracking semantic change over time.
 
-## Word2Vec Implementation
-qhChina provides a custom implementation of Word2Vec with both CBOW (Continuous Bag of Words) and Skip-gram architectures, designed specifically for research in humanities and social sciences with Chinese text.
+## Word2Vec
 
-### Basic Usage
+Implementation of Word2Vec with both CBOW and Skip-gram architectures.
+
+### Initialization
+
+```python
+Word2Vec(vector_size=100, window=5, min_word_count=5, sg=1, negative=5, 
+         alpha=0.025, min_alpha=None, ns_exponent=0.75, max_vocab_size=None, 
+         sample=1e-3, shrink_windows=True, seed=1, cbow_mean=True, 
+         use_double_precision=False, use_cython=False, gradient_clip=1.0, 
+         exp_table_size=1000, max_exp=6.0)
+```
+
+### Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `vector_size` | Dimensionality of word vectors | 100 |
+| `window` | Maximum distance between target and context words | 5 |
+| `min_word_count` | Ignores words with frequency below threshold | 5 |
+| `sg` | Training algorithm: 1 for Skip-gram, 0 for CBOW | 1 |
+| `alpha` | Initial learning rate | 0.025 |
+| `negative` | Number of negative samples | 5 |
+| `sample` | Threshold for downsampling frequent words | 1e-3 |
+| `seed` | Random seed for reproducibility | 1 |
+| `cbow_mean` | Use mean (True) or sum (False) for context vectors in CBOW | True |
+| `use_cython` | Use Cython for performance-critical operations | False |
+
+### Main Methods
+
+#### `build_vocab(sentences, update=False)`
+
+Build vocabulary from tokenized sentences.
+
+**Parameters:**
+- `sentences` (list): List of tokenized sentences
+- `update` (bool): Update existing vocabulary instead of replacing
+
+#### `train(sentences, epochs=5, batch_size=None)`
+
+Train the Word2Vec model.
+
+**Parameters:**
+- `sentences` (list): List of tokenized sentences
+- `epochs` (int): Number of training epochs
+- `batch_size` (int): Batch size for training (optional)
+
+#### `get_vector(word)`
+
+Get the vector representation of a word.
+
+**Parameters:**
+- `word` (str): The word to get vector for
+
+**Returns:** (numpy.ndarray) Word vector
+
+#### `most_similar(word, topn=10)`
+
+Find the most similar words.
+
+**Parameters:**
+- `word` (str): Target word
+- `topn` (int): Number of similar words to return
+
+**Returns:** (list) List of (word, similarity) tuples
+
+#### `similarity(word1, word2)`
+
+Calculate cosine similarity between two words.
+
+**Parameters:**
+- `word1` (str): First word
+- `word2` (str): Second word
+
+**Returns:** (float) Cosine similarity score
+
+#### `save(filepath)` / `load(filepath)`
+
+Save or load model to/from file.
+
+**Parameters:**
+- `filepath` (str): Path to save/load model
+
+## TempRefWord2Vec
+
+Specialized implementation for tracking semantic change over time. Creates temporal variants of target words in a single vector space.
+
+### Initialization
+
+```python
+TempRefWord2Vec(corpora, labels, targets, vector_size=100, window=5, 
+                min_word_count=5, sg=1, negative=5, alpha=0.025, seed=1, ...)
+```
+
+### Key Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `corpora` | List of corpora for different time periods (list of lists of sentences) |
+| `labels` | Labels for each time period (list of strings) |
+| `targets` | Words to track for semantic change (list of strings) |
+| Additional parameters | Same as Word2Vec |
+
+### Main Methods
+
+#### `train(calculate_loss=True, batch_size=64)`
+
+Train the temporal reference model.
+
+#### `get_vector(word)`
+
+Get vector for a word (including temporal variants like "word_1980").
+
+#### `calculate_semantic_change(target_word)`
+
+Calculate semantic change for a target word across time periods.
+
+**Parameters:**
+- `target_word` (str): The target word to analyze
+
+**Returns:** (dict) Dictionary mapping transitions to lists of (word, change_score) tuples
+
+## Vector Analysis Functions
+
+From `qhchina.analytics.vectors`:
+
+#### `project_2d(vectors, method='pca', title=None, adjust_text_labels=True, perplexity=30, **kwargs)`
+
+Project word vectors to 2D space for visualization.
+
+**Parameters:**
+- `vectors` (dict): Dictionary mapping words to vectors
+- `method` (str): Projection method ('pca' or 'tsne')
+- `title` (str): Plot title
+- `adjust_text_labels` (bool): Adjust text labels to avoid overlap
+- `perplexity` (int): Perplexity for t-SNE (if using t-SNE)
+
+#### `calculate_bias(dimension_pairs, target_words, model)`
+
+Calculate bias scores along a semantic dimension.
+
+**Parameters:**
+- `dimension_pairs` (list): List of word pairs defining the dimension
+- `target_words` (list): Words to calculate bias for
+- `model`: Word2Vec model
+
+**Returns:** (dict) Mapping of target words to bias scores
+
+#### `align_vectors(model1, model2)`
+
+Align vectors from two models for direct comparison.
+
+**Parameters:**
+- `model1`: Reference Word2Vec model
+- `model2`: Model to align to model1's space
+
+## Examples
+
+### Basic Word2Vec Training
 
 ```python
 from qhchina.analytics.word2vec import Word2Vec
 
-# Initialize a Word2Vec model
-model = Word2Vec(
-    vector_size=100,  # Dimensionality of word vectors
-    window=5,         # Context window size
-    min_word_count=5, # Minimum word frequency threshold
-    sg=1,             # 1 for Skip-gram; 0 for CBOW
-    negative=5,       # Number of negative samples
-    alpha=0.025,      # Initial learning rate
-    seed=42           # Random seed for reproducibility
-)
+# Initialize model
+model = Word2Vec(vector_size=100, window=5, min_word_count=5, sg=1, seed=42)
 
 # Prepare tokenized sentences
 sentences = [
@@ -34,322 +182,51 @@ sentences = [
     # More sentences...
 ]
 
-# Train the model
+# Train model
 model.train(sentences, epochs=5)
 
-# Get word vector
-vector = model.get_vector("电影")
-
-# Find similar words
+# Get similar words
 similar_words = model.most_similar("电影", topn=10)
+for word, score in similar_words:
+    print(f"{word}: {score:.4f}")
+
+# Calculate similarity
+sim = model.similarity("电影", "电视")
+print(f"Similarity: {sim:.4f}")
 ```
 
-### Key Features
-
-#### Architecture Options
-
-- **CBOW (Continuous Bag of Words)**: Predicts the target word from context words
-- **Skip-gram**: Predicts context words from the target word
-
-```python
-# CBOW model (default)
-cbow_model = Word2Vec(sg=0)
-
-# Skip-gram model
-skipgram_model = Word2Vec(sg=1)
-```
-
-#### Training Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `vector_size` | Dimensionality of word vectors (default: 100) |
-| `window` | Maximum distance between target and context words (default: 5) |
-| `min_word_count` | Ignores words with frequency below this threshold (default: 5) |
-| `alpha` | Initial learning rate (default: 0.025) |
-| `min_alpha` | Final learning rate (default: None) |
-| `negative` | Number of negative samples for each positive sample (default: 5) |
-| `ns_exponent` | Exponent for negative sampling distribution (default: 0.75) |
-| `max_vocab_size` | Maximum vocabulary size (default: None) |
-| `sample` | Threshold for downsampling frequent words (default: 1e-3) |
-| `shrink_windows` | Whether to use dynamic window size (default: True) |
-| `seed` | Random seed for reproducibility (default: 1) |
-| `cbow_mean` | Whether to use mean or sum for context word vectors in CBOW (default: True) |
-| `use_double_precision` | Whether to use double precision for calculations (default: False) |
-| `use_cython` | Whether to use Cython for performance-critical operations (default: False) |
-| `gradient_clip` | Clipping value for gradients (default: 1.0) |
-| `exp_table_size` | Size of the precomputed sigmoid table (default: 1000) |
-| `max_exp` | Maximum value in the precomputed sigmoid table (default: 6.0) |
-
-#### Batch Training
-
-The Word2Vec implementation supports batch-based training for better performance:
-
-```python
-# Train with batching
-model.train(sentences, epochs=5, batch_size=64)
-```
-
-#### Advanced Methods
-
-```python
-# Save and load models
-model.save("my_model.model")
-loaded_model = Word2Vec.load("my_model.model")
-
-# Update model with new sentences
-model.build_vocab(new_sentences, update=True)
-model.train(new_sentences, epochs=3)
-
-# Word similarity
-similarity = model.similarity("电影", "电视")
-
-# Get most similar words
-similar_words = model.most_similar("中国", topn=10)
-```
-
-## Temporal Reference Word2Vec
-
-qhChina provides a specialized implementation called `TempRefWord2Vec` for tracking semantic change over time. This model does not require training separate models for each time period. Instead, it creates temporal variants of target words in a single vector space using a specialized training approach.
-
-### Basic Usage
+### Tracking Semantic Change Over Time
 
 ```python
 from qhchina.analytics.word2vec import TempRefWord2Vec
 
 # Prepare corpus data from different time periods
 time_labels = ["1980", "1990", "2000", "2010"]
-corpora = [corpus_1980, corpus_1990, corpus_2000, corpus_2010]
+corpora = [corpus_1980, corpus_1990, corpus_2000, corpus_2010]  # Each is a list of tokenized sentences
 
-# Target words to track for semantic change
-target_words = ["改革", "经济", "科技", "人民"]
+# Words to track for semantic change
+target_words = ["改革", "经济", "科技"]
 
-# Initialize and train the model in one step
+# Initialize and train model
 model = TempRefWord2Vec(
-    corpora=corpora,          # List of corpora for different time periods
-    labels=time_labels,       # Labels for each time period
-    targets=target_words,     # Words to track for semantic change
-    vector_size=256,
+    corpora=corpora,
+    labels=time_labels,
+    targets=target_words,
+    vector_size=100,
     window=5,
-    min_word_count=5,
-    sg=1,                     # Use Skip-gram model
-    negative=10,
+    sg=1,
     seed=42
 )
+model.train(calculate_loss=True)
 
-# Train the model
-model.train(calculate_loss=True, batch_size=64)
-
-# Access temporal variants of words
+# Access temporal variants
 reform_1980s = model.get_vector("改革_1980")
 reform_2010s = model.get_vector("改革_2010")
 
-# Find words similar to a target in a specific time period
-similar_to_reform_1980s = model.most_similar("改革_1980", topn=10)
-similar_to_reform_2010s = model.most_similar("改革_2010", topn=10)
-```
-
-### How It Works
-
-The `TempRefWord2Vec` model works by:
-
-1. Creating temporal variants of target words by appending time period labels (e.g., "改革_1980s", "改革_2010s")
-2. Training a single Word2Vec model with all corpora, but making each target word specific to its time period
-3. Maintaining the shared vector space for all non-target words across all time periods
-4. This allows direct comparison of how a word's semantic associations change over time
-
-### Analyzing Semantic Change
-
-```python
-# Calculate semantic change using the built-in method
-target_word = "人民"
-changes = model.calculate_semantic_change(target_word)
-
-# Apply filtering as needed by the user
-filtered_changes = {}
+# Analyze semantic change
+changes = model.calculate_semantic_change("改革")
 for transition, word_changes in changes.items():
-    # Filter by minimum word length
-    min_length = 2
-    filtered_words = [change for change in word_changes if len(change[0]) >= min_length]
-    
-    # Filter by word frequency/count (requires access to corpus statistics)
-    # min_count = 5
-    # filtered_words = [change for change in filtered_words if corpus_word_count[change[0]] >= min_count]
-    
-    # Take only top N most changed words
-    top_n = 50
-    filtered_words = filtered_words[:top_n]
-    
-    filtered_changes[transition] = filtered_words
-
-# Display words that became more associated with "人民"
-for transition, word_changes in changes.items():
-    print(f"\nTransition: {transition}")
-    
-    # Words with increased similarity (moved towards)
-    print("Words moved towards:")
-    for word, change in word_changes[:10]:
-        print(f"  {word}: {change:.4f}")
-    
-    # Words with decreased similarity (moved away)
-    print("\nWords moved away from:")
-    for word, change in word_changes[-10:]:
-        print(f"  {word}: {change:.4f}")
+    print(f"\n{transition}:")
+    print("Words moved towards:", word_changes[:10])
+    print("Words moved away:", word_changes[-10:])
 ```
-
-### Visualization Examples
-
-You can visualize the semantic change using the standard vector projection tools:
-
-```python
-from qhchina.analytics.vectors import project_2d
-
-# Get vectors for target word across all time periods
-target_word = "改革"
-vectors = {}
-for period in time_labels:
-    temporal_variant = f"{target_word}_{period}"
-    vectors[temporal_variant] = model.get_vector(temporal_variant)
-
-# Add common words to the visualization
-common_words = ["政策", "开放", "经济", "发展", "市场"]
-for word in common_words:
-    vectors[word] = model.get_vector(word)
-
-# Project to 2D
-project_2d(
-    vectors=vectors,
-    method="pca",
-    title=f"Semantic Change of '{target_word}' Over Time",
-    adjust_text_labels=True
-)
-```
-
-## Vector Analysis
-
-qhChina provides tools for analyzing and visualizing word embeddings.
-
-### Vector Projection
-
-```python
-from qhchina.analytics.vectors import project_2d
-
-# Project vectors to 2D space using PCA
-project_2d(
-    vectors={word: model.get_vector(word) for word in ["中国", "美国", "俄罗斯", "日本", "德国"]},
-    method="pca",
-    title="Countries in Vector Space"
-)
-
-# Using t-SNE for better clustering visualization
-project_2d(
-    vectors={word: model.get_vector(word) for word in words_list},
-    method="tsne",
-    perplexity=5,
-    title="t-SNE Projection of Word Vectors"
-)
-```
-
-### Bias Analysis
-
-```python
-from qhchina.analytics.vectors import calculate_bias, project_bias
-
-# Define gender dimension
-gender_pairs = [("男人", "女人"), ("他", "她"), ("父亲", "母亲")]
-
-# Calculate bias scores along gender dimension
-target_words = ["医生", "护士", "工程师", "教师", "科学家"]
-bias_scores = calculate_bias(gender_pairs, target_words, model)
-
-# Project words on the gender dimension
-project_bias(
-    x=gender_pairs,
-    y=None,
-    targets=target_words,
-    word_vectors=model,
-    title="Gender Bias in Profession Words"
-)
-```
-
-### Vector Alignment
-
-When comparing word vectors across different models (e.g., from different training runs), you can align them to enable direct comparison:
-
-```python
-from qhchina.analytics.vectors import align_vectors
-
-# Align model2's vectors to model1's vector space
-align_vectors(model1, model2)
-
-# Now you can directly compare vectors
-vector1 = model1.get_vector("电影")
-vector2 = model2.get_vector("电影")
-```
-
-## Practical Examples
-
-### Analyzing Conceptual Change
-
-```python
-# Initialize model with specific parameters for historical analysis
-model = Word2Vec(
-    vector_size=200,
-    window=10,
-    min_word_count=10,
-    sg=1,
-    negative=10
-)
-
-# Train on early period corpus
-model.build_vocab(early_period_texts)
-model.train(early_period_texts, epochs=5)
-early_model = model.copy()
-
-# Update model with later period corpus
-model.build_vocab(later_period_texts, update=True)
-model.train(later_period_texts, epochs=5)
-
-# Compare semantic neighborhoods
-early_neighbors = early_model.most_similar("革命", topn=20)
-modern_neighbors = model.most_similar("革命", topn=20)
-```
-
-### Creating Semantic Fields
-
-```python
-# Get all words similar to a concept
-economy_terms = model.most_similar("经济", topn=50)
-
-# Find clusters within a semantic field
-from sklearn.cluster import KMeans
-from qhchina.analytics.vectors import cosine_similarity
-
-# Get vectors for economy-related terms
-vectors = [model.get_vector(word) for word, _ in economy_terms]
-
-# Cluster vectors
-kmeans = KMeans(n_clusters=5)
-clusters = kmeans.fit_predict(vectors)
-
-# Group words by cluster
-semantic_fields = {}
-for i, (word, _) in enumerate(economy_terms):
-    cluster = clusters[i]
-    if cluster not in semantic_fields:
-        semantic_fields[cluster] = []
-    semantic_fields[cluster].append(word)
-```
-
-## Performance Considerations
-
-- For large corpora, increase `max_vocab_size` to limit memory usage
-- Use `sample` parameter to downsample frequent words for better results
-- For very large vocabularies, consider filtering words before training
-- Set `shrink_windows=True` for more diverse contexts during training
-
-## References
-
-1. Mikolov, T., Chen, K., Corrado, G., & Dean, J. (2013). Efficient estimation of word representations in vector space. arXiv preprint arXiv:1301.3781.
-2. Mikolov, T., Sutskever, I., Chen, K., Corrado, G. S., & Dean, J. (2013). Distributed representations of words and phrases and their compositionality. Advances in neural information processing systems, 26. 
-3. Hamilton, W. L., Leskovec, J., & Jurafsky, D. (2016). Diachronic word embeddings reveal statistical laws of semantic change. arXiv preprint arXiv:1605.09096. 
