@@ -88,9 +88,9 @@ class LDAGibbsSampler:
             self.beta = beta
             
         if np.isscalar(self.alpha):
-            self.alpha = np.ones(n_topics) * self.alpha
+            self.alpha = np.ones(n_topics, dtype=np.float64) * self.alpha
         else:
-            self.alpha = np.asarray(self.alpha)
+            self.alpha = np.ascontiguousarray(self.alpha, dtype=np.float64)
         
         self.alpha_sum = np.sum(self.alpha)
             
@@ -232,8 +232,8 @@ class LDAGibbsSampler:
         
         max_doc_length = max(self.doc_lengths) if n_docs > 0 else 0
         
-        # Create NumPy array for topic assignments with padding
-        # We'll use -1 as a padding value to indicate positions beyond doc length
+        # Create 2D NumPy array for documents and topic assignments with padding (-1)
+        self.docs_tokens = np.full((n_docs, max_doc_length), -1, dtype=np.int32)
         self.z = np.full((n_docs, max_doc_length), -1, dtype=np.int32)
         self.z_shape = (n_docs, max_doc_length)
         
@@ -243,6 +243,8 @@ class LDAGibbsSampler:
         token_idx = 0
         for d, doc in enumerate(docs_as_ids):
             doc_len = len(doc)
+            # Store document tokens in 2D array
+            self.docs_tokens[d, :doc_len] = doc
             doc_topics = all_topics[token_idx:token_idx+doc_len]
             token_idx += doc_len
             self.z[d, :doc_len] = doc_topics
@@ -311,8 +313,9 @@ class LDAGibbsSampler:
         n_docs = len(self.docs_tokens)
         total_iterations = self.iterations + self.burnin
         
-        if self.use_cython and hasattr(self.lda_sampler, 'seed_rng'):
-            self.lda_sampler.seed_rng(self.random_state)
+        if self.use_cython:
+            if hasattr(self.lda_sampler, 'seed_rng'):
+                self.lda_sampler.seed_rng(self.random_state)
         
         impl_type = "Cython" if self.use_cython else "Python"
         n_iter = total_iterations if self.burnin > 0 else self.iterations
@@ -326,13 +329,14 @@ class LDAGibbsSampler:
             if self.use_cython:
                 self.z = self.lda_sampler.run_iteration(
                     self.n_wt, self.n_dt, self.n_t, self.z, 
-                    self.docs_tokens, self.alpha, self.beta,
+                    self.docs_tokens, self.doc_lengths, self.alpha, self.beta,
                     self.n_topics, self.vocabulary_size
                 )
             else:
                 for d in range(n_docs):
-                    doc = self.docs_tokens[d]
-                    for i, w in enumerate(doc):
+                    doc_len = self.doc_lengths[d]
+                    for i in range(doc_len):
+                        w = self.docs_tokens[d, i]
                         self.z[d, i] = self._sample_topic(d, i, w)
             
             is_burnin = it < self.burnin
@@ -421,7 +425,8 @@ class LDAGibbsSampler:
             else:
                 phi[:, k] = 1.0 / self.vocabulary_size
                 
-        self.phi = phi.T
+        # Ensure phi is C-contiguous after transpose
+        self.phi = np.ascontiguousarray(phi.T)
         
     def fit(self, documents: List[List[str]]) -> 'LDAGibbsSampler':
         """
@@ -475,20 +480,25 @@ class LDAGibbsSampler:
             Perplexity value (lower is better)
         """
         if self.use_cython:
+            # Ensure arrays are C-contiguous for Cython
+            phi_contig = np.ascontiguousarray(self.phi)
+            theta_contig = np.ascontiguousarray(self.theta)
             return self.lda_sampler.calculate_perplexity(
-                self.phi, self.theta, self.docs_tokens
+                phi_contig, theta_contig, self.docs_tokens, self.doc_lengths
             )
         
         log_likelihood = 0
         token_count = 0
         
-        for d, doc in enumerate(self.docs_tokens):
+        for d in range(len(self.doc_lengths)):
+            doc_len = self.doc_lengths[d]
             doc_topics = self.theta[d, :]
             
-            if len(doc) == 0:
+            if doc_len == 0:
                 continue
 
-            for word_id in doc:
+            for i in range(doc_len):
+                word_id = self.docs_tokens[d, i]
                 word_topic_probs = self.phi[:, word_id] 
                 word_prob = np.sum(word_topic_probs * doc_topics)
                 
@@ -497,7 +507,7 @@ class LDAGibbsSampler:
                 else:
                     log_likelihood += np.log(1e-10)
                 
-            token_count += len(doc)
+            token_count += doc_len
         
         if token_count == 0:
             return float('inf')
@@ -578,8 +588,11 @@ class LDAGibbsSampler:
             if hasattr(self.lda_sampler, 'seed_rng'):
                 self.lda_sampler.seed_rng(self.random_state)
             
+            # Convert to numpy array for Cython
+            filtered_doc_array = np.array(filtered_doc, dtype=np.int32)
+            
             return self.lda_sampler.run_inference(
-                self.n_wt, self.n_t, filtered_doc,
+                self.n_wt, self.n_t, filtered_doc_array,
                 self.alpha, self.beta,
                 self.n_topics, self.vocabulary_size,
                 inference_iterations

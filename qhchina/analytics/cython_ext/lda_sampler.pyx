@@ -1,7 +1,10 @@
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
+# cython: boundscheck=False
+# cython: wraparound=False
+# cython: cdivision=True
+# cython: initializedcheck=False
 import numpy as np
 cimport numpy as np
-from libc.stdlib cimport rand, RAND_MAX, srand
 from libc.math cimport log, exp
 from libc.time cimport time
 
@@ -10,8 +13,8 @@ ctypedef np.int32_t INT_t
 ctypedef np.float64_t DOUBLE_t
 
 # Define global buffers for reuse
-cdef double[:] PROB_BUFFER = np.zeros(100, dtype=np.float64)  # Initial size, will be resized if needed
-cdef double[::1] TOPIC_NORMALIZERS  # Buffer for topic normalizers (C-contiguous)
+cdef double[::1] PROB_BUFFER = np.zeros(100, dtype=np.float64)
+cdef double[::1] TOPIC_NORMALIZERS = np.zeros(100, dtype=np.float64)
 cdef double VOCAB_SIZE_BETA = 0.0  # Global to store vocab_size * beta
 
 # Define Xorshift128+ state structure
@@ -34,6 +37,9 @@ cdef void seed_xorshift128plus(unsigned long long seed):
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL
     z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL
     RNG_STATE.s1 = z ^ (z >> 31)
+
+# Seed the RNG at module import time to avoid all-zero state
+seed_xorshift128plus(<unsigned long long>time(NULL))
 
 # Fast Xorshift128+ random number generation (returns double in range [0,1))
 cdef inline double xorshift128plus_random():
@@ -58,6 +64,7 @@ def seed_rng(seed=None):
     else:
         seed_value = <unsigned long long>seed
     seed_xorshift128plus(seed_value)
+
 
 # Function to sample from a multinomial distribution using linear search
 cdef int _sample_multinomial_linear(double* p_cumsum, int length):
@@ -125,6 +132,14 @@ cdef inline void normalize_to_cumsum(double* probs, int length, double p_sum):
     """
     cdef int k
     
+    # Guard against zero or negative p_sum (should not happen with valid data)
+    if p_sum <= 0.0:
+        # Fallback to uniform distribution
+        for k in range(length - 1):
+            probs[k] = (k + 1.0) / length
+        probs[length - 1] = 1.0
+        return
+    
     # Normalize first element
     probs[0] /= p_sum
     
@@ -133,13 +148,13 @@ cdef inline void normalize_to_cumsum(double* probs, int length, double p_sum):
         probs[k] = probs[k-1] + (probs[k] / p_sum)
     probs[length - 1] = 1.0
 
-def sample_topic(np.ndarray[INT_t, ndim=2] n_wt, 
-                np.ndarray[INT_t, ndim=2] n_dt, 
-                np.ndarray[INT_t, ndim=1] n_t, 
-                np.ndarray[INT_t, ndim=2] z,
-                int d, int i, int w, 
-                np.ndarray[DOUBLE_t, ndim=1] alpha, double beta, 
-                int n_topics, int vocab_size):
+cdef inline int sample_topic(INT_t[:, ::1] n_wt, 
+                             INT_t[:, ::1] n_dt, 
+                             INT_t[::1] n_t, 
+                             INT_t[:, ::1] z,
+                             int d, int i, int w, 
+                             DOUBLE_t[::1] alpha, double beta, 
+                             int n_topics):
     """
     Optimized Cython implementation of topic sampling for LDA Gibbs sampler.
     
@@ -154,7 +169,6 @@ def sample_topic(np.ndarray[INT_t, ndim=2] n_wt,
         alpha: Dirichlet prior for document-topic distributions (array)
         beta: Dirichlet prior for topic-word distributions
         n_topics: Number of topics
-        vocab_size: Size of vocabulary
         
     Returns:
         Sampled topic ID
@@ -194,50 +208,53 @@ def sample_topic(np.ndarray[INT_t, ndim=2] n_wt,
     
     return new_topic
     
-def run_iteration(np.ndarray[INT_t, ndim=2] n_wt,
-                 np.ndarray[INT_t, ndim=2] n_dt,
-                 np.ndarray[INT_t, ndim=1] n_t,
-                 np.ndarray[INT_t, ndim=2] z,
-                 list docs_tokens,
-                 np.ndarray[DOUBLE_t, ndim=1] alpha, double beta,
+def run_iteration(INT_t[:, ::1] n_wt,
+                 INT_t[:, ::1] n_dt,
+                 INT_t[::1] n_t,
+                 INT_t[:, ::1] z,
+                 INT_t[:, ::1] docs_tokens,
+                 INT_t[::1] doc_lengths,
+                 DOUBLE_t[::1] alpha, double beta,
                  int n_topics, int vocab_size):
     """
     Run a full iteration of Gibbs sampling over all documents and words.
+    
+    Args:
+        docs_tokens: 2D array with shape (n_docs, max_doc_length), padded with -1
+        doc_lengths: Array of actual document lengths
     """
     global PROB_BUFFER, TOPIC_NORMALIZERS, VOCAB_SIZE_BETA
     cdef int d, i, w, doc_len, num_docs, k
-    cdef list doc
+    
+    # Ensure buffers are correctly sized for n_topics
+    if PROB_BUFFER.shape[0] != n_topics:
+        PROB_BUFFER = np.empty(n_topics, dtype=np.float64)
+    if TOPIC_NORMALIZERS.shape[0] != n_topics:
+        TOPIC_NORMALIZERS = np.empty(n_topics, dtype=np.float64)
     
     # Compute vocab_size_beta once for the entire run
     VOCAB_SIZE_BETA = vocab_size * beta
-    
-    # Ensure buffer is exactly equal to n_topics (the exact size needed)
-    if PROB_BUFFER.shape[0] != n_topics:
-        PROB_BUFFER = np.empty(n_topics, dtype=np.float64)
-    
-    # Initialize or resize the topic normalizers array
-    TOPIC_NORMALIZERS = np.empty(n_topics, dtype=np.float64)
     
     # Pre-compute topic normalizers
     for k in range(n_topics):
         TOPIC_NORMALIZERS[k] = 1.0 / (n_t[k] + VOCAB_SIZE_BETA)
     
-    num_docs = len(docs_tokens)
+    num_docs = docs_tokens.shape[0]
     
     for d in range(num_docs):
-        doc = docs_tokens[d]
-        doc_len = len(doc)
+        doc_len = doc_lengths[d]
         
         for i in range(doc_len):
-            w = doc[i]
-            z[d, i] = sample_topic(n_wt, n_dt, n_t, z, d, i, w, alpha, beta, n_topics, vocab_size)
+            w = docs_tokens[d, i]
+            z[d, i] = sample_topic(n_wt, n_dt, n_t, z, d, i, w, alpha, beta, n_topics)
     
-    return z 
+    return z.base if z.base is not None else np.asarray(z) 
 
 def calculate_perplexity(
-    np.ndarray[DOUBLE_t, ndim=2] phi,     # Topic-word distributions (n_topics, vocab_size)
-    np.ndarray[DOUBLE_t, ndim=2] theta,   # Document-topic distributions (n_docs, n_topics) 
-    list docs_tokens                      # Document tokens as word IDs
+    DOUBLE_t[:, ::1] phi,     # Topic-word distributions (n_topics, vocab_size)
+    DOUBLE_t[:, ::1] theta,   # Document-topic distributions (n_docs, n_topics) 
+    INT_t[:, ::1] docs_tokens, # Document tokens as word IDs (2D array, padded with -1)
+    INT_t[::1] doc_lengths    # Actual document lengths
 ):
     """
     Optimized Cython implementation for perplexity calculation.
@@ -245,29 +262,29 @@ def calculate_perplexity(
     Args:
         phi: Topic-word distributions (n_topics, vocab_size)
         theta: Document-topic distributions (n_docs, n_topics)
-        docs_tokens: List of documents, each containing word IDs
+        docs_tokens: 2D array with shape (n_docs, max_doc_length), padded with -1
+        doc_lengths: Array of actual document lengths
         
     Returns:
         Perplexity value (lower is better)
     """
-    cdef int n_docs = len(docs_tokens)
+    cdef int n_docs = docs_tokens.shape[0]
     cdef int n_topics = phi.shape[0]
-    cdef int d, w, k, doc_len
-    cdef list doc
+    cdef int d, w, k, doc_len, i
     cdef double log_likelihood = 0.0
-    cdef double word_prob, topic_prob
+    cdef double word_prob
     cdef long total_tokens = 0
     
     # For each document
     for d in range(n_docs):
-        doc = docs_tokens[d]
-        doc_len = len(doc)
+        doc_len = doc_lengths[d]
         
         if doc_len == 0:
             continue
             
         # For each word in document
-        for w in doc:
+        for i in range(doc_len):
+            w = docs_tokens[d, i]
             # Calculate P(word|doc) = sum_k P(word|topic_k) * P(topic_k|doc)
             word_prob = 0.0
             for k in range(n_topics):
@@ -289,14 +306,14 @@ def calculate_perplexity(
     return exp(-log_likelihood / total_tokens)
 
 def run_inference(
-    np.ndarray[INT_t, ndim=2] n_wt,           # Word-topic count matrix (vocab_size, n_topics)
-    np.ndarray[INT_t, ndim=1] n_t,            # Topic count vector (n_topics)
-    list new_doc_tokens,                       # New document tokens as word IDs
-    np.ndarray[DOUBLE_t, ndim=1] alpha,       # Dirichlet prior for document-topic distributions
-    double beta,                               # Dirichlet prior for topic-word distributions
-    int n_topics,                              # Number of topics
-    int vocab_size,                            # Size of vocabulary
-    int inference_iterations                   # Number of sampling iterations
+    INT_t[:, ::1] n_wt,           # Word-topic count matrix (vocab_size, n_topics)
+    INT_t[::1] n_t,               # Topic count vector (n_topics)
+    INT_t[::1] new_doc_tokens,    # New document tokens as word IDs
+    DOUBLE_t[::1] alpha,          # Dirichlet prior for document-topic distributions
+    double beta,                  # Dirichlet prior for topic-word distributions
+    int n_topics,                 # Number of topics
+    int vocab_size,               # Size of vocabulary
+    int inference_iterations      # Number of sampling iterations
 ):
     """
     Optimized Cython implementation for inferring topic distribution of a new document.
@@ -314,42 +331,43 @@ def run_inference(
     Returns:
         Document-topic distribution (numpy array of length n_topics)
         
-    Note: RNG should be seeded before calling this function (using seed_rng).
+    Note: RNG is automatically seeded at module import, but can be re-seeded using seed_rng().
     """
     global PROB_BUFFER, TOPIC_NORMALIZERS, VOCAB_SIZE_BETA
     
-    cdef int doc_len = len(new_doc_tokens)
+    cdef int doc_len = new_doc_tokens.shape[0]
     cdef int i, w, k, iteration
     cdef double p_sum, alpha_sum
     cdef int old_topic, new_topic
-    cdef np.ndarray[INT_t, ndim=1] z_doc, n_dt_doc
-    cdef np.ndarray[DOUBLE_t, ndim=1] theta_doc
+    cdef INT_t[::1] z_doc, n_dt_doc
+    cdef DOUBLE_t[::1] theta_doc
     
     # If document is empty, return uniform distribution
     if doc_len == 0:
         return np.ones(n_topics, dtype=np.float64) / n_topics
     
-    # Compute vocab_size_beta once
-    VOCAB_SIZE_BETA = vocab_size * beta
-    
-    # Ensure buffer is exactly equal to n_topics
+    # Ensure buffers are correctly sized for n_topics
     if PROB_BUFFER.shape[0] != n_topics:
         PROB_BUFFER = np.empty(n_topics, dtype=np.float64)
+    if TOPIC_NORMALIZERS.shape[0] != n_topics:
+        TOPIC_NORMALIZERS = np.empty(n_topics, dtype=np.float64)
     
-    # Initialize topic normalizers array
-    TOPIC_NORMALIZERS = np.empty(n_topics, dtype=np.float64)
+    # Compute vocab_size_beta once
+    VOCAB_SIZE_BETA = vocab_size * beta
     
     # Pre-compute topic normalizers from the trained model
     for k in range(n_topics):
         TOPIC_NORMALIZERS[k] = 1.0 / (n_t[k] + VOCAB_SIZE_BETA)
     
     # Initialize topic assignments randomly for the new document
-    z_doc = np.empty(doc_len, dtype=np.int32)
+    z_doc_arr = np.empty(doc_len, dtype=np.int32)
+    z_doc = z_doc_arr
     for i in range(doc_len):
         z_doc[i] = <int>(xorshift128plus_random() * n_topics)
     
     # Initialize document-topic counts for the new document
-    n_dt_doc = np.zeros(n_topics, dtype=np.int32)
+    n_dt_doc_arr = np.zeros(n_topics, dtype=np.int32)
+    n_dt_doc = n_dt_doc_arr
     for i in range(doc_len):
         n_dt_doc[z_doc[i]] += 1
     
@@ -385,8 +403,9 @@ def run_inference(
             z_doc[i] = new_topic
             n_dt_doc[new_topic] += 1
     
-    theta_doc = np.empty(n_topics, dtype=np.float64)
+    theta_doc_arr = np.empty(n_topics, dtype=np.float64)
+    theta_doc = theta_doc_arr
     for k in range(n_topics):
         theta_doc[k] = (n_dt_doc[k] + alpha[k]) / (doc_len + alpha_sum)
     
-    return theta_doc 
+    return theta_doc_arr 
