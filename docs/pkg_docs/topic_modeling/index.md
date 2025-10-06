@@ -136,7 +136,11 @@ Calculate similarity between two topics.
 **Parameters:**
 - `topic_i` (int): First topic ID
 - `topic_j` (int): Second topic ID
-- `metric` (str): Similarity metric ('jsd', 'hellinger', 'cosine', or 'kl')
+- `metric` (str): Similarity metric. Available options:
+  - `'jsd'` - Jensen-Shannon Divergence
+  - `'hellinger'` - Hellinger Distance
+  - `'cosine'` - Cosine Similarity
+  - `'kl'` - Kullback-Leibler Divergence
 
 **Returns:** (float) Similarity score
 

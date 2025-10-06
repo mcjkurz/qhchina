@@ -19,7 +19,10 @@ load_fonts(target_font='Noto Sans CJK TC', verbose=False)
 Load CJK fonts into matplotlib and set a default font.
 
 **Parameters:**
-- `target_font` (str): Font name or alias to set as default. Options: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
+- `target_font` (str): Font name or alias to set as default. Options:
+  - Bundled fonts: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
+  - Custom font: Path to your own font file (`.otf` or `.ttf`)
+  - `None`: Load bundled fonts only without setting a default
 - `verbose` (bool): Print detailed loading information
 
 <br>
@@ -31,7 +34,9 @@ set_font(font='Noto Sans CJK TC')
 Set the matplotlib font for Chinese text rendering.
 
 **Parameters:**
-- `font` (str): Font name or alias (same options as `load_fonts`)
+- `font` (str): Font name, alias, or path to font file. Options:
+  - Bundled fonts: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
+  - Custom font: Path to your own font file (`.otf` or `.ttf`)
 
 <br>
 
@@ -155,7 +160,11 @@ load_stopwords(language='zh_sim')
 Load stopwords for filtering.
 
 **Parameters:**
-- `language` (str): Language code (`'zh_sim'` for Simplified Chinese, `'zh_tr'` for Traditional Chinese)
+- `language` (str): Language code. Available options:
+  - `'zh_sim'` - Simplified Chinese
+  - `'zh_tr'` - Traditional Chinese
+  - `'zh_cl_sim'` - Classical Chinese (Simplified)
+  - `'zh_cl_tr'` - Classical Chinese (Traditional)
 
 **Returns:** (set) Set of stopwords
 
@@ -191,7 +200,7 @@ Split text or a list of tokens into chunks with optional overlap.
 ### Basic Font Setup
 
 ```python
-from qhchina.helpers import load_fonts
+from qhchina.helpers import load_fonts, set_font
 import matplotlib.pyplot as plt
 
 # Load fonts and set Traditional Chinese serif as default
@@ -202,6 +211,25 @@ plt.figure(figsize=(8, 6))
 plt.title('中國古典詩歌分析')
 plt.xlabel('時間')
 plt.ylabel('頻率')
+plt.show()
+```
+
+### Using Custom Fonts
+
+```python
+from qhchina.helpers import set_font
+import matplotlib.pyplot as plt
+
+# Use your own font file
+set_font('/path/to/your/custom-font.otf')
+
+# Or set it when loading fonts
+from qhchina.helpers import load_fonts
+load_fonts(target_font='/path/to/your/custom-font.ttf')
+
+# Now your plots will use the custom font
+plt.figure(figsize=(8, 6))
+plt.title('使用自定義字體')
 plt.show()
 ```
 
