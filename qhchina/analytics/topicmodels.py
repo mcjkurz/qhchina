@@ -51,6 +51,30 @@ class LDAGibbsSampler:
             use_cython: Whether to use Cython acceleration if available (default: True)
             estimate_alpha: Frequency for estimating alpha (0 = no estimation; default 1 = after every iteration, 2 = after every 2 iterations, etc.)
         """
+        # Validate parameters
+        if not isinstance(n_topics, int) or n_topics <= 0:
+            raise ValueError(f"n_topics must be a positive integer, got {n_topics}")
+        if alpha is not None and not (np.isscalar(alpha) or isinstance(alpha, (list, tuple, np.ndarray))):
+            raise ValueError(f"alpha must be a scalar or array-like, got {type(alpha)}")
+        if alpha is not None:
+            alpha_array = np.atleast_1d(alpha)
+            if np.any(alpha_array <= 0):
+                raise ValueError(f"alpha must be positive, got values <= 0")
+        if beta is not None and (not np.isscalar(beta) or beta <= 0):
+            raise ValueError(f"beta must be a positive scalar, got {beta}")
+        if not isinstance(iterations, int) or iterations <= 0:
+            raise ValueError(f"iterations must be a positive integer, got {iterations}")
+        if not isinstance(burnin, int) or burnin < 0:
+            raise ValueError(f"burnin must be a non-negative integer, got {burnin}")
+        if not isinstance(min_word_count, int) or min_word_count < 1:
+            raise ValueError(f"min_word_count must be a positive integer, got {min_word_count}")
+        if not isinstance(min_word_length, int) or min_word_length < 1:
+            raise ValueError(f"min_word_length must be a positive integer, got {min_word_length}")
+        if max_vocab_size is not None and (not isinstance(max_vocab_size, int) or max_vocab_size <= 0):
+            raise ValueError(f"max_vocab_size must be a positive integer or None, got {max_vocab_size}")
+        if not isinstance(estimate_alpha, int) or estimate_alpha < 0:
+            raise ValueError(f"estimate_alpha must be a non-negative integer, got {estimate_alpha}")
+        
         self.n_topics = n_topics
         # Use Griffiths and Steyvers (2004) heuristic if alpha is None
         if alpha is None:
@@ -167,10 +191,22 @@ class LDAGibbsSampler:
         id_to_word = {idx: word for word, idx in word_to_id.items()}
         
         docs_as_ids = []
-        for doc in documents:
+        short_doc_count = 0
+        for i, doc in enumerate(documents):
             doc_ids = [word_to_id[word] for word in doc if word in word_to_id]
             if doc_ids:
                 docs_as_ids.append(doc_ids)
+                # Warn about short documents after filtering
+                if len(doc_ids) < 50:
+                    short_doc_count += 1
+        
+        # Issue a single warning for all short documents
+        if short_doc_count > 0:
+            warnings.warn(
+                f"{short_doc_count} document(s) have fewer than 50 tokens after filtering. "
+                f"This may affect topic model quality, but training will continue.",
+                UserWarning
+            )
 
         return docs_as_ids, word_to_id, id_to_word
     
@@ -393,10 +429,31 @@ class LDAGibbsSampler:
             
         Returns:
             The fitted model instance (self)
-        """        
+        """
+        # Validate input documents
+        if not isinstance(documents, list):
+            raise TypeError(f"documents must be a list, got {type(documents)}")
+        if len(documents) == 0:
+            raise ValueError("documents cannot be empty")
+        
+        # Check that all documents are lists and not empty
+        for i, doc in enumerate(documents):
+            if not isinstance(doc, list):
+                raise TypeError(f"Document {i} must be a list, got {type(doc)}")
+            if len(doc) == 0:
+                raise ValueError(f"Document {i} is empty. All documents must contain at least one token.")
+        
         self.docs_tokens, self.word_to_id, self.id_to_word = self.preprocess(documents)
         self.vocabulary = list(self.word_to_id.keys())
         self.vocabulary_size = len(self.vocabulary)
+        
+        # Check that preprocessing left us with valid data
+        if self.vocabulary_size == 0:
+            raise ValueError("Vocabulary is empty after preprocessing. Check your min_word_count, "
+                           "min_word_length, and stopwords settings.")
+        if len(self.docs_tokens) == 0:
+            raise ValueError("All documents were filtered out during preprocessing. "
+                           "Check your vocabulary filtering settings.")
         
         print(f"Vocabulary size: {self.vocabulary_size}")
         print(f"Number of documents: {len(self.docs_tokens)}")
@@ -501,6 +558,14 @@ class LDAGibbsSampler:
         Returns:
             Topic distribution for the document
         """
+        # Validate inputs
+        if not isinstance(new_doc, list):
+            raise TypeError(f"new_doc must be a list, got {type(new_doc)}")
+        if len(new_doc) == 0:
+            raise ValueError("new_doc cannot be empty")
+        if not isinstance(inference_iterations, int) or inference_iterations <= 0:
+            raise ValueError(f"inference_iterations must be a positive integer, got {inference_iterations}")
+        
         filtered_doc = [self.word_to_id[w] for w in new_doc if w in self.word_to_id]
         
         if not filtered_doc:
