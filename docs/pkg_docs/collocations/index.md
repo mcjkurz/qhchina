@@ -47,6 +47,7 @@ Find words that co-occur with target words more frequently than expected by chan
 - `obs_global`: Total frequency of the collocate
 - `p_value`: Statistical significance of the association
 
+<br>
 
 ```python
 cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, 
@@ -74,6 +75,8 @@ Create a co-occurrence matrix from a collection of documents.
 - If `as_dataframe=True`: pandas DataFrame with rows and columns labeled by vocabulary
 - If `as_dataframe=False` and `use_sparse=False`: tuple of (numpy array, word_to_index dictionary)
 - If `as_dataframe=False` and `use_sparse=True`: tuple of (scipy sparse matrix, word_to_index dictionary)
+
+<br>
 
 ## Examples
 

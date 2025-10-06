@@ -46,6 +46,7 @@ Fit the LDA model to documents.
 **Parameters:**
 - `documents` (list): List of tokenized documents (each document is a list of tokens)
 
+<br>
 
 ```python
 get_topics(n_words=10)
@@ -58,6 +59,7 @@ Get top words for all topics.
 
 **Returns:** (list) List of lists containing (word, probability) tuples
 
+<br>
 
 ```python
 get_topic_words(topic_id, n_words=10)
@@ -71,6 +73,7 @@ Get top words for a specific topic.
 
 **Returns:** (list) List of (word, probability) tuples
 
+<br>
 
 ```python
 get_document_topics(doc_id, sort_by_prob=False)
@@ -84,6 +87,7 @@ Get topic distribution for a document.
 
 **Returns:** (list) List of (topic_id, probability) tuples
 
+<br>
 
 ```python
 get_top_documents(topic_id, n_docs=10)
@@ -97,6 +101,7 @@ Get top documents for a topic.
 
 **Returns:** (list) List of (doc_id, probability) tuples
 
+<br>
 
 ```python
 get_topic_distribution()
@@ -106,6 +111,7 @@ Get overall topic distribution across the corpus.
 
 **Returns:** (numpy.ndarray) Topic distribution
 
+<br>
 
 ```python
 inference(new_doc, inference_iterations=100)
@@ -119,6 +125,7 @@ Infer topic distribution for a new document.
 
 **Returns:** (numpy.ndarray) Topic distribution
 
+<br>
 
 ```python
 topic_similarity(topic_i, topic_j, metric='jsd')
@@ -133,6 +140,7 @@ Calculate similarity between two topics.
 
 **Returns:** (float) Similarity score
 
+<br>
 
 ```python
 topic_correlation_matrix(metric='jsd')
@@ -145,6 +153,7 @@ Calculate pairwise similarity between all topics.
 
 **Returns:** (numpy.ndarray) Similarity matrix
 
+<br>
 
 ```python
 document_similarity(doc_i, doc_j, metric='jsd')
@@ -159,6 +168,7 @@ Calculate similarity between two documents.
 
 **Returns:** (float) Similarity score
 
+<br>
 
 ```python
 document_similarity_matrix(doc_ids=None, metric='jsd')
@@ -172,6 +182,7 @@ Calculate pairwise similarity between documents.
 
 **Returns:** (numpy.ndarray) Similarity matrix
 
+<br>
 
 ```python
 plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, 
@@ -189,6 +200,7 @@ Plot top words for topics as bar charts.
 - `dpi` (int): Resolution
 - `orientation` (str): Bar orientation ('horizontal' or 'vertical')
 
+<br>
 
 ```python
 save(filepath)
@@ -202,6 +214,8 @@ Save or load model to/from file.
 
 **Parameters:**
 - `filepath` (str): Path to save/load model
+
+<br>
 
 ## Examples
 

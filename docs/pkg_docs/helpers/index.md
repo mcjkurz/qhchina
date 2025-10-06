@@ -22,6 +22,7 @@ Load CJK fonts into matplotlib and set a default font.
 - `target_font` (str): Font name or alias to set as default. Options: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
 - `verbose` (bool): Print detailed loading information
 
+<br>
 
 ```python
 set_font(font='Noto Sans CJK TC')
@@ -32,6 +33,7 @@ Set the matplotlib font for Chinese text rendering.
 **Parameters:**
 - `font` (str): Font name or alias (same options as `load_fonts`)
 
+<br>
 
 ```python
 current_font()
@@ -41,6 +43,7 @@ Get the currently active font name.
 
 **Returns:** (str) Current font name
 
+<br>
 
 ```python
 list_available_fonts()
@@ -50,6 +53,7 @@ Get dictionary of bundled font files and their internal names.
 
 **Returns:** (dict) Mapping of font file names to font names
 
+<br>
 
 ```python
 list_font_aliases()
@@ -58,6 +62,8 @@ list_font_aliases()
 Get dictionary of font aliases and their corresponding names.
 
 **Returns:** (dict) Mapping of aliases to full font names
+
+<br>
 
 ### Available Fonts
 
@@ -126,6 +132,7 @@ Load text from a single file.
 
 **Returns:** (str) Text content of the file
 
+<br>
 
 ```python
 load_texts(filepaths, encoding='utf-8')
@@ -139,6 +146,7 @@ Load text from multiple files.
 
 **Returns:** (list) List of text contents
 
+<br>
 
 ```python
 load_stopwords(language='zh_sim')
@@ -151,6 +159,7 @@ Load stopwords for filtering.
 
 **Returns:** (set) Set of stopwords
 
+<br>
 
 ```python
 get_stopword_languages()
@@ -160,6 +169,7 @@ Get all available stopword language codes.
 
 **Returns:** (list) List of available language codes
 
+<br>
 
 ```python
 split_into_chunks(sequence, chunk_size, overlap=0.0)
@@ -173,6 +183,8 @@ Split text or a list of tokens into chunks with optional overlap.
 - `overlap` (float): Fraction of overlap between consecutive chunks (0.0 to 1.0)
 
 **Returns:** (list) List of chunks
+
+<br>
 
 ## Examples
 
