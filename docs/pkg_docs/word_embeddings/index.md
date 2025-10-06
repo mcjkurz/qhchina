@@ -47,6 +47,7 @@ Build vocabulary from tokenized sentences.
 - `sentences` (list): List of tokenized sentences
 - `update` (bool): Update existing vocabulary instead of replacing
 
+<br>
 
 ```python
 train(sentences, epochs=5, batch_size=None)
@@ -59,6 +60,7 @@ Train the Word2Vec model.
 - `epochs` (int): Number of training epochs
 - `batch_size` (int): Batch size for training (optional)
 
+<br>
 
 ```python
 get_vector(word)
@@ -71,6 +73,7 @@ Get the vector representation of a word.
 
 **Returns:** (numpy.ndarray) Word vector
 
+<br>
 
 ```python
 most_similar(word, topn=10)
@@ -84,6 +87,7 @@ Find the most similar words.
 
 **Returns:** (list) List of (word, similarity) tuples
 
+<br>
 
 ```python
 similarity(word1, word2)
@@ -97,6 +101,7 @@ Calculate cosine similarity between two words.
 
 **Returns:** (float) Cosine similarity score
 
+<br>
 
 ```python
 save(filepath)
@@ -110,6 +115,8 @@ Save or load model to/from file.
 
 **Parameters:**
 - `filepath` (str): Path to save/load model
+
+<br>
 
 ## TempRefWord2Vec
 
@@ -137,6 +144,7 @@ train(calculate_loss=True, batch_size=64)
 
 Train the temporal reference model.
 
+<br>
 
 ```python
 get_vector(word)
@@ -144,6 +152,7 @@ get_vector(word)
 
 Get vector for a word (including temporal variants like "word_1980").
 
+<br>
 
 ```python
 calculate_semantic_change(target_word)
@@ -155,6 +164,8 @@ Calculate semantic change for a target word across time periods.
 - `target_word` (str): The target word to analyze
 
 **Returns:** (dict) Dictionary mapping transitions to lists of (word, change_score) tuples
+
+<br>
 
 ## Vector Analysis Functions
 
@@ -174,6 +185,7 @@ Project word vectors to 2D space for visualization.
 - `adjust_text_labels` (bool): Adjust text labels to avoid overlap
 - `perplexity` (int): Perplexity for t-SNE (if using t-SNE)
 
+<br>
 
 ```python
 calculate_bias(dimension_pairs, target_words, model)
@@ -188,6 +200,7 @@ Calculate bias scores along a semantic dimension.
 
 **Returns:** (dict) Mapping of target words to bias scores
 
+<br>
 
 ```python
 align_vectors(model1, model2)
@@ -198,6 +211,8 @@ Align vectors from two models for direct comparison.
 **Parameters:**
 - `model1`: Reference Word2Vec model
 - `model2`: Model to align to model1's space
+
+<br>
 
 ## Examples
 
