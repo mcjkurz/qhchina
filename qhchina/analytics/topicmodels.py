@@ -136,6 +136,9 @@ class LDAGibbsSampler:
         # Results
         self.theta = None  # Document-topic distributions
         self.phi = None    # Topic-word distributions
+        
+        # Private thresholds for internal processing
+        self._min_doc_length = 50  # Minimum document length threshold for warnings
     
     def _attempt_cython_import(self) -> bool:
         """
@@ -197,13 +200,13 @@ class LDAGibbsSampler:
             if doc_ids:
                 docs_as_ids.append(doc_ids)
                 # Warn about short documents after filtering
-                if len(doc_ids) < 50:
+                if len(doc_ids) < self._min_doc_length:
                     short_doc_count += 1
         
         # Issue a single warning for all short documents
         if short_doc_count > 0:
             warnings.warn(
-                f"{short_doc_count} document(s) have fewer than 50 tokens after filtering. "
+                f"{short_doc_count} document(s) have fewer than {self._min_doc_length} tokens after filtering. "
                 f"This may affect topic model quality, but training will continue.",
                 UserWarning
             )
