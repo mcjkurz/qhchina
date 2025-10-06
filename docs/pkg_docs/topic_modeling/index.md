@@ -21,32 +21,34 @@ LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=1000, burnin=0,
 
 ### Parameters
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `n_topics` | Number of topics | 10 |
-| `alpha` | Document-topic prior. If None, uses `50/n_topics` (Griffiths & Steyvers, 2004) | None |
-| `beta` | Topic-word prior. If None, uses `1/n_topics` (Griffiths & Steyvers, 2004) | None |
-| `iterations` | Number of Gibbs sampling iterations | 1000 |
-| `burnin` | Initial iterations before alpha optimization | 0 |
-| `random_state` | Random seed for reproducibility | None |
-| `log_interval` | Calculate and print perplexity every N iterations | None |
-| `min_word_count` | Minimum word count to include in vocabulary | 1 |
-| `max_vocab_size` | Maximum vocabulary size | None |
-| `min_word_length` | Minimum word length to include | 1 |
-| `stopwords` | Set of words to exclude | None |
-| `use_cython` | Use Cython acceleration if available | True |
-| `estimate_alpha` | Estimate alpha every N iterations (0 = disable) | 1 |
+- `n_topics` (int): Number of topics (default: 10)
+- `alpha` (float): Document-topic prior. If None, uses `50/n_topics` (Griffiths & Steyvers, 2004) (default: None)
+- `beta` (float): Topic-word prior. If None, uses `1/n_topics` (Griffiths & Steyvers, 2004) (default: None)
+- `iterations` (int): Number of Gibbs sampling iterations (default: 1000)
+- `burnin` (int): Initial iterations before alpha optimization (default: 0)
+- `random_state` (int): Random seed for reproducibility (default: None)
+- `log_interval` (int): Calculate and print perplexity every N iterations (default: None)
+- `min_word_count` (int): Minimum word count to include in vocabulary (default: 1)
+- `max_vocab_size` (int): Maximum vocabulary size (default: None)
+- `min_word_length` (int): Minimum word length to include (default: 1)
+- `stopwords` (set): Set of words to exclude (default: None)
+- `use_cython` (bool): Use Cython acceleration if available (default: True)
+- `estimate_alpha` (int): Estimate alpha every N iterations (0 = disable) (default: 1)
 
 ### Main Methods
 
-#### `fit(documents)`
+```python
+fit(documents)
+```
 
 Fit the LDA model to documents.
 
 **Parameters:**
 - `documents` (list): List of tokenized documents (each document is a list of tokens)
 
-#### `get_topics(n_words=10)`
+```python
+get_topics(n_words=10)
+```
 
 Get top words for all topics.
 
@@ -55,7 +57,9 @@ Get top words for all topics.
 
 **Returns:** (list) List of lists containing (word, probability) tuples
 
-#### `get_topic_words(topic_id, n_words=10)`
+```python
+get_topic_words(topic_id, n_words=10)
+```
 
 Get top words for a specific topic.
 
@@ -65,7 +69,9 @@ Get top words for a specific topic.
 
 **Returns:** (list) List of (word, probability) tuples
 
-#### `get_document_topics(doc_id, sort_by_prob=False)`
+```python
+get_document_topics(doc_id, sort_by_prob=False)
+```
 
 Get topic distribution for a document.
 
@@ -75,7 +81,9 @@ Get topic distribution for a document.
 
 **Returns:** (list) List of (topic_id, probability) tuples
 
-#### `get_top_documents(topic_id, n_docs=10)`
+```python
+get_top_documents(topic_id, n_docs=10)
+```
 
 Get top documents for a topic.
 
@@ -85,13 +93,17 @@ Get top documents for a topic.
 
 **Returns:** (list) List of (doc_id, probability) tuples
 
-#### `get_topic_distribution()`
+```python
+get_topic_distribution()
+```
 
 Get overall topic distribution across the corpus.
 
 **Returns:** (numpy.ndarray) Topic distribution
 
-#### `inference(new_doc, inference_iterations=100)`
+```python
+inference(new_doc, inference_iterations=100)
+```
 
 Infer topic distribution for a new document.
 
@@ -101,7 +113,9 @@ Infer topic distribution for a new document.
 
 **Returns:** (numpy.ndarray) Topic distribution
 
-#### `topic_similarity(topic_i, topic_j, metric='jsd')`
+```python
+topic_similarity(topic_i, topic_j, metric='jsd')
+```
 
 Calculate similarity between two topics.
 
@@ -112,7 +126,9 @@ Calculate similarity between two topics.
 
 **Returns:** (float) Similarity score
 
-#### `topic_correlation_matrix(metric='jsd')`
+```python
+topic_correlation_matrix(metric='jsd')
+```
 
 Calculate pairwise similarity between all topics.
 
@@ -121,7 +137,9 @@ Calculate pairwise similarity between all topics.
 
 **Returns:** (numpy.ndarray) Similarity matrix
 
-#### `document_similarity(doc_i, doc_j, metric='jsd')`
+```python
+document_similarity(doc_i, doc_j, metric='jsd')
+```
 
 Calculate similarity between two documents.
 
@@ -132,7 +150,9 @@ Calculate similarity between two documents.
 
 **Returns:** (float) Similarity score
 
-#### `document_similarity_matrix(doc_ids=None, metric='jsd')`
+```python
+document_similarity_matrix(doc_ids=None, metric='jsd')
+```
 
 Calculate pairwise similarity between documents.
 
@@ -142,7 +162,9 @@ Calculate pairwise similarity between documents.
 
 **Returns:** (numpy.ndarray) Similarity matrix
 
-#### `plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, separate_files=False, dpi=72, orientation='horizontal')`
+```python
+plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, separate_files=False, dpi=72, orientation='horizontal')
+```
 
 Plot top words for topics as bar charts.
 
@@ -155,7 +177,13 @@ Plot top words for topics as bar charts.
 - `dpi` (int): Resolution
 - `orientation` (str): Bar orientation ('horizontal' or 'vertical')
 
-#### `save(filepath)` / `load(filepath)`
+```python
+save(filepath)
+```
+
+```python
+load(filepath)
+```
 
 Save or load model to/from file.
 

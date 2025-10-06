@@ -10,7 +10,9 @@ The `qhchina.preprocessing` module provides Chinese text segmentation (word toke
 
 ## Creating a Segmenter
 
-### `create_segmenter(backend='spacy', strategy='whole', chunk_size=512, sentence_end_pattern=r"([。！？\.!?……]+)", **kwargs)`
+```python
+create_segmenter(backend='spacy', strategy='whole', chunk_size=512, sentence_end_pattern=r"([。！？\.!?……]+)", **kwargs)
+```
 
 Factory function to create a segmenter based on the specified backend.
 
@@ -86,7 +88,9 @@ Uses Large Language Models via API services (e.g., OpenAI).
 
 All segmenters have the following method:
 
-### `segment(text)`
+```python
+segment(text)
+```
 
 Segment text into tokens.
 

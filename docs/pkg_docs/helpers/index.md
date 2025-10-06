@@ -12,7 +12,9 @@ The `qhchina.helpers` module provides utilities for font management and text loa
 
 ### Functions
 
-#### `load_fonts(target_font='Noto Sans CJK TC', verbose=False)`
+```python
+load_fonts(target_font='Noto Sans CJK TC', verbose=False)
+```
 
 Load CJK fonts into matplotlib and set a default font.
 
@@ -20,26 +22,34 @@ Load CJK fonts into matplotlib and set a default font.
 - `target_font` (str): Font name or alias to set as default. Options: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
 - `verbose` (bool): Print detailed loading information
 
-#### `set_font(font='Noto Sans CJK TC')`
+```python
+set_font(font='Noto Sans CJK TC')
+```
 
 Set the matplotlib font for Chinese text rendering.
 
 **Parameters:**
 - `font` (str): Font name or alias (same options as `load_fonts`)
 
-#### `current_font()`
+```python
+current_font()
+```
 
 Get the currently active font name.
 
 **Returns:** (str) Current font name
 
-#### `list_available_fonts()`
+```python
+list_available_fonts()
+```
 
 Get dictionary of bundled font files and their internal names.
 
 **Returns:** (dict) Mapping of font file names to font names
 
-#### `list_font_aliases()`
+```python
+list_font_aliases()
+```
 
 Get dictionary of font aliases and their corresponding names.
 
@@ -57,7 +67,9 @@ Get dictionary of font aliases and their corresponding names.
 
 ### Functions
 
-#### `load_text(filepath, encoding='utf-8')`
+```python
+load_text(filepath, encoding='utf-8')
+```
 
 Load text from a single file.
 
@@ -67,7 +79,9 @@ Load text from a single file.
 
 **Returns:** (str) Text content of the file
 
-#### `load_texts(filepaths, encoding='utf-8')`
+```python
+load_texts(filepaths, encoding='utf-8')
+```
 
 Load text from multiple files.
 
@@ -77,7 +91,9 @@ Load text from multiple files.
 
 **Returns:** (list) List of text contents
 
-#### `load_stopwords(language='zh_sim')`
+```python
+load_stopwords(language='zh_sim')
+```
 
 Load stopwords for filtering.
 
@@ -86,13 +102,17 @@ Load stopwords for filtering.
 
 **Returns:** (set) Set of stopwords
 
-#### `get_stopword_languages()`
+```python
+get_stopword_languages()
+```
 
 Get all available stopword language codes.
 
 **Returns:** (list) List of available language codes
 
-#### `split_into_chunks(sequence, chunk_size, overlap=0.0)`
+```python
+split_into_chunks(sequence, chunk_size, overlap=0.0)
+```
 
 Split text or a list of tokens into chunks with optional overlap.
 

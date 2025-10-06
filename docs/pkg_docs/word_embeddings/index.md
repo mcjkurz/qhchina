@@ -24,22 +24,22 @@ Word2Vec(vector_size=100, window=5, min_word_count=5, sg=1, negative=5,
 
 ### Key Parameters
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `vector_size` | Dimensionality of word vectors | 100 |
-| `window` | Maximum distance between target and context words | 5 |
-| `min_word_count` | Ignores words with frequency below threshold | 5 |
-| `sg` | Training algorithm: 1 for Skip-gram, 0 for CBOW | 1 |
-| `alpha` | Initial learning rate | 0.025 |
-| `negative` | Number of negative samples | 5 |
-| `sample` | Threshold for downsampling frequent words | 1e-3 |
-| `seed` | Random seed for reproducibility | 1 |
-| `cbow_mean` | Use mean (True) or sum (False) for context vectors in CBOW | True |
-| `use_cython` | Use Cython for performance-critical operations | False |
+- `vector_size` (int): Dimensionality of word vectors (default: 100)
+- `window` (int): Maximum distance between target and context words (default: 5)
+- `min_word_count` (int): Ignores words with frequency below threshold (default: 5)
+- `sg` (int): Training algorithm: 1 for Skip-gram, 0 for CBOW (default: 1)
+- `alpha` (float): Initial learning rate (default: 0.025)
+- `negative` (int): Number of negative samples (default: 5)
+- `sample` (float): Threshold for downsampling frequent words (default: 1e-3)
+- `seed` (int): Random seed for reproducibility (default: 1)
+- `cbow_mean` (bool): Use mean (True) or sum (False) for context vectors in CBOW (default: True)
+- `use_cython` (bool): Use Cython for performance-critical operations (default: False)
 
 ### Main Methods
 
-#### `build_vocab(sentences, update=False)`
+```python
+build_vocab(sentences, update=False)
+```
 
 Build vocabulary from tokenized sentences.
 
@@ -47,7 +47,9 @@ Build vocabulary from tokenized sentences.
 - `sentences` (list): List of tokenized sentences
 - `update` (bool): Update existing vocabulary instead of replacing
 
-#### `train(sentences, epochs=5, batch_size=None)`
+```python
+train(sentences, epochs=5, batch_size=None)
+```
 
 Train the Word2Vec model.
 
@@ -56,7 +58,9 @@ Train the Word2Vec model.
 - `epochs` (int): Number of training epochs
 - `batch_size` (int): Batch size for training (optional)
 
-#### `get_vector(word)`
+```python
+get_vector(word)
+```
 
 Get the vector representation of a word.
 
@@ -65,7 +69,9 @@ Get the vector representation of a word.
 
 **Returns:** (numpy.ndarray) Word vector
 
-#### `most_similar(word, topn=10)`
+```python
+most_similar(word, topn=10)
+```
 
 Find the most similar words.
 
@@ -75,7 +81,9 @@ Find the most similar words.
 
 **Returns:** (list) List of (word, similarity) tuples
 
-#### `similarity(word1, word2)`
+```python
+similarity(word1, word2)
+```
 
 Calculate cosine similarity between two words.
 
@@ -85,7 +93,13 @@ Calculate cosine similarity between two words.
 
 **Returns:** (float) Cosine similarity score
 
-#### `save(filepath)` / `load(filepath)`
+```python
+save(filepath)
+```
+
+```python
+load(filepath)
+```
 
 Save or load model to/from file.
 
@@ -105,24 +119,28 @@ TempRefWord2Vec(corpora, labels, targets, vector_size=100, window=5,
 
 ### Key Parameters
 
-| Parameter | Description |
-|-----------|-------------|
-| `corpora` | List of corpora for different time periods (list of lists of sentences) |
-| `labels` | Labels for each time period (list of strings) |
-| `targets` | Words to track for semantic change (list of strings) |
-| Additional parameters | Same as Word2Vec |
+- `corpora` (list): List of corpora for different time periods (list of lists of sentences)
+- `labels` (list): Labels for each time period (list of strings)
+- `targets` (list): Words to track for semantic change (list of strings)
+- Additional parameters: Same as Word2Vec
 
 ### Main Methods
 
-#### `train(calculate_loss=True, batch_size=64)`
+```python
+train(calculate_loss=True, batch_size=64)
+```
 
 Train the temporal reference model.
 
-#### `get_vector(word)`
+```python
+get_vector(word)
+```
 
 Get vector for a word (including temporal variants like "word_1980").
 
-#### `calculate_semantic_change(target_word)`
+```python
+calculate_semantic_change(target_word)
+```
 
 Calculate semantic change for a target word across time periods.
 
@@ -135,7 +153,9 @@ Calculate semantic change for a target word across time periods.
 
 From `qhchina.analytics.vectors`:
 
-#### `project_2d(vectors, method='pca', title=None, adjust_text_labels=True, perplexity=30, **kwargs)`
+```python
+project_2d(vectors, method='pca', title=None, adjust_text_labels=True, perplexity=30, **kwargs)
+```
 
 Project word vectors to 2D space for visualization.
 
@@ -146,7 +166,9 @@ Project word vectors to 2D space for visualization.
 - `adjust_text_labels` (bool): Adjust text labels to avoid overlap
 - `perplexity` (int): Perplexity for t-SNE (if using t-SNE)
 
-#### `calculate_bias(dimension_pairs, target_words, model)`
+```python
+calculate_bias(dimension_pairs, target_words, model)
+```
 
 Calculate bias scores along a semantic dimension.
 
@@ -157,7 +179,9 @@ Calculate bias scores along a semantic dimension.
 
 **Returns:** (dict) Mapping of target words to bias scores
 
-#### `align_vectors(model1, model2)`
+```python
+align_vectors(model1, model2)
+```
 
 Align vectors from two models for direct comparison.
 
