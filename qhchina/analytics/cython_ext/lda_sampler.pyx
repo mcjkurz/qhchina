@@ -195,7 +195,7 @@ cdef inline int sample_topic(INT_t[:, ::1] n_wt,
     # Convert to cumulative probabilities using helper function
     normalize_to_cumsum(&PROB_BUFFER[0], n_topics, p_sum)
     
-    # Use binary search for sampling (faster for large n_topics)
+    # Use binary search for sampling
     cdef int new_topic = _sample_multinomial_binary(&PROB_BUFFER[0], n_topics)
     
     # Update counts for new topic assignment

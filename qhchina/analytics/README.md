@@ -68,7 +68,80 @@ lda.plot_topic_words()
 # Infer topics for a new document
 new_doc = ["word1", "word3", "word6"]
 topic_dist = lda.inference(new_doc)
+
+# Visualize documents in 2D space (colored by dominant topic)
+lda.visualize_documents(
+    method='pca',           # Options: 'pca', 'tsne', 'mds', 'umap'
+    show_labels=True,       # Show document labels
+    label_strategy='auto',  # Automatic label display
+    figsize=(12, 10),       # Figure size
+    dpi=150,                # High resolution
+    filename='docs_vis.png' # Save to file
+)
+
+# Create interactive HTML visualization
+lda.visualize_documents(
+    method='tsne',
+    doc_labels=['Doc1', 'Doc2', ...],  # Custom document names
+    format='html',          # Interactive HTML output
+    filename='interactive.html'
+)
 ```
+
+### Document Visualization
+
+The `visualize_documents()` method provides powerful visualization of your document corpus in 2D space:
+
+**Dimensionality Reduction Methods:**
+- `pca`: Principal Component Analysis (fast, linear)
+- `tsne`: t-SNE (captures non-linear structure)
+- `mds`: Multidimensional Scaling
+- `umap`: UMAP (requires `umap-learn` package)
+
+**Coloring:**
+- By default, colors documents by their dominant topic
+- Specify `n_clusters` to use k-means clustering instead
+
+**Features:**
+- Optional document labels with automatic spacing (uses `adjusttext` if available)
+- Static (matplotlib) or interactive (HTML) visualizations
+- Customizable appearance (size, colors, transparency, resolution)
+- Smart label display strategies (auto/all/sample/none)
+
+**Example:**
+```python
+# PCA with document labels
+lda.visualize_documents(
+    method='pca',
+    doc_labels=['Document ' + str(i) for i in range(len(docs))],
+    show_labels=True,
+    label_strategy='sample',
+    max_labels=30,
+    filename='pca_visualization.png'
+)
+
+# Interactive t-SNE with hover tooltips
+lda.visualize_documents(
+    method='tsne',
+    doc_labels=doc_names,
+    format='html',
+    filename='interactive_tsne.html'
+)
+
+# K-means clustering with MDS (specify n_clusters)
+lda.visualize_documents(
+    method='mds',
+    n_clusters=5,  # Use k-means with 5 clusters
+    figsize=(14, 10),
+    dpi=200
+)
+```
+
+**Optional Dependencies:**
+- `umap-learn`: For UMAP dimensionality reduction
+- `adjusttext`: For better label placement in static plots
+
+Install with: `pip install umap-learn adjusttext`
 
 See the `examples.py` module for more detailed examples.
 

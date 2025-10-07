@@ -982,3 +982,776 @@ class LDAGibbsSampler:
                     sim_matrix[j, i] = sim
         
         return sim_matrix
+    
+    def visualize_documents(
+        self,
+        method: str = 'pca',
+        n_clusters: Optional[int] = None,
+        doc_labels: Optional[List[str]] = None,
+        show_labels: bool = False,
+        label_strategy: str = 'auto',
+        use_adjusttext: bool = True,
+        max_labels: Optional[int] = None,
+        figsize: Optional[Tuple[int, int]] = None,
+        dpi: int = 150,
+        alpha: float = 0.7,
+        size: float = 50,
+        cmap: str = 'tab10',
+        title: Optional[str] = None,
+        filename: Optional[str] = None,
+        format: str = 'static',
+        random_state: Optional[int] = None,
+        highlight: Optional[Union[int, List[int]]] = None,
+        n_topic_words: int = 4,
+        **kwargs
+    ) -> Optional[np.ndarray]:
+        """
+        Visualize documents in 2D space using dimensionality reduction.
+        
+        Documents are automatically colored by dominant topic, or by k-means clusters if n_clusters is specified.
+        
+        Args:
+            method: Dimensionality reduction method. Options:
+                   - 'pca': Principal Component Analysis (fast, linear)
+                   - 'tsne': t-SNE (slower, captures non-linear structure)
+                   - 'mds': Multidimensional Scaling (moderate speed)
+                   - 'umap': UMAP (requires umap-learn package, fast and effective)
+            n_clusters: If specified, apply k-means clustering and color by cluster instead of topic
+            doc_labels: Optional list of document names/labels (same length as number of documents)
+            show_labels: Whether to show document labels on the plot
+            label_strategy: How to handle label display:
+                          - 'auto': Automatically decide based on number of documents
+                          - 'all': Show all labels (use adjustText if available)
+                          - 'sample': Show a random sample of labels (controlled by max_labels)
+                          - 'none': Don't show any labels
+            use_adjusttext: Use adjustText package for better label placement (if available)
+            max_labels: Maximum number of labels to show (used with 'sample' or 'auto' strategy)
+            figsize: Figure size as (width, height). If None, automatically scales based on number of documents
+            dpi: Resolution in dots per inch
+            alpha: Transparency of points (0-1)
+            size: Size of scatter plot points
+            cmap: Colormap to use (matplotlib colormap name)
+            title: Optional plot title (auto-generated if None)
+            filename: If provided, save the plot to this file
+            format: Output format:
+                   - 'static': Static matplotlib plot
+                   - 'html': Interactive HTML visualization with hover tooltips
+            random_state: Random seed for reproducibility
+            highlight: Topic ID(s) to highlight. Can be a single int or list of ints.
+                      Only the specified topics will be colored; others will be gray.
+                      In HTML format, all topics are shown in legend and can be toggled interactively.
+            n_topic_words: Number of representative words to show for each topic in the legend (default: 4).
+                          Only applies to HTML format.
+            **kwargs: Additional keyword arguments to pass to the dimensionality reduction method.
+                     For t-SNE: perplexity, learning_rate, max_iter, etc.
+                     For UMAP: n_neighbors, min_dist, metric, etc.
+                     For PCA: whiten, svd_solver, tol, etc.
+                     For MDS: metric, max_iter, eps, etc.
+            
+        Returns:
+            2D coordinates array of shape (n_docs, 2) if format='static', None if format='html'
+        """
+        if self.theta is None:
+            raise ValueError("Model has not been fitted yet. Call fit() first.")
+        
+        # Process highlight parameter
+        if highlight is not None:
+            if isinstance(highlight, int):
+                highlight = [highlight]
+            else:
+                highlight = list(highlight)
+        
+        # Set random state
+        if random_state is None:
+            random_state = self.random_state
+        if random_state is not None:
+            np.random.seed(random_state)
+        
+        n_docs = self.theta.shape[0]
+        
+        # Dynamically adjust figure size based on number of documents if not provided
+        if figsize is None:
+            if n_docs < 100:
+                figsize = (12, 10)
+            elif n_docs < 500:
+                figsize = (14, 12)
+            elif n_docs < 1000:
+                figsize = (16, 14)
+            elif n_docs < 5000:
+                figsize = (20, 18)
+            else:  # >= 5000 documents
+                figsize = (24, 22)
+        
+        # Dynamically adjust point size based on number of documents
+        if n_docs > 1000:
+            size = max(10, size * (500 / n_docs))  # Reduce point size for large datasets
+        
+        # Perform dimensionality reduction
+        extra_info = {}  # Store additional info like variance explained
+        if method == 'pca':
+            from sklearn.decomposition import PCA
+            # Filter kwargs to only include valid PCA parameters
+            pca_kwargs = {k: v for k, v in kwargs.items() if k in ['whiten', 'svd_solver', 'tol', 'iterated_power']}
+            reducer = PCA(n_components=2, random_state=random_state, **pca_kwargs)
+            coords_2d = reducer.fit_transform(self.theta)
+            extra_info['explained_variance'] = reducer.explained_variance_ratio_
+        
+        elif method == 'tsne':
+            from sklearn.manifold import TSNE
+            # Set default init to 'pca' if not provided
+            tsne_kwargs = {'init': 'pca', **kwargs}
+            # Filter to valid t-SNE parameters
+            valid_tsne_params = ['perplexity', 'early_exaggeration', 'learning_rate', 'max_iter', 
+                                'n_iter_without_progress', 'min_grad_norm', 'metric', 'init', 
+                                'verbose', 'method', 'angle', 'n_jobs']
+            tsne_kwargs = {k: v for k, v in tsne_kwargs.items() if k in valid_tsne_params}
+            reducer = TSNE(n_components=2, random_state=random_state, **tsne_kwargs)
+            coords_2d = reducer.fit_transform(self.theta)
+        
+        elif method == 'mds':
+            from sklearn.manifold import MDS
+            # Set default normalized_stress if not provided
+            mds_kwargs = {'normalized_stress': 'auto', **kwargs}
+            # Filter to valid MDS parameters
+            valid_mds_params = ['metric', 'n_init', 'max_iter', 'verbose', 'eps', 
+                               'n_jobs', 'dissimilarity', 'normalized_stress']
+            mds_kwargs = {k: v for k, v in mds_kwargs.items() if k in valid_mds_params}
+            reducer = MDS(n_components=2, random_state=random_state, **mds_kwargs)
+            coords_2d = reducer.fit_transform(self.theta)
+        
+        elif method == 'umap':
+            try:
+                import umap
+                # Filter to valid UMAP parameters
+                valid_umap_params = ['n_neighbors', 'min_dist', 'metric', 'n_epochs', 'learning_rate',
+                                    'init', 'min_grad_norm', 'spread', 'low_memory', 'set_op_mix_ratio',
+                                    'local_connectivity', 'repulsion_strength', 'negative_sample_rate',
+                                    'transform_queue_size', 'a', 'b', 'angular_rp_forest', 'target_n_neighbors',
+                                    'target_metric', 'target_weight', 'transform_seed', 'verbose']
+                umap_kwargs = {k: v for k, v in kwargs.items() if k in valid_umap_params}
+                reducer = umap.UMAP(n_components=2, random_state=random_state, **umap_kwargs)
+                coords_2d = reducer.fit_transform(self.theta)
+            except ImportError:
+                raise ImportError(
+                    "UMAP is not installed. Please install it with: pip install umap-learn"
+                )
+        
+        else:
+            raise ValueError(
+                f"Unknown method: {method}. Use 'pca', 'tsne', 'mds', or 'umap'"
+            )
+        
+        # Determine colors - infer from n_clusters
+        if n_clusters is not None:
+            # User specified n_clusters, so use k-means clustering
+            # IMPORTANT: Apply k-means to the 2D coordinates, not the original high-dimensional space
+            # This is much faster and visually consistent with what's displayed
+            from sklearn.cluster import KMeans
+            kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
+            colors = kmeans.fit_predict(coords_2d)
+            color_label = "K-means Cluster"
+            extra_info['n_clusters'] = n_clusters
+        else:
+            # Default: color by dominant topic
+            colors = np.argmax(self.theta, axis=1)
+            color_label = "Dominant Topic"
+        
+        # Handle document labels
+        if doc_labels is not None and len(doc_labels) != n_docs:
+            raise ValueError(
+                f"doc_labels length ({len(doc_labels)}) must match number of documents ({n_docs})"
+            )
+        
+        # Generate default labels if not provided
+        if doc_labels is None:
+            doc_labels = [f"Doc {i}" for i in range(n_docs)]
+        
+        # Determine which labels to show
+        labels_to_show = []
+        if show_labels:
+            if label_strategy == 'none':
+                pass
+            elif label_strategy == 'all':
+                labels_to_show = list(range(n_docs))
+            elif label_strategy == 'sample':
+                if max_labels is None:
+                    max_labels = min(50, n_docs)
+                labels_to_show = np.random.choice(n_docs, size=min(max_labels, n_docs), replace=False).tolist()
+            elif label_strategy == 'auto':
+                if n_docs <= 20:
+                    labels_to_show = list(range(n_docs))
+                elif n_docs <= 100:
+                    max_labels = max_labels or 30
+                    labels_to_show = np.random.choice(n_docs, size=min(max_labels, n_docs), replace=False).tolist()
+                else:
+                    max_labels = max_labels or 50
+                    labels_to_show = np.random.choice(n_docs, size=min(max_labels, n_docs), replace=False).tolist()
+            else:
+                raise ValueError(
+                    f"Unknown label_strategy: {label_strategy}. Use 'auto', 'all', 'sample', or 'none'"
+                )
+        
+        # Generate visualization based on format
+        if format == 'static':
+            return self._plot_static_scatter(
+                coords_2d, colors, doc_labels, labels_to_show, 
+                method, color_label, use_adjusttext,
+                figsize, dpi, alpha, size, cmap, title, filename, extra_info, highlight
+            )
+        
+        elif format == 'html':
+            self._plot_interactive_html(
+                coords_2d, colors, doc_labels, method, color_label,
+                title, filename, extra_info, highlight, n_topic_words
+            )
+            return None
+        
+        else:
+            raise ValueError(
+                f"Unknown format: {format}. Use 'static' or 'html'"
+            )
+    
+    def _plot_static_scatter(
+        self,
+        coords_2d: np.ndarray,
+        colors: np.ndarray,
+        doc_labels: List[str],
+        labels_to_show: List[int],
+        method: str,
+        color_label: str,
+        use_adjusttext: bool,
+        figsize: Tuple[int, int],
+        dpi: int,
+        alpha: float,
+        size: float,
+        cmap: str,
+        title: Optional[str],
+        filename: Optional[str],
+        extra_info: Dict[str, Any],
+        highlight: Optional[List[int]]
+    ) -> np.ndarray:
+        """Create static matplotlib scatter plot."""
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        
+        # Get topic top words for legend (if coloring by topic)
+        unique_colors = np.unique(colors)
+        
+        # Apply highlight filter if specified
+        if highlight is not None:
+            # Filter unique_colors to only include highlighted topics
+            unique_colors = np.array([c for c in unique_colors if c in highlight])
+        
+        legend_labels = []
+        
+        if color_label == "Dominant Topic" and self.phi is not None and self.id_to_word is not None:
+            # Get top 4 words for each topic
+            for topic_id in unique_colors:
+                topic_id = int(topic_id)
+                top_word_indices = np.argsort(-self.phi[topic_id])[:4]
+                top_words = [self.id_to_word[i] for i in top_word_indices]
+                legend_labels.append(f"Topic {topic_id}: {', '.join(top_words)}")
+        else:
+            # For k-means clusters or when no topic words available
+            for c in unique_colors:
+                legend_labels.append(f"{color_label} {int(c)}")
+        
+        # Create scatter plot with separate plots for each color to enable legend
+        import matplotlib.cm as cm
+        colormap = cm.get_cmap(cmap)
+        n_colors = len(unique_colors)
+        
+        # Plot non-highlighted points in gray if highlight is specified
+        if highlight is not None:
+            # Plot all non-highlighted points first in gray
+            all_colors_set = set(colors)
+            non_highlighted = [c for c in all_colors_set if c not in highlight]
+            if non_highlighted:
+                non_highlighted_mask = np.isin(colors, non_highlighted)
+                ax.scatter(
+                    coords_2d[non_highlighted_mask, 0], coords_2d[non_highlighted_mask, 1],
+                    c='lightgray', alpha=alpha * 0.5, s=size, edgecolors='w', linewidth=0.5
+                )
+        
+        # Plot highlighted colors (or all colors if no highlight specified)
+        for i, color_val in enumerate(unique_colors):
+            mask = colors == color_val
+            color_rgb = colormap(i / max(n_colors - 1, 1))
+            ax.scatter(
+                coords_2d[mask, 0], coords_2d[mask, 1],
+                c=[color_rgb], alpha=alpha, s=size, edgecolors='w', linewidth=0.5,
+                label=legend_labels[i]
+            )
+        
+        # Add legend with colored dots
+        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=True, 
+                 fancybox=True, shadow=True, fontsize=9)
+        
+        # Add labels
+        if labels_to_show:
+            if use_adjusttext:
+                try:
+                    from adjustText import adjust_text
+                    texts = []
+                    for idx in labels_to_show:
+                        texts.append(
+                            ax.text(coords_2d[idx, 0], coords_2d[idx, 1], 
+                                   doc_labels[idx], fontsize=8)
+                        )
+                    adjust_text(texts, arrowprops=dict(arrowstyle='->', color='gray', lw=0.5))
+                except ImportError:
+                    warnings.warn(
+                        "adjustText is not installed. Labels will be shown without adjustment. "
+                        "Install it with: pip install adjusttext"
+                    )
+                    for idx in labels_to_show:
+                        ax.text(coords_2d[idx, 0], coords_2d[idx, 1], 
+                               doc_labels[idx], fontsize=8, alpha=0.7)
+            else:
+                for idx in labels_to_show:
+                    ax.text(coords_2d[idx, 0], coords_2d[idx, 1], 
+                           doc_labels[idx], fontsize=8, alpha=0.7)
+        
+        # Set title
+        if title is None:
+            if 'n_clusters' in extra_info:
+                title = f'Document Visualization ({method.upper()}) - K-means with k={extra_info["n_clusters"]}'
+            else:
+                title = f'Document Visualization ({method.upper()}) - Colored by {color_label}'
+        ax.set_title(title, fontsize=14, fontweight='bold')
+        
+        # Set axis labels with variance explained for PCA
+        if method == 'pca' and 'explained_variance' in extra_info:
+            var_exp = extra_info['explained_variance']
+            ax.set_xlabel(f'{method.upper()} Component 1 ({var_exp[0]:.1%} variance)', fontsize=12)
+            ax.set_ylabel(f'{method.upper()} Component 2 ({var_exp[1]:.1%} variance)', fontsize=12)
+        else:
+            ax.set_xlabel(f'{method.upper()} Component 1', fontsize=12)
+            ax.set_ylabel(f'{method.upper()} Component 2', fontsize=12)
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if filename:
+            plt.savefig(filename, dpi=dpi, bbox_inches='tight')
+            print(f"Plot saved to: {filename}")
+        
+        plt.show()
+        
+        return coords_2d
+    
+    def _plot_interactive_html(
+        self,
+        coords_2d: np.ndarray,
+        colors: np.ndarray,
+        doc_labels: List[str],
+        method: str,
+        color_label: str,
+        title: Optional[str],
+        filename: Optional[str],
+        extra_info: Dict[str, Any],
+        highlight: Optional[List[int]],
+        n_topic_words: int = 4
+    ) -> None:
+        """Create interactive HTML visualization with JavaScript."""
+        import json
+        
+        n_docs = len(coords_2d)
+        
+        # Get top words for each topic (configurable number of words)
+        topic_top_words = []
+        if self.phi is not None and self.id_to_word is not None:
+            for k in range(self.n_topics):
+                top_word_indices = np.argsort(-self.phi[k])[:n_topic_words]
+                top_words = [self.id_to_word[i] for i in top_word_indices]
+                topic_top_words.append(", ".join(top_words))
+        else:
+            topic_top_words = [f"Topic {k}" for k in range(self.n_topics)]
+        
+        # Prepare data for JavaScript
+        points_data = []
+        for i in range(n_docs):
+            topic_dist = self.theta[i]
+            top_topics = np.argsort(-topic_dist)[:3]
+            topic_info_lines = []
+            for t in top_topics:
+                if t < len(topic_top_words):
+                    topic_info_lines.append(
+                        f"Topic {t} ({topic_dist[t]:.3f}): {topic_top_words[t]}"
+                    )
+                else:
+                    topic_info_lines.append(f"Topic {t}: {topic_dist[t]:.3f}")
+            topic_info = "<br>".join(topic_info_lines)
+            
+            # Check if this point should be highlighted
+            is_highlighted = highlight is None or colors[i] in highlight
+            
+            points_data.append({
+                'x': float(coords_2d[i, 0]),
+                'y': float(coords_2d[i, 1]),
+                'color': int(colors[i]),
+                'label': doc_labels[i],
+                'doc_id': i,
+                'topic_info': topic_info,
+                'highlighted': is_highlighted
+            })
+        
+        # Generate color palette
+        import matplotlib.cm as cm
+        n_colors = len(np.unique(colors))
+        colormap = cm.get_cmap('tab10')
+        color_palette = [
+            'rgb({},{},{})'.format(
+                int(colormap(i / n_colors)[0] * 255),
+                int(colormap(i / n_colors)[1] * 255),
+                int(colormap(i / n_colors)[2] * 255)
+            ) for i in range(n_colors)
+        ]
+        
+        if title is None:
+            if 'n_clusters' in extra_info:
+                title = f'Interactive Document Visualization ({method.upper()}) - K-means with k={extra_info["n_clusters"]}'
+            else:
+                title = f'Interactive Document Visualization ({method.upper()})'
+        
+        # Dynamically adjust canvas size based on number of documents
+        if n_docs < 100:
+            canvas_width, canvas_height = 1000, 800
+        elif n_docs < 500:
+            canvas_width, canvas_height = 1200, 1000
+        elif n_docs < 1000:
+            canvas_width, canvas_height = 1400, 1200
+        elif n_docs < 5000:
+            canvas_width, canvas_height = 1600, 1400
+        else:  # >= 5000 documents
+            canvas_width, canvas_height = 2000, 1600
+        
+        # Create HTML content
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{title}</title>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        #container {{
+            width: fit-content;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        h1 {{
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+            margin-top: 0;
+            width: 100%;
+        }}
+        #canvas {{
+            border: 1px solid #ddd;
+            display: block;
+            margin: 0 auto;
+            cursor: pointer;
+            background-color: white;
+        }}
+        #tooltip {{
+            position: absolute;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            font-size: 12px;
+            z-index: 1000;
+            min-width: 250px;
+            white-space: nowrap;
+        }}
+        #legend {{
+            margin-top: 20px;
+            text-align: center;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            max-width: {canvas_width}px;
+            margin-left: auto;
+            margin-right: auto;
+        }}
+        .legend-item {{
+            display: inline-flex;
+            align-items: center;
+            margin: 0;
+            white-space: nowrap;
+            cursor: pointer;
+            padding: 5px 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }}
+        .legend-item:hover {{
+            background-color: #f0f0f0;
+        }}
+        .legend-item.grayed {{
+            opacity: 0.4;
+        }}
+        .legend-color {{
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            vertical-align: middle;
+            margin-right: 5px;
+        }}
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>{title}</h1>
+        <canvas id="canvas" width="{canvas_width}" height="{canvas_height}"></canvas>
+        <div id="tooltip"></div>
+        <div id="legend"></div>
+    </div>
+    
+    <script>
+        const data = {json.dumps(points_data)};
+        const colorPalette = {json.dumps(color_palette)};
+        const colorLabel = "{color_label.replace('Dominant Topic', 'Topic')}";
+        const topicWords = {json.dumps(topic_top_words)};  // Array of topic word strings
+        
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const tooltip = document.getElementById('tooltip');
+        const legend = document.getElementById('legend');
+        
+        // Track which topics are highlighted (use Set for efficient operations)
+        const highlightedTopics = new Set();
+        
+        // Initialize with topics that were originally highlighted
+        data.forEach(point => {{
+            if (point.highlighted) {{
+                highlightedTopics.add(point.color);
+            }}
+        }});
+        
+        // Dynamically adjust point radius based on number of documents
+        const numDocs = data.length;
+        let pointRadius = 5;
+        if (numDocs > 1000) {{
+            pointRadius = Math.max(2, 5 * (500 / numDocs));
+        }} else if (numDocs > 500) {{
+            pointRadius = 4;
+        }}
+        const hoverThreshold = Math.max(pointRadius + 5, 10);
+        
+        // Calculate bounds
+        const xValues = data.map(d => d.x);
+        const yValues = data.map(d => d.y);
+        const xMin = Math.min(...xValues);
+        const xMax = Math.max(...xValues);
+        const yMin = Math.min(...yValues);
+        const yMax = Math.max(...yValues);
+        
+        const padding = 50;
+        const width = canvas.width - 2 * padding;
+        const height = canvas.height - 2 * padding;
+        
+        function scaleX(x) {{
+            return padding + (x - xMin) / (xMax - xMin) * width;
+        }}
+        
+        function scaleY(y) {{
+            return canvas.height - padding - (y - yMin) / (yMax - yMin) * height;
+        }}
+        
+        function drawPlot() {{
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid lines
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 1;
+            const numGridLines = 10;
+            
+            // Vertical grid lines
+            for (let i = 0; i <= numGridLines; i++) {{
+                const x = padding + (i / numGridLines) * width;
+                ctx.beginPath();
+                ctx.moveTo(x, padding);
+                ctx.lineTo(x, canvas.height - padding);
+                ctx.stroke();
+            }}
+            
+            // Horizontal grid lines
+            for (let i = 0; i <= numGridLines; i++) {{
+                const y = padding + (i / numGridLines) * height;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(canvas.width - padding, y);
+                ctx.stroke();
+            }}
+            
+            // Draw axes
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(padding, padding);
+            ctx.lineTo(padding, canvas.height - padding);
+            ctx.lineTo(canvas.width - padding, canvas.height - padding);
+            ctx.stroke();
+            
+            // Draw black border around entire drawable area
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(padding, padding, width, height);
+            
+            // Draw points based on current highlighted topics
+            data.forEach(point => {{
+                const sx = scaleX(point.x);
+                const sy = scaleY(point.y);
+                
+                // Check if this point's topic is currently highlighted
+                const isHighlighted = highlightedTopics.has(point.color);
+                
+                if (isHighlighted) {{
+                    ctx.fillStyle = colorPalette[point.color % colorPalette.length];
+                    ctx.globalAlpha = 1.0;
+                }} else {{
+                    ctx.fillStyle = 'lightgray';
+                    ctx.globalAlpha = 0.5;
+                }}
+                
+                ctx.beginPath();
+                ctx.arc(sx, sy, pointRadius, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.globalAlpha = 1.0;  // Reset alpha
+            }});
+        }}
+        
+        function findNearestPoint(mx, my) {{
+            const threshold = hoverThreshold;
+            let nearest = null;
+            let minDist = threshold;
+            
+            data.forEach(point => {{
+                const sx = scaleX(point.x);
+                const sy = scaleY(point.y);
+                const dist = Math.sqrt((sx - mx) ** 2 + (sy - my) ** 2);
+                
+                if (dist < minDist) {{
+                    minDist = dist;
+                    nearest = point;
+                }}
+            }});
+            
+            return nearest;
+        }}
+        
+        function toggleTopic(topicId) {{
+            if (highlightedTopics.has(topicId)) {{
+                highlightedTopics.delete(topicId);
+            }} else {{
+                highlightedTopics.add(topicId);
+            }}
+            updateLegend();
+            drawPlot();
+        }}
+        
+        function updateLegend() {{
+            // Get all unique topics (colors) from the data
+            const uniqueColors = [...new Set(data.map(d => d.color))].sort((a, b) => a - b);
+            
+            // Clear and rebuild legend
+            legend.innerHTML = '';
+            
+            uniqueColors.forEach(color => {{
+                const item = document.createElement('div');
+                item.className = 'legend-item';
+                
+                // Add grayed class if not highlighted
+                if (!highlightedTopics.has(color)) {{
+                    item.classList.add('grayed');
+                }}
+                
+                // Store topic ID for click handler
+                item.dataset.topicId = color;
+                
+                // For topics, show just "Topic X: words", for clusters show "K-means Cluster X"
+                const labelText = topicWords[color] ? `Topic ${{color}}: ${{topicWords[color]}}` : `${{colorLabel}} ${{color}}`;
+                item.innerHTML = `
+                    <span class="legend-color" style="background-color: ${{colorPalette[color % colorPalette.length]}}"></span>
+                    <span>${{labelText}}</span>
+                `;
+                
+                // Add click handler
+                item.addEventListener('click', () => {{
+                    toggleTopic(color);
+                }});
+                
+                legend.appendChild(item);
+            }});
+        }}
+        
+        // Mouse move for tooltip
+        canvas.addEventListener('mousemove', (e) => {{
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            
+            const point = findNearestPoint(mx, my);
+            
+            if (point) {{
+                tooltip.style.display = 'block';
+                // Use pageX/pageY for positioning relative to page, not viewport
+                tooltip.style.left = (e.pageX + 10) + 'px';
+                tooltip.style.top = (e.pageY + 10) + 'px';
+                tooltip.innerHTML = `
+                    <strong>${{point.label}}</strong> (Doc #${{point.doc_id}})<br>
+                    <strong>Top Topics:</strong><br>
+                    ${{point.topic_info}}
+                `;
+            }} else {{
+                tooltip.style.display = 'none';
+            }}
+        }});
+        
+        canvas.addEventListener('mouseleave', () => {{
+            tooltip.style.display = 'none';
+        }});
+        
+        // Click on canvas to toggle topic of clicked point
+        canvas.addEventListener('click', (e) => {{
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            
+            const point = findNearestPoint(mx, my);
+            
+            if (point) {{
+                toggleTopic(point.color);
+            }}
+        }});
+        
+        // Initialize legend and draw
+        updateLegend();
+        drawPlot();
+    </script>
+</body>
+</html>"""
+        
+        # Save or display HTML
+        if filename is None:
+            filename = 'document_visualization.html'
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        print(f"Interactive visualization saved to: {filename}")
+        print(f"Open this file in a web browser to view the interactive plot.")

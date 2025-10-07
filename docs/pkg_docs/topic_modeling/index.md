@@ -207,6 +207,49 @@ Plot top words for topics as bar charts.
 <br>
 
 ```python
+visualize_documents(method='pca', n_clusters=None, doc_labels=None,
+                   show_labels=False, label_strategy='auto', use_adjusttext=True,
+                   max_labels=None, figsize=(12, 10), dpi=150, alpha=0.7, size=50,
+                   cmap='tab10', title=None, filename=None, format='static',
+                   random_state=None, highlight=None, n_topic_words=4, **kwargs)
+```
+
+Visualize documents in 2D space using dimensionality reduction.
+
+Documents are automatically colored by dominant topic, or by k-means clusters if `n_clusters` is specified.
+
+**Parameters:**
+- `method` (str): Dimensionality reduction method. Options:
+  - `'pca'` - Principal Component Analysis (fast, linear)
+  - `'tsne'` - t-SNE (captures non-linear structure)
+  - `'mds'` - Multidimensional Scaling
+  - `'umap'` - UMAP (requires `umap-learn` package)
+- `n_clusters` (int): If specified, use k-means clustering instead of topic coloring
+- `doc_labels` (list): Optional document names/labels
+- `show_labels` (bool): Whether to show document labels
+- `label_strategy` (str): Label display strategy ('auto', 'all', 'sample', 'none')
+- `use_adjusttext` (bool): Use adjustText for better label placement (if available)
+- `max_labels` (int): Maximum number of labels to show
+- `figsize` (tuple): Figure size
+- `dpi` (int): Resolution
+- `alpha` (float): Point transparency (0-1)
+- `size` (float): Point size
+- `cmap` (str): Matplotlib colormap name
+- `title` (str): Plot title
+- `filename` (str): Output filename
+- `format` (str): Output format ('static' or 'html')
+- `random_state` (int): Random seed
+- `highlight` (int or list): Topic ID(s) to highlight. Non-highlighted topics shown in gray. In HTML format, all topics appear in legend and can be toggled interactively
+- `n_topic_words` (int): Number of representative words per topic in legend (HTML format only, default: 4)
+- `**kwargs`: Additional parameters for dimensionality reduction (e.g., `perplexity` for t-SNE, `n_neighbors` for UMAP)
+
+**Returns:** 2D coordinates array (if format='static'), None (if format='html')
+
+**Note:** Optional dependencies: `umap-learn` for UMAP, `adjusttext` for label adjustment
+
+<br>
+
+```python
 save(filepath)
 ```
 
@@ -284,3 +327,87 @@ print("New document topic distribution:", topic_dist)
 similarity = lda.topic_similarity(topic_i=0, topic_j=1, metric='jsd')
 print(f"Topic similarity: {similarity:.4f}")
 ```
+
+### Visualizing Documents in 2D Space
+
+```python
+# PCA visualization colored by dominant topic (default)
+lda.visualize_documents(
+    method='pca',
+    figsize=(12, 10),
+    dpi=150,
+    filename='documents_pca.png'
+)
+
+# t-SNE with document labels
+doc_labels = [f"Document_{i}" for i in range(len(documents))]
+lda.visualize_documents(
+    method='tsne',
+    doc_labels=doc_labels,
+    show_labels=True,
+    label_strategy='sample',  # Show sample of labels
+    max_labels=30,
+    figsize=(14, 12),
+    dpi=200,
+    filename='documents_tsne.png'
+)
+
+# K-means clustering with MDS (specify n_clusters to use k-means)
+lda.visualize_documents(
+    method='mds',
+    n_clusters=3,  # Automatically uses k-means when n_clusters is set
+    figsize=(10, 8),
+    filename='documents_clusters.png'
+)
+
+# Interactive HTML visualization
+lda.visualize_documents(
+    method='pca',
+    doc_labels=doc_labels,
+    format='html',  # Creates interactive visualization
+    filename='documents_interactive.html'
+)
+
+# Highlight specific topics (static plot)
+lda.visualize_documents(
+    method='pca',
+    highlight=[0, 2, 5],  # Only topics 0, 2, and 5 shown in color
+    figsize=(12, 10),
+    filename='documents_highlighted.png'
+)
+
+# Interactive HTML with highlighting and custom topic words
+lda.visualize_documents(
+    method='tsne',
+    doc_labels=doc_labels,
+    format='html',
+    highlight=[0, 2, 5],  # Initially highlight these topics
+    n_topic_words=6,      # Show 6 words per topic in legend
+    perplexity=50,        # Custom t-SNE parameter
+    filename='documents_custom.html'
+)
+
+# UMAP with custom parameters (if umap-learn is installed)
+try:
+    lda.visualize_documents(
+        method='umap',
+        doc_labels=doc_labels,
+        format='html',
+        n_neighbors=15,       # UMAP parameter
+        min_dist=0.1,         # UMAP parameter
+        filename='documents_umap.html'
+    )
+except ImportError:
+    print("Install umap-learn: pip install umap-learn")
+```
+
+**Interactive HTML Features:**
+
+The HTML format creates a standalone file with:
+- **Hover tooltips** showing document name/ID and top 3 topic probabilities
+- **Click topics** in the legend to toggle highlighting on/off
+- **Click points** on the canvas to toggle their topic's highlighting
+- **Responsive legend** that updates based on highlighted topics
+- All topics shown in legend (grayed when not highlighted)
+
+This is useful for exploring large document collections and interactively focusing on specific topics.
