@@ -289,8 +289,6 @@ class LDAGibbsSampler:
             logphat += self._dirichlet_expectation(gamma)
         logphat /= N
         
-        dalpha = np.copy(self.alpha)
-        
         # Newton's method: compute gradient and Hessian
         gradf = N * (psi(np.sum(self.alpha)) - psi(self.alpha) + logphat)
         c = N * polygamma(1, np.sum(self.alpha))
