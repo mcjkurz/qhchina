@@ -12,10 +12,10 @@ The `qhchina.analytics.collocations` module provides tools for identifying words
 
 ```python
 find_collocates(sentences, target_words, method='window', horizon=5, filters=None, 
-                as_dataframe=True)
+                as_dataframe=True, max_sentence_length=256)
 ```
 
-Find words that co-occur with target words more frequently than expected by chance.
+Find words that co-occur with target words more frequently than expected by chance. Uses optimized Cython implementation if available.
 
 **Parameters:**
 - `sentences` (list): List of tokenized sentences (each sentence is a list of tokens)
@@ -24,6 +24,7 @@ Find words that co-occur with target words more frequently than expected by chan
   - `'window'`: Use sliding window of specified horizon (default)
   - `'sentence'`: Use whole sentences as context
 - `horizon` (int): Context window size (only used if `method='window'`)
+- `max_sentence_length` (int): Maximum sentence length for preprocessing (only used if `method='sentence'`). Longer sentences are truncated to avoid memory bloat. Default is 256. Set to `None` for no limit.
 - `filters` (dict): Optional filters to apply:
   - `'max_p'`: Maximum p-value threshold for statistical significance
   - `'stopwords'`: List of words to exclude
