@@ -229,7 +229,7 @@ Documents are automatically colored by dominant topic, or by k-means clusters if
 - `show_labels` (bool): Whether to show document labels
 - `label_strategy` (str): Label display strategy ('auto', 'all', 'sample', 'none')
 - `use_adjusttext` (bool): Use adjustText for better label placement (if available)
-- `max_labels` (int): Maximum number of labels to show
+- `max_labels` (int): Maximum number of labels to show per topic/cluster
 - `figsize` (tuple): Figure size
 - `dpi` (int): Resolution
 - `alpha` (float): Point transparency (0-1)
@@ -240,7 +240,7 @@ Documents are automatically colored by dominant topic, or by k-means clusters if
 - `format` (str): Output format ('static' or 'html')
 - `random_state` (int): Random seed
 - `highlight` (int or list): Topic ID(s) to highlight. Non-highlighted topics shown in gray. In HTML format, all topics appear in legend and can be toggled interactively
-- `n_topic_words` (int): Number of representative words per topic in legend (HTML format only, default: 4)
+- `n_topic_words` (int): Number of representative words per topic in legend (default: 4). Increase figsize width if using many words
 - `**kwargs`: Additional parameters for dimensionality reduction (e.g., `perplexity` for t-SNE, `n_neighbors` for UMAP)
 
 **Returns:** 2D coordinates array (if format='static'), None (if format='html')
@@ -339,14 +339,14 @@ lda.visualize_documents(
     filename='documents_pca.png'
 )
 
-# t-SNE with document labels
+# t-SNE with document labels (sample per topic)
 doc_labels = [f"Document_{i}" for i in range(len(documents))]
 lda.visualize_documents(
     method='tsne',
     doc_labels=doc_labels,
     show_labels=True,
-    label_strategy='sample',  # Show sample of labels
-    max_labels=30,
+    label_strategy='sample',  # Show sample of labels per topic
+    max_labels=5,             # Show up to 5 documents per topic
     figsize=(14, 12),
     dpi=200,
     filename='documents_tsne.png'
@@ -374,6 +374,14 @@ lda.visualize_documents(
     highlight=[0, 2, 5],  # Only topics 0, 2, and 5 shown in color
     figsize=(12, 10),
     filename='documents_highlighted.png'
+)
+
+# Custom number of words in legend (static plot)
+lda.visualize_documents(
+    method='pca',
+    n_topic_words=6,      # Show 6 words per topic in legend
+    figsize=(14, 10),     # Wider figure to accommodate longer legend
+    filename='documents_6words.png'
 )
 
 # Interactive HTML with highlighting and custom topic words
@@ -407,6 +415,7 @@ The HTML format creates a standalone file with:
 - **Hover tooltips** showing document name/ID and top 3 topic probabilities
 - **Click topics** in the legend to toggle highlighting on/off
 - **Click points** on the canvas to toggle their topic's highlighting
+- **Select All / Deselect All button** to quickly toggle all topics at once
 - **Responsive legend** that updates based on highlighted topics
 - All topics shown in legend (grayed when not highlighted)
 

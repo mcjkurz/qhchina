@@ -1025,7 +1025,7 @@ class LDAGibbsSampler:
                           - 'sample': Show a random sample of labels (controlled by max_labels)
                           - 'none': Don't show any labels
             use_adjusttext: Use adjustText package for better label placement (if available)
-            max_labels: Maximum number of labels to show (used with 'sample' or 'auto' strategy)
+            max_labels: Maximum number of labels to show per topic/cluster (used with 'sample' or 'auto' strategy)
             figsize: Figure size as (width, height). If None, automatically scales based on number of documents
             dpi: Resolution in dots per inch
             alpha: Transparency of points (0-1)
@@ -1041,7 +1041,7 @@ class LDAGibbsSampler:
                       Only the specified topics will be colored; others will be gray.
                       In HTML format, all topics are shown in legend and can be toggled interactively.
             n_topic_words: Number of representative words to show for each topic in the legend (default: 4).
-                          Only applies to HTML format.
+                          Increase figsize width if using many words to accommodate longer legend labels.
             **kwargs: Additional keyword arguments to pass to the dimensionality reduction method.
                      For t-SNE: perplexity, learning_rate, max_iter, etc.
                      For UMAP: n_neighbors, min_dist, metric, etc.
@@ -1174,18 +1174,57 @@ class LDAGibbsSampler:
             elif label_strategy == 'all':
                 labels_to_show = list(range(n_docs))
             elif label_strategy == 'sample':
+                # Sample max_labels documents per topic/cluster
                 if max_labels is None:
-                    max_labels = min(50, n_docs)
-                labels_to_show = np.random.choice(n_docs, size=min(max_labels, n_docs), replace=False).tolist()
+                    max_labels = 5
+                
+                # Group documents by their color (topic or cluster)
+                labels_by_color = {}
+                for doc_id, color in enumerate(colors):
+                    if color not in labels_by_color:
+                        labels_by_color[color] = []
+                    labels_by_color[color].append(doc_id)
+                
+                # Sample up to max_labels from each topic/cluster
+                labels_to_show = []
+                for color, doc_ids in labels_by_color.items():
+                    n_to_sample = min(max_labels, len(doc_ids))
+                    sampled = np.random.choice(doc_ids, size=n_to_sample, replace=False).tolist()
+                    labels_to_show.extend(sampled)
+                    
             elif label_strategy == 'auto':
                 if n_docs <= 20:
                     labels_to_show = list(range(n_docs))
                 elif n_docs <= 100:
-                    max_labels = max_labels or 30
-                    labels_to_show = np.random.choice(n_docs, size=min(max_labels, n_docs), replace=False).tolist()
+                    # Sample up to max_labels per topic/cluster
+                    max_labels = max_labels or 3
+                    
+                    labels_by_color = {}
+                    for doc_id, color in enumerate(colors):
+                        if color not in labels_by_color:
+                            labels_by_color[color] = []
+                        labels_by_color[color].append(doc_id)
+                    
+                    labels_to_show = []
+                    for color, doc_ids in labels_by_color.items():
+                        n_to_sample = min(max_labels, len(doc_ids))
+                        sampled = np.random.choice(doc_ids, size=n_to_sample, replace=False).tolist()
+                        labels_to_show.extend(sampled)
                 else:
-                    max_labels = max_labels or 50
-                    labels_to_show = np.random.choice(n_docs, size=min(max_labels, n_docs), replace=False).tolist()
+                    # For large datasets, sample fewer per topic
+                    max_labels = max_labels or 2
+                    
+                    labels_by_color = {}
+                    for doc_id, color in enumerate(colors):
+                        if color not in labels_by_color:
+                            labels_by_color[color] = []
+                        labels_by_color[color].append(doc_id)
+                    
+                    labels_to_show = []
+                    for color, doc_ids in labels_by_color.items():
+                        n_to_sample = min(max_labels, len(doc_ids))
+                        sampled = np.random.choice(doc_ids, size=n_to_sample, replace=False).tolist()
+                        labels_to_show.extend(sampled)
             else:
                 raise ValueError(
                     f"Unknown label_strategy: {label_strategy}. Use 'auto', 'all', 'sample', or 'none'"
@@ -1196,7 +1235,7 @@ class LDAGibbsSampler:
             return self._plot_static_scatter(
                 coords_2d, colors, doc_labels, labels_to_show, 
                 method, color_label, use_adjusttext,
-                figsize, dpi, alpha, size, cmap, title, filename, extra_info, highlight
+                figsize, dpi, alpha, size, cmap, title, filename, extra_info, highlight, n_topic_words
             )
         
         elif format == 'html':
@@ -1228,7 +1267,8 @@ class LDAGibbsSampler:
         title: Optional[str],
         filename: Optional[str],
         extra_info: Dict[str, Any],
-        highlight: Optional[List[int]]
+        highlight: Optional[List[int]],
+        n_topic_words: int = 4
     ) -> np.ndarray:
         """Create static matplotlib scatter plot."""
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
@@ -1244,10 +1284,10 @@ class LDAGibbsSampler:
         legend_labels = []
         
         if color_label == "Dominant Topic" and self.phi is not None and self.id_to_word is not None:
-            # Get top 4 words for each topic
+            # Get top n_topic_words words for each topic
             for topic_id in unique_colors:
                 topic_id = int(topic_id)
-                top_word_indices = np.argsort(-self.phi[topic_id])[:4]
+                top_word_indices = np.argsort(-self.phi[topic_id])[:n_topic_words]
                 top_words = [self.id_to_word[i] for i in top_word_indices]
                 legend_labels.append(f"Topic {topic_id}: {', '.join(top_words)}")
         else:
@@ -1473,8 +1513,29 @@ class LDAGibbsSampler:
             min-width: 250px;
             white-space: nowrap;
         }}
+        #controls {{
+            text-align: center;
+            margin-top: 15px;
+            margin-bottom: 10px;
+        }}
+        #toggleAllBtn {{
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }}
+        #toggleAllBtn:hover {{
+            background-color: #45a049;
+        }}
         #legend {{
-            margin-top: 20px;
+            margin-top: 10px;
             text-align: center;
             display: flex;
             flex-wrap: wrap;
@@ -1515,6 +1576,9 @@ class LDAGibbsSampler:
         <h1>{title}</h1>
         <canvas id="canvas" width="{canvas_width}" height="{canvas_height}"></canvas>
         <div id="tooltip"></div>
+        <div id="controls">
+            <button id="toggleAllBtn" onclick="toggleAllTopics()">Deselect All</button>
+        </div>
         <div id="legend"></div>
     </div>
     
@@ -1664,6 +1728,33 @@ class LDAGibbsSampler:
             drawPlot();
         }}
         
+        function toggleAllTopics() {{
+            const uniqueColors = [...new Set(data.map(d => d.color))];
+            
+            // If all are highlighted, deselect all. Otherwise, select all.
+            if (highlightedTopics.size === uniqueColors.length) {{
+                highlightedTopics.clear();
+            }} else {{
+                uniqueColors.forEach(color => highlightedTopics.add(color));
+            }}
+            
+            updateLegend();
+            drawPlot();
+        }}
+        
+        function updateToggleButton() {{
+            const uniqueColors = [...new Set(data.map(d => d.color))];
+            const toggleBtn = document.getElementById('toggleAllBtn');
+            
+            if (highlightedTopics.size === uniqueColors.length) {{
+                toggleBtn.textContent = 'Deselect All';
+            }} else if (highlightedTopics.size === 0) {{
+                toggleBtn.textContent = 'Select All';
+            }} else {{
+                toggleBtn.textContent = 'Select All';
+            }}
+        }}
+        
         function updateLegend() {{
             // Get all unique topics (colors) from the data
             const uniqueColors = [...new Set(data.map(d => d.color))].sort((a, b) => a - b);
@@ -1697,6 +1788,9 @@ class LDAGibbsSampler:
                 
                 legend.appendChild(item);
             }});
+            
+            // Update the toggle button text
+            updateToggleButton();
         }}
         
         // Mouse move for tooltip

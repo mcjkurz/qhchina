@@ -5,6 +5,13 @@ import pandas as pd
 from tqdm.auto import tqdm
 from typing import Dict, List, Optional, Union, TypedDict
 
+# Try to import Cython extensions for faster computation
+try:
+    from .cython_ext.collocations import calculate_window_counts, calculate_sentence_counts
+    CYTHON_AVAILABLE = True
+except ImportError:
+    CYTHON_AVAILABLE = False
+
 class FilterOptions(TypedDict, total=False):
     """Type definition for filter options in collocation analysis."""
     max_p: float
@@ -18,6 +25,111 @@ class FilterOptions(TypedDict, total=False):
     max_ratio_local: float
     min_obs_global: int
     max_obs_global: int
+
+def _build_vocabulary(tokenized_sentences):
+    """Build vocabulary mapping for Cython implementation."""
+    word2idx = {}
+    idx = 0
+    for sentence in tokenized_sentences:
+        for word in sentence:
+            if word not in word2idx:
+                word2idx[word] = idx
+                idx += 1
+    idx2word = {v: k for k, v in word2idx.items()}
+    return word2idx, idx2word
+
+def _convert_sentences_to_indices(tokenized_sentences, word2idx, max_sentence_length=256):
+    """
+    Convert tokenized sentences to padded integer arrays for Cython.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences
+        word2idx: Vocabulary mapping
+        max_sentence_length: Maximum sentence length to pad to (default 256).
+                           Longer sentences will be truncated to avoid memory bloat.
+                           Set to None for no limit (may use a lot of memory).
+    
+    Returns:
+        tuple: (sentences_indices, sentence_lengths)
+    """
+    n_sentences = len(tokenized_sentences)
+    max_length = max(len(sent) for sent in tokenized_sentences) if tokenized_sentences else 0
+    
+    # Cap max_length to avoid memory bloat from outlier long sentences
+    if max_sentence_length is not None:
+        max_length = min(max_length, max_sentence_length)
+    
+    # Create padded array
+    sentences_indices = np.zeros((n_sentences, max_length), dtype=np.int32)
+    sentence_lengths = np.zeros(n_sentences, dtype=np.int32)
+    
+    for i, sentence in enumerate(tokenized_sentences):
+        # Truncate if necessary
+        actual_len = min(len(sentence), max_length)
+        sentence_lengths[i] = actual_len
+        for j in range(actual_len):
+            sentences_indices[i, j] = word2idx[sentence[j]]
+    
+    return sentences_indices, sentence_lengths
+
+def _calculate_collocations_window_fast(tokenized_sentences, target_words, horizon=5):
+    """Fast Cython implementation of window-based collocation calculation."""
+    # Build vocabulary
+    word2idx, idx2word = _build_vocabulary(tokenized_sentences)
+    vocab_size = len(word2idx)
+    
+    # Convert sentences to indices (no length limit - window method processes locally)
+    sentences_indices, sentence_lengths = _convert_sentences_to_indices(
+        tokenized_sentences, word2idx, max_sentence_length=None
+    )
+    
+    # Convert target words to indices (filter out targets not in vocabulary)
+    target_indices = np.array([word2idx[w] for w in target_words if w in word2idx], dtype=np.int32)
+    target_words_filtered = [w for w in target_words if w in word2idx]
+    
+    if len(target_indices) == 0:
+        return []
+    
+    # Call Cython function
+    T_count, candidate_counts, token_counter, total_tokens = calculate_window_counts(
+        sentences_indices, sentence_lengths, target_indices, horizon, vocab_size
+    )
+    
+    # Build results from the count matrices
+    results = []
+    for t_idx, target in enumerate(target_words_filtered):
+        target_word_idx = target_indices[t_idx]
+        for candidate_idx in range(vocab_size):
+            a = candidate_counts[t_idx, candidate_idx]
+            if a == 0 or candidate_idx == target_word_idx:
+                continue
+            
+            candidate = idx2word[candidate_idx]
+            
+            # Calculate contingency table
+            b = T_count[t_idx] - a
+            c = token_counter[candidate_idx] - a
+            d = (total_tokens - token_counter[target_word_idx]) - (a + b + c)
+            
+            # Calculate expected and ratio
+            expected = (a + b) * (a + c) / total_tokens if total_tokens > 0 else 0
+            ratio = a / expected if expected > 0 else 0
+            
+            # Compute Fisher's exact test
+            table = np.array([[a, b], [c, d]])
+            p_value = fisher_exact(table, alternative='greater')[1]
+            
+            results.append({
+                "target": target,
+                "collocate": candidate,
+                "exp_local": expected,
+                "obs_local": int(a),
+                "ratio_local": ratio,
+                "obs_global": int(token_counter[candidate_idx]),
+                "p_value": p_value,
+            })
+    
+    return results
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5):
     total_tokens = 0  # Total number of token positions in the corpus
@@ -99,13 +211,86 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
 
     return results
 
-def _calculate_collocations_sentence(tokenized_sentences, target_words):
+def _calculate_collocations_sentence_fast(tokenized_sentences, target_words, max_sentence_length=256):
+    """Fast Cython implementation of sentence-based collocation calculation."""
+    # Build vocabulary
+    word2idx, idx2word = _build_vocabulary(tokenized_sentences)
+    vocab_size = len(word2idx)
+    
+    # Convert sentences to indices
+    sentences_indices, sentence_lengths = _convert_sentences_to_indices(
+        tokenized_sentences, word2idx, max_sentence_length
+    )
+    
+    # Convert target words to indices
+    target_indices = np.array([word2idx[w] for w in target_words if w in word2idx], dtype=np.int32)
+    target_words_filtered = [w for w in target_words if w in word2idx]
+    
+    if len(target_indices) == 0:
+        return []
+    
+    # Call Cython function
+    candidate_sentences, sentences_with_token, total_sentences = calculate_sentence_counts(
+        sentences_indices, sentence_lengths, target_indices, vocab_size
+    )
+    
+    # Build results from the count matrices
+    results = []
+    for t_idx, target in enumerate(target_words_filtered):
+        target_word_idx = target_indices[t_idx]
+        for candidate_idx in range(vocab_size):
+            a = candidate_sentences[t_idx, candidate_idx]
+            if a == 0 or candidate_idx == target_word_idx:
+                continue
+            
+            candidate = idx2word[candidate_idx]
+            
+            # Calculate contingency table
+            b = sentences_with_token[target_word_idx] - a
+            c = sentences_with_token[candidate_idx] - a
+            d = total_sentences - a - b - c
+            
+            # Calculate expected and ratio
+            expected = (a + b) * (a + c) / total_sentences if total_sentences > 0 else 0
+            ratio = a / expected if expected > 0 else 0
+            
+            # Compute Fisher's exact test
+            table = np.array([[a, b], [c, d]])
+            p_value = fisher_exact(table, alternative='greater')[1]
+            
+            results.append({
+                "target": target,
+                "collocate": candidate,
+                "exp_local": expected,
+                "obs_local": int(a),
+                "ratio_local": ratio,
+                "obs_global": int(sentences_with_token[candidate_idx]),
+                "p_value": p_value,
+            })
+    
+    return results
+
+def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length=256):
+    """
+    Pure Python implementation of sentence-based collocation calculation.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences
+        target_words: Set or list of target words
+        max_sentence_length: Maximum sentence length to consider (default 256).
+                           Longer sentences will be truncated for consistency with Cython.
+                           Set to None for no limit.
+    """
     total_sentences = len(tokenized_sentences)
     results = []
     candidate_in_sentences = {target: Counter() for target in target_words}
     sentences_with_token = defaultdict(int)
 
     for sentence in tqdm(tokenized_sentences):
+        # Truncate sentence if needed for consistency with Cython implementation
+        if max_sentence_length is not None and len(sentence) > max_sentence_length:
+            sentence = sentence[:max_sentence_length]
+        
         unique_tokens = set(sentence)
         for token in unique_tokens:
             sentences_with_token[token] += 1
@@ -147,7 +332,8 @@ def find_collocates(
     method: str = 'window', 
     horizon: int = 5, 
     filters: Optional[FilterOptions] = None, 
-    as_dataframe: bool = True
+    as_dataframe: bool = True,
+    max_sentence_length: Optional[int] = 256
 ) -> Union[List[Dict], pd.DataFrame]:
     """
     Find collocates for target words within a corpus of sentences.
@@ -179,6 +365,12 @@ def find_collocates(
         - 'max_obs_global': int - Maximum global frequency
     as_dataframe : bool, default=True
         If True, return results as a pandas DataFrame.
+    max_sentence_length : Optional[int], default=256
+        Maximum sentence length for preprocessing (only affects 'sentence' method).
+        Longer sentences will be truncated to avoid memory bloat from outliers. 
+        Set to None for no limit (may use a lot of memory if you have very long 
+        sentences). The 'window' method processes tokens locally and does not use
+        this parameter.
     
     Returns:
     --------
@@ -187,14 +379,30 @@ def find_collocates(
     """
     if not isinstance(target_words, list):
         target_words = [target_words]
-    target_words = set(target_words)
+    target_words = list(set(target_words))
 
-    if method == 'window':
-        results = _calculate_collocations_window(sentences, target_words, horizon=horizon)
-    elif method == 'sentence':
-        results = _calculate_collocations_sentence(sentences, target_words)
+    # Use Cython implementation if available, otherwise fall back to pure Python
+    if CYTHON_AVAILABLE:
+        if method == 'window':
+            # Window method doesn't use max_sentence_length (processes token-by-token)
+            results = _calculate_collocations_window_fast(
+                sentences, target_words, horizon=horizon
+            )
+        elif method == 'sentence':
+            results = _calculate_collocations_sentence_fast(
+                sentences, target_words, max_sentence_length=max_sentence_length
+            )
+        else:
+            raise NotImplementedError(f"The method {method} is not implemented.")
     else:
-        raise NotImplementedError(f"The method {method} is not implemented.")
+        if method == 'window':
+            results = _calculate_collocations_window(sentences, target_words, horizon=horizon)
+        elif method == 'sentence':
+            results = _calculate_collocations_sentence(
+                sentences, target_words, max_sentence_length=max_sentence_length
+            )
+        else:
+            raise NotImplementedError(f"The method {method} is not implemented.")
 
     # Apply filters if specified
     if filters:
