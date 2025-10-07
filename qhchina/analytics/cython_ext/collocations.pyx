@@ -31,6 +31,317 @@ from libc.string cimport memset
 ctypedef np.int32_t INT_t
 ctypedef np.int64_t LONG_t
 
+def build_vocabulary_fast(list tokenized_sentences):
+    """
+    Fast Cython implementation of vocabulary building.
+    
+    Builds word-to-index and index-to-word mappings from tokenized sentences.
+    Significantly faster than pure Python for large corpora.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences (list of lists of strings)
+        
+    Returns:
+        tuple: (word2idx, idx2word) - dictionaries for bidirectional mapping
+    """
+    cdef dict word2idx = {}
+    cdef dict idx2word = {}
+    cdef int idx = 0
+    cdef list sentence
+    cdef str word
+    cdef int i
+    cdef int n_sentences = len(tokenized_sentences)
+    
+    # Build word2idx mapping
+    for i in range(n_sentences):
+        sentence = tokenized_sentences[i]
+        for word in sentence:
+            if word not in word2idx:
+                word2idx[word] = idx
+                idx2word[idx] = word
+                idx += 1
+    
+    return word2idx, idx2word
+
+def convert_sentences_to_indices_fast(list tokenized_sentences, dict word2idx, int max_sentence_length=256):
+    """
+    Fast Cython implementation of sentence-to-indices conversion.
+    
+    Converts tokenized sentences to padded integer arrays for efficient processing.
+    Much faster than pure Python for large batches.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences (list of lists of strings)
+        word2idx: Dictionary mapping words to integer indices
+        max_sentence_length: Maximum sentence length to pad to (default 256)
+        
+    Returns:
+        tuple: (sentences_indices, sentence_lengths)
+            - sentences_indices: 2D numpy array (n_sentences, max_length) of int32
+            - sentence_lengths: 1D numpy array (n_sentences,) of int32
+    """
+    cdef int n_sentences = len(tokenized_sentences)
+    cdef int i, j, actual_len, sent_len
+    cdef int max_length = 0
+    cdef list sentence
+    cdef str word
+    
+    # First pass: find max length
+    for i in range(n_sentences):
+        sent_len = len(tokenized_sentences[i])
+        if sent_len > max_length:
+            max_length = sent_len
+    
+    # Cap max_length to avoid memory bloat
+    if max_length > max_sentence_length:
+        max_length = max_sentence_length
+    
+    # Allocate arrays
+    cdef np.ndarray[INT_t, ndim=2] sentences_indices = np.zeros((n_sentences, max_length), dtype=np.int32)
+    cdef np.ndarray[INT_t, ndim=1] sentence_lengths = np.zeros(n_sentences, dtype=np.int32)
+    
+    # Second pass: convert to indices
+    for i in range(n_sentences):
+        sentence = tokenized_sentences[i]
+        actual_len = len(sentence)
+        if actual_len > max_length:
+            actual_len = max_length
+        sentence_lengths[i] = actual_len
+        
+        for j in range(actual_len):
+            word = sentence[j]
+            sentences_indices[i, j] = word2idx[word]
+    
+    return sentences_indices, sentence_lengths
+
+def build_vocabulary_and_convert_fast(list tokenized_sentences, int max_sentence_length=256):
+    """
+    Fast Cython implementation combining vocabulary building and conversion.
+    
+    Most efficient for processing large corpora - builds vocabulary and converts
+    sentences in optimized passes without intermediate Python overhead.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences (list of lists of strings)
+        max_sentence_length: Maximum sentence length to pad to (default 256)
+        
+    Returns:
+        tuple: (sentences_indices, sentence_lengths, word2idx, idx2word)
+            - sentences_indices: 2D numpy array (n_sentences, max_length) of int32
+            - sentence_lengths: 1D numpy array (n_sentences,) of int32
+            - word2idx: Dictionary mapping words to indices
+            - idx2word: Dictionary mapping indices to words
+    """
+    cdef dict word2idx = {}
+    cdef dict idx2word = {}
+    cdef int idx = 0
+    cdef int n_sentences = len(tokenized_sentences)
+    cdef int i, j, actual_len, sent_len
+    cdef int max_length = 0
+    cdef list sentence
+    cdef str word
+    
+    # First pass: build vocabulary and find max length
+    for i in range(n_sentences):
+        sentence = tokenized_sentences[i]
+        sent_len = len(sentence)
+        if sent_len > max_length:
+            max_length = sent_len
+        
+        for word in sentence:
+            if word not in word2idx:
+                word2idx[word] = idx
+                idx2word[idx] = word
+                idx += 1
+    
+    # Cap max_length to avoid memory bloat
+    if max_length > max_sentence_length:
+        max_length = max_sentence_length
+    
+    # Allocate arrays
+    cdef np.ndarray[INT_t, ndim=2] sentences_indices = np.zeros((n_sentences, max_length), dtype=np.int32)
+    cdef np.ndarray[INT_t, ndim=1] sentence_lengths = np.zeros(n_sentences, dtype=np.int32)
+    
+    # Second pass: convert to indices
+    for i in range(n_sentences):
+        sentence = tokenized_sentences[i]
+        actual_len = len(sentence)
+        if actual_len > max_length:
+            actual_len = max_length
+        sentence_lengths[i] = actual_len
+        
+        for j in range(actual_len):
+            word = sentence[j]
+            sentences_indices[i, j] = word2idx[word]
+    
+    return sentences_indices, sentence_lengths, word2idx, idx2word
+
+def calculate_collocations_window(list tokenized_sentences, list target_words, 
+                                  int horizon=5, int max_sentence_length=256, 
+                                  int batch_size=10000):
+    """
+    Complete Cython implementation of window-based collocation calculation.
+    
+    Performs all operations in Cython including vocabulary building, batching,
+    counting, and accumulation. Only returns to Python for final result formatting.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences
+        target_words: List of target words
+        horizon: Window size on each side
+        max_sentence_length: Maximum sentence length (default 256)
+        batch_size: Batch size for processing (default 10000)
+        
+    Returns:
+        tuple: (T_count, candidate_counts, token_counter, total_tokens, word2idx, idx2word, target_indices)
+    """
+    # All variable declarations at the top
+    cdef dict word2idx, idx2word
+    cdef int vocab_size, n_sentences, n_targets, n_batches
+    cdef int batch_start, batch_end, batch_idx, t_idx, candidate_idx
+    cdef list batch_sentences, target_words_filtered
+    cdef str word
+    cdef INT_t[:, ::1] batch_indices
+    cdef INT_t[::1] batch_lengths, target_indices_array
+    cdef LONG_t[::1] T_count_batch, token_counter_batch
+    cdef LONG_t[:, ::1] candidate_counts_batch
+    cdef LONG_t total_tokens_batch
+    cdef np.ndarray[LONG_t, ndim=1] T_count_total, token_counter_total
+    cdef np.ndarray[LONG_t, ndim=2] candidate_counts_total
+    cdef np.ndarray[INT_t, ndim=1] target_indices
+    cdef LONG_t total_tokens = 0
+    
+    # Build vocabulary
+    word2idx, idx2word = build_vocabulary_fast(tokenized_sentences)
+    vocab_size = len(word2idx)
+    n_sentences = len(tokenized_sentences)
+    
+    # Filter target words and convert to indices
+    target_words_filtered = [w for w in target_words if w in word2idx]
+    if len(target_words_filtered) == 0:
+        return None, None, None, 0, word2idx, idx2word, np.array([], dtype=np.int32)
+    
+    target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
+    target_indices_array = target_indices
+    n_targets = len(target_indices)
+    
+    # Initialize accumulation arrays
+    T_count_total = np.zeros(n_targets, dtype=np.int64)
+    candidate_counts_total = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    token_counter_total = np.zeros(vocab_size, dtype=np.int64)
+    
+    # Process batches - all in Cython
+    n_batches = (n_sentences + batch_size - 1) // batch_size
+    
+    for batch_idx in range(n_batches):
+        batch_start = batch_idx * batch_size
+        batch_end = min(batch_start + batch_size, n_sentences)
+        batch_sentences = tokenized_sentences[batch_start:batch_end]
+        
+        # Convert batch to indices
+        batch_indices, batch_lengths = convert_sentences_to_indices_fast(
+            batch_sentences, word2idx, max_sentence_length
+        )
+        
+        # Calculate counts for this batch
+        T_count_batch, candidate_counts_batch, token_counter_batch, total_tokens_batch = calculate_window_counts(
+            batch_indices, batch_lengths, target_indices_array, horizon, vocab_size
+        )
+        
+        # Accumulate results in Cython
+        for t_idx in range(n_targets):
+            T_count_total[t_idx] += T_count_batch[t_idx]
+            for candidate_idx in range(vocab_size):
+                candidate_counts_total[t_idx, candidate_idx] += candidate_counts_batch[t_idx, candidate_idx]
+        
+        for candidate_idx in range(vocab_size):
+            token_counter_total[candidate_idx] += token_counter_batch[candidate_idx]
+        
+        total_tokens += total_tokens_batch
+    
+    return T_count_total, candidate_counts_total, token_counter_total, total_tokens, word2idx, idx2word, target_indices
+
+def calculate_collocations_sentence(list tokenized_sentences, list target_words,
+                                    int max_sentence_length=256, int batch_size=10000):
+    """
+    Complete Cython implementation of sentence-based collocation calculation.
+    
+    Performs all operations in Cython including vocabulary building, batching,
+    counting, and accumulation. Only returns to Python for final result formatting.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences
+        target_words: List of target words
+        max_sentence_length: Maximum sentence length (default 256)
+        batch_size: Batch size for processing (default 10000)
+        
+    Returns:
+        tuple: (candidate_sentences, sentences_with_token, total_sentences, word2idx, idx2word, target_indices)
+    """
+    # All variable declarations at the top
+    cdef dict word2idx, idx2word
+    cdef int vocab_size, n_sentences, n_targets, n_batches
+    cdef int batch_start, batch_end, batch_idx, t_idx, candidate_idx
+    cdef list batch_sentences, target_words_filtered
+    cdef str word
+    cdef INT_t[:, ::1] batch_indices
+    cdef INT_t[::1] batch_lengths, target_indices_array
+    cdef LONG_t[:, ::1] candidate_sentences_batch
+    cdef LONG_t[::1] sentences_with_token_batch
+    cdef LONG_t n_sentences_batch
+    cdef np.ndarray[LONG_t, ndim=2] candidate_sentences_total
+    cdef np.ndarray[LONG_t, ndim=1] sentences_with_token_total
+    cdef np.ndarray[INT_t, ndim=1] target_indices
+    cdef LONG_t total_sentences = 0
+    
+    # Build vocabulary
+    word2idx, idx2word = build_vocabulary_fast(tokenized_sentences)
+    vocab_size = len(word2idx)
+    n_sentences = len(tokenized_sentences)
+    
+    # Filter target words and convert to indices
+    target_words_filtered = [w for w in target_words if w in word2idx]
+    if len(target_words_filtered) == 0:
+        return None, None, 0, word2idx, idx2word, np.array([], dtype=np.int32)
+    
+    target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
+    target_indices_array = target_indices
+    n_targets = len(target_indices)
+    
+    # Initialize accumulation arrays
+    candidate_sentences_total = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    sentences_with_token_total = np.zeros(vocab_size, dtype=np.int64)
+    
+    # Process batches - all in Cython
+    n_batches = (n_sentences + batch_size - 1) // batch_size
+    
+    for batch_idx in range(n_batches):
+        batch_start = batch_idx * batch_size
+        batch_end = min(batch_start + batch_size, n_sentences)
+        batch_sentences = tokenized_sentences[batch_start:batch_end]
+        
+        # Convert batch to indices
+        batch_indices, batch_lengths = convert_sentences_to_indices_fast(
+            batch_sentences, word2idx, max_sentence_length
+        )
+        
+        # Calculate counts for this batch
+        candidate_sentences_batch, sentences_with_token_batch, n_sentences_batch = calculate_sentence_counts(
+            batch_indices, batch_lengths, target_indices_array, vocab_size
+        )
+        
+        # Accumulate results in Cython
+        for t_idx in range(n_targets):
+            for candidate_idx in range(vocab_size):
+                candidate_sentences_total[t_idx, candidate_idx] += candidate_sentences_batch[t_idx, candidate_idx]
+        
+        for candidate_idx in range(vocab_size):
+            sentences_with_token_total[candidate_idx] += sentences_with_token_batch[candidate_idx]
+        
+        total_sentences += n_sentences_batch
+    
+    return candidate_sentences_total, sentences_with_token_total, total_sentences, word2idx, idx2word, target_indices
+
 def calculate_window_counts(
     INT_t[:, ::1] sentences_indices,
     INT_t[::1] sentence_lengths,
