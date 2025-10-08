@@ -26,7 +26,7 @@ Find words that co-occur with target words more frequently than expected by chan
 - `horizon` (int): Context window size (only used if `method='window'`)
 - `max_sentence_length` (int): Maximum sentence length for preprocessing. Longer sentences are truncated to avoid memory bloat. Default is 256. Set to `None` for no limit.
 - `batch_size` (int): Number of sentences to process per batch. Default is 10000. Controls memory usage - smaller batches use less RAM. For typical use cases, the default works well. Adjust only if memory-constrained (use smaller values) or have abundant RAM (use larger values for marginal speed gains).
-- `filters` (dict): Optional filters to apply:
+- `filters` (dict): Optional filters to apply *after* finding all collocates (statistics are computed on the full corpus first, then results are filtered):
   - `'max_p'`: Maximum p-value threshold for statistical significance
   - `'stopwords'`: List of words to exclude
   - `'min_length'`: Minimum character length for collocates

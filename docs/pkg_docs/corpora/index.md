@@ -24,7 +24,7 @@ Identify statistically significant differences in word usage between two corpora
   - `'fisher'`: Fisher's exact test (default)
   - `'chi2'`: Chi-square test with Yates' correction
   - `'chi2_corrected'`: Chi-square test without correction
-- `filters` (dict): Optional filters to apply:
+- `filters` (dict): Optional filters to apply *after* computing statistics (statistics are computed on the full corpora first, then results are filtered):
   - `'min_count'`: Minimum count threshold for a word to be included. Can be:
     - Single int (applies to both corpora)
     - Tuple of (min_countA, min_countB)
