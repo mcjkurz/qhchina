@@ -31,7 +31,7 @@ class FilterOptions(TypedDict, total=False):
     max_obs_global: int
 
 def _calculate_collocations_window_cython(tokenized_sentences, target_words, horizon=5, 
-                                         max_sentence_length=256, batch_size=10000):
+                                         max_sentence_length=256, batch_size=10000, alternative='greater'):
     """
     Cython implementation of window-based collocation calculation.
     
@@ -41,6 +41,7 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
         horizon: Window size on each side
         max_sentence_length: Maximum sentence length to consider (default 256)
         batch_size: Number of sentences to process per batch (default 10000)
+        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
     
     Returns:
         List of dictionaries with collocation statistics
@@ -74,7 +75,7 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
             ratio = a / expected if expected > 0 else 0
             
             table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative='greater')[1]
+            p_value = fisher_exact(table, alternative=alternative)[1]
             
             results.append({
                 "target": target,
@@ -88,7 +89,7 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
     
     return results
 
-def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5):
+def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5, alternative='greater'):
     """Pure Python implementation of window-based collocation calculation."""
     total_tokens = 0
     T_count = {target: 0 for target in target_words}
@@ -124,7 +125,7 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
             ratio = a / expected if expected > 0 else 0
 
             table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative='greater')[1]
+            p_value = fisher_exact(table, alternative=alternative)[1]
 
             results.append({
                 "target": target,
@@ -139,7 +140,7 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
     return results
 
 def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, 
-                                           max_sentence_length=256, batch_size=10000):
+                                           max_sentence_length=256, batch_size=10000, alternative='greater'):
     """
     Cython implementation of sentence-based collocation calculation.
     
@@ -148,6 +149,7 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words,
         target_words: List or set of target words
         max_sentence_length: Maximum sentence length to consider (default 256)
         batch_size: Number of sentences to process per batch (default 10000)
+        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
     
     Returns:
         List of dictionaries with collocation statistics
@@ -181,7 +183,7 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words,
             ratio = a / expected if expected > 0 else 0
             
             table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative='greater')[1]
+            p_value = fisher_exact(table, alternative=alternative)[1]
             
             results.append({
                 "target": target,
@@ -195,7 +197,7 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words,
     
     return results
 
-def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length=256):
+def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length=256, alternative='greater'):
     """
     Pure Python implementation of sentence-based collocation calculation.
     
@@ -232,7 +234,7 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sent
             ratio = a / expected if expected > 0 else 0
 
             table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative='greater')[1]
+            p_value = fisher_exact(table, alternative=alternative)[1]
 
             results.append({
                 "target": target,
@@ -254,7 +256,8 @@ def find_collocates(
     filters: Optional[FilterOptions] = None, 
     as_dataframe: bool = True,
     max_sentence_length: Optional[int] = 256,
-    batch_size: int = 10000
+    batch_size: int = 10000,
+    alternative: str = 'greater'
 ) -> Union[List[Dict], pd.DataFrame]:
     """
     Find collocates for target words within a corpus of sentences.
@@ -294,6 +297,11 @@ def find_collocates(
         Number of sentences to process in each batch when using Cython 
         implementation. Larger batches are faster but use more memory. 
         Adjust based on available RAM and corpus characteristics.
+    alternative : str, default='greater'
+        Alternative hypothesis for Fisher's exact test. Options are:
+        - 'greater': Test if observed co-occurrence is greater than expected (default)
+        - 'less': Test if observed co-occurrence is less than expected
+        - 'two-sided': Test if observed co-occurrence differs from expected
     
     Returns:
     --------
@@ -309,21 +317,24 @@ def find_collocates(
         if method == 'window':
             results = _calculate_collocations_window_cython(
                 sentences, target_words, horizon=horizon, 
-                max_sentence_length=max_sentence_length, batch_size=batch_size
+                max_sentence_length=max_sentence_length, batch_size=batch_size,
+                alternative=alternative
             )
         elif method == 'sentence':
             results = _calculate_collocations_sentence_cython(
                 sentences, target_words, max_sentence_length=max_sentence_length,
-                batch_size=batch_size
+                batch_size=batch_size, alternative=alternative
             )
         else:
             raise NotImplementedError(f"The method {method} is not implemented.")
     else:
         if method == 'window':
-            results = _calculate_collocations_window(sentences, target_words, horizon=horizon)
+            results = _calculate_collocations_window(sentences, target_words, horizon=horizon, 
+                                                    alternative=alternative)
         elif method == 'sentence':
             results = _calculate_collocations_sentence(
-                sentences, target_words, max_sentence_length=max_sentence_length
+                sentences, target_words, max_sentence_length=max_sentence_length,
+                alternative=alternative
             )
         else:
             raise NotImplementedError(f"The method {method} is not implemented.")
