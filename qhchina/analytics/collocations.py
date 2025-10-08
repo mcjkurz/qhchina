@@ -30,25 +30,10 @@ class FilterOptions(TypedDict, total=False):
     min_obs_global: int
     max_obs_global: int
 
-def _build_vocabulary_python(tokenized_sentences):
-    """Pure Python vocabulary builder - no Cython dependencies."""
-    word2idx = {}
-    idx = 0
-    for sentence in tokenized_sentences:
-        for word in sentence:
-            if word not in word2idx:
-                word2idx[word] = idx
-                idx += 1
-    idx2word = {v: k for k, v in word2idx.items()}
-    return word2idx, idx2word
-
-def _calculate_collocations_window_fast(tokenized_sentences, target_words, horizon=5, 
+def _calculate_collocations_window_cython(tokenized_sentences, target_words, horizon=5, 
                                          max_sentence_length=256, batch_size=10000):
     """
-    Fast Cython implementation of window-based collocation calculation.
-    
-    Performs all operations in compiled Cython code. This function requires Cython
-    to be compiled and available - it does not fall back to Python.
+    Cython implementation of window-based collocation calculation.
     
     Args:
         tokenized_sentences: List of tokenized sentences
@@ -153,13 +138,10 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5)
 
     return results
 
-def _calculate_collocations_sentence_fast(tokenized_sentences, target_words, 
+def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, 
                                            max_sentence_length=256, batch_size=10000):
     """
-    Fast Cython implementation of sentence-based collocation calculation.
-    
-    Performs all operations in compiled Cython code. This function requires Cython
-    to be compiled and available - it does not fall back to Python.
+    Cython implementation of sentence-based collocation calculation.
     
     Args:
         tokenized_sentences: List of tokenized sentences
@@ -228,7 +210,6 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sent
     sentences_with_token = defaultdict(int)
 
     for sentence in tqdm(tokenized_sentences):
-        # Truncate sentence if needed for consistency with Cython implementation
         if max_sentence_length is not None and len(sentence) > max_sentence_length:
             sentence = sentence[:max_sentence_length]
         
@@ -247,11 +228,9 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sent
             c = sentences_with_token[candidate] - a
             d = total_sentences - a - b - c
 
-            # Calculate the expected frequency (if independent) and ratio.
             expected = (a + b) * (a + c) / total_sentences if total_sentences > 0 else 0
             ratio = a / expected if expected > 0 else 0
 
-            # Compute Fisher's exact test.
             table = np.array([[a, b], [c, d]])
             p_value = fisher_exact(table, alternative='greater')[1]
 
@@ -328,12 +307,12 @@ def find_collocates(
     # Use Cython implementation if available, otherwise fall back to pure Python
     if CYTHON_AVAILABLE:
         if method == 'window':
-            results = _calculate_collocations_window_fast(
+            results = _calculate_collocations_window_cython(
                 sentences, target_words, horizon=horizon, 
                 max_sentence_length=max_sentence_length, batch_size=batch_size
             )
         elif method == 'sentence':
-            results = _calculate_collocations_sentence_fast(
+            results = _calculate_collocations_sentence_cython(
                 sentences, target_words, max_sentence_length=max_sentence_length,
                 batch_size=batch_size
             )
@@ -564,9 +543,9 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
         for (i, j), count in cooc_dict.items():
             cooc_matrix_array[i, j] = count
     
-    del cooc_dict # free memory
+    del cooc_dict
     
-    # Return results based on parametersi
+    # Return results based on parameters
     if as_dataframe:
         if use_sparse:
             # Convert sparse matrix to dense for DataFrame

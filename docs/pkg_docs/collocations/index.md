@@ -8,13 +8,6 @@ permalink: /pkg_docs/collocations/
 
 The `qhchina.analytics.collocations` module provides tools for identifying words that frequently co-occur together in text.
 
-## Performance
-
-The module includes **optimized Cython implementations** that provide significant speedups on large corpora:
-- **Window method**: 5-7× faster than pure Python on millions of sentences
-- **Sentence method**: 3-5× faster than pure Python on millions of sentences
-- Automatically falls back to pure Python if Cython is not available
-
 ## Functions
 
 ```python
@@ -120,30 +113,6 @@ collocates = find_collocates(
 top_collocates = collocates.sort_values("p_value").head(10)
 for _, row in top_collocates.iterrows():
     print(f"{row['collocate']}: obs={row['obs_local']}, ratio={row['ratio_local']:.2f}, p={row['p_value']:.4f}")
-```
-
-### Performance on Large Corpora
-
-```python
-# The optimized Cython implementation scales efficiently to millions of sentences
-large_corpus = load_large_corpus()  # e.g., 5M sentences
-
-# Default settings work well for most use cases
-collocates = find_collocates(
-    sentences=large_corpus,
-    target_words=["经济", "文化", "政治"],
-    method="sentence",
-    as_dataframe=True
-)
-
-# For memory-constrained systems (e.g., <8GB RAM), reduce batch_size
-collocates = find_collocates(
-    sentences=large_corpus,
-    target_words=["经济", "文化"],
-    method="sentence",
-    batch_size=5000,  # Lower memory usage
-    as_dataframe=True
-)
 ```
 
 ### Creating Co-occurrence Matrix
