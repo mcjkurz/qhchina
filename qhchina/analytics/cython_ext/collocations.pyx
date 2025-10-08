@@ -1,3 +1,4 @@
+# distutils: language = c++
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 # cython: boundscheck=False
 # cython: wraparound=False
@@ -15,6 +16,9 @@ import numpy as np
 cimport numpy as np
 from libc.stdlib cimport malloc, free
 from libc.string cimport memset
+from libcpp.unordered_map cimport unordered_map
+from libcpp.vector cimport vector
+from cython.operator cimport dereference, postincrement
 
 # Define C-level types for better performance
 ctypedef np.int32_t INT_t
@@ -269,7 +273,7 @@ def calculate_window_counts(
     int vocab_size
 ):
     """
-    Window-based collocation counting.
+    Window-based collocation counting using sparse C++ hash maps.
     
     Args:
         sentences_indices: 2D array of sentence tokens as indices (n_sentences, max_length)
@@ -293,15 +297,16 @@ def calculate_window_counts(
     cdef char* context_has_target
     cdef INT_t* target_idx_map
     
-    # Pre-allocate count arrays
+    # T_count remains as NumPy array (small, based on n_targets)
     cdef np.ndarray[LONG_t, ndim=1] T_count_arr = np.zeros(n_targets, dtype=np.int64)
     cdef LONG_t[::1] T_count = T_count_arr
     
-    cdef np.ndarray[LONG_t, ndim=2] candidate_counts_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
-    cdef LONG_t[:, ::1] candidate_counts = candidate_counts_arr
+    # Declare C++ hash maps for sparse counting
+    cdef unordered_map[INT_t, LONG_t] token_counter_map
+    cdef vector[unordered_map[INT_t, LONG_t]] candidate_counts_maps
     
-    cdef np.ndarray[LONG_t, ndim=1] token_counter_arr = np.zeros(vocab_size, dtype=np.int64)
-    cdef LONG_t[::1] token_counter = token_counter_arr
+    # Initialize vector of maps (one per target)
+    candidate_counts_maps.resize(n_targets)
     
     # Build target lookup table for O(1) checking
     is_target = <char*>malloc(vocab_size * sizeof(char))
@@ -328,6 +333,7 @@ def calculate_window_counts(
         raise MemoryError("Failed to allocate memory for context_has_target")
     
     # Main counting loop - release GIL for parallel processing potential
+    # Use C++ hash maps for sparse counting - better cache performance
     with nogil:
         for s in range(n_sentences):
             doc_len = sentence_lengths[s]
@@ -335,7 +341,7 @@ def calculate_window_counts(
             for i in range(doc_len):
                 token_idx = sentences_indices[s, i]
                 total_tokens += 1
-                token_counter[token_idx] += 1
+                token_counter_map[token_idx] += 1
                 
                 # Define window bounds (excluding center token) - inline comparisons
                 start = i - horizon if i >= horizon else 0
@@ -358,12 +364,36 @@ def calculate_window_counts(
                 for t in range(n_targets):
                     if context_has_target[t]:
                         T_count[t] += 1
-                        candidate_counts[t, token_idx] += 1
+                        candidate_counts_maps[t][token_idx] += 1
     
     # Free allocated memory
     free(is_target)
     free(target_idx_map)
     free(context_has_target)
+    
+    # Transfer sparse map data to dense NumPy arrays for return
+    cdef np.ndarray[LONG_t, ndim=2] candidate_counts_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    cdef np.ndarray[LONG_t, ndim=1] token_counter_arr = np.zeros(vocab_size, dtype=np.int64)
+    cdef LONG_t[:, ::1] candidate_counts = candidate_counts_arr
+    cdef LONG_t[::1] token_counter = token_counter_arr
+    
+    # Populate token_counter array from map
+    cdef unordered_map[INT_t, LONG_t].iterator it_token = token_counter_map.begin()
+    while it_token != token_counter_map.end():
+        token_idx = dereference(it_token).first
+        if token_idx < vocab_size:
+            token_counter[token_idx] = dereference(it_token).second
+        postincrement(it_token)
+    
+    # Populate candidate_counts array from maps
+    cdef unordered_map[INT_t, LONG_t].iterator it_cand
+    for t in range(n_targets):
+        it_cand = candidate_counts_maps[t].begin()
+        while it_cand != candidate_counts_maps[t].end():
+            token_idx = dereference(it_cand).first
+            if token_idx < vocab_size:
+                candidate_counts[t, token_idx] = dereference(it_cand).second
+            postincrement(it_cand)
     
     return T_count_arr, candidate_counts_arr, token_counter_arr, total_tokens
 
@@ -375,7 +405,7 @@ def calculate_sentence_counts(
     int vocab_size
 ):
     """
-    Sentence-based collocation counting.
+    Sentence-based collocation counting using sparse C++ hash maps.
     
     Args:
         sentences_indices: 2D array of sentence tokens as indices (n_sentences, max_length)
@@ -399,12 +429,12 @@ def calculate_sentence_counts(
     cdef INT_t* unique_tokens
     cdef INT_t* target_idx_map
     
-    # Pre-allocate count arrays
-    cdef np.ndarray[LONG_t, ndim=2] candidate_sentences_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
-    cdef LONG_t[:, ::1] candidate_sentences = candidate_sentences_arr
+    # Declare C++ hash maps for sparse counting
+    cdef unordered_map[INT_t, LONG_t] sentences_with_token_map
+    cdef vector[unordered_map[INT_t, LONG_t]] candidate_sentences_maps
     
-    cdef np.ndarray[LONG_t, ndim=1] sentences_with_token_arr = np.zeros(vocab_size, dtype=np.int64)
-    cdef LONG_t[::1] sentences_with_token = sentences_with_token_arr
+    # Initialize vector of maps (one per target)
+    candidate_sentences_maps.resize(n_targets)
     
     # Build target lookup table
     is_target = <char*>malloc(vocab_size * sizeof(char))
@@ -447,6 +477,7 @@ def calculate_sentence_counts(
         raise MemoryError("Failed to allocate memory for unique_tokens")
     
     # Main counting loop - release GIL for parallel processing potential
+    # Use C++ hash maps for sparse counting - better cache performance
     with nogil:
         for s in range(n_sentences):
             doc_len = sentence_lengths[s]
@@ -468,17 +499,17 @@ def calculate_sentence_counts(
                         if is_target[token_idx]:
                             target_in_sentence[target_idx_map[token_idx]] = 1
             
-            # Update global sentence counts - only iterate unique tokens, not full vocab
+            # Update global sentence counts using hash map - only iterate unique tokens
             for i in range(unique_count):
                 token_idx = unique_tokens[i]
-                sentences_with_token[token_idx] += 1
+                sentences_with_token_map[token_idx] += 1
             
-            # For each target in sentence, count all unique tokens - only iterate unique tokens
+            # For each target in sentence, count all unique tokens using hash maps
             for t in range(n_targets):
                 if target_in_sentence[t]:
                     for i in range(unique_count):
                         token_idx = unique_tokens[i]
-                        candidate_sentences[t, token_idx] += 1
+                        candidate_sentences_maps[t][token_idx] += 1
             
             # Clear only the tokens we actually used (much faster than memset entire vocab)
             for i in range(unique_count):
@@ -490,6 +521,30 @@ def calculate_sentence_counts(
     free(token_in_sentence)
     free(target_in_sentence)
     free(unique_tokens)
+    
+    # Transfer sparse map data to dense NumPy arrays for return
+    cdef np.ndarray[LONG_t, ndim=2] candidate_sentences_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    cdef np.ndarray[LONG_t, ndim=1] sentences_with_token_arr = np.zeros(vocab_size, dtype=np.int64)
+    cdef LONG_t[:, ::1] candidate_sentences = candidate_sentences_arr
+    cdef LONG_t[::1] sentences_with_token = sentences_with_token_arr
+    
+    # Populate sentences_with_token array from map
+    cdef unordered_map[INT_t, LONG_t].iterator it_token = sentences_with_token_map.begin()
+    while it_token != sentences_with_token_map.end():
+        token_idx = dereference(it_token).first
+        if token_idx < vocab_size:
+            sentences_with_token[token_idx] = dereference(it_token).second
+        postincrement(it_token)
+    
+    # Populate candidate_sentences array from maps
+    cdef unordered_map[INT_t, LONG_t].iterator it_cand
+    for t in range(n_targets):
+        it_cand = candidate_sentences_maps[t].begin()
+        while it_cand != candidate_sentences_maps[t].end():
+            token_idx = dereference(it_cand).first
+            if token_idx < vocab_size:
+                candidate_sentences[t, token_idx] = dereference(it_cand).second
+            postincrement(it_cand)
     
     return candidate_sentences_arr, sentences_with_token_arr, n_sentences
 
