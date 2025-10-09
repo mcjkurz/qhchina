@@ -16,7 +16,7 @@ find_collocates(sentences, target_words, method='window', horizon=5, filters=Non
                 alternative='greater')
 ```
 
-Find words that co-occur with target words more frequently than expected by chance. Statistical significance is computed using Fisher's exact test with the "greater" alternative by default, testing whether observed co-occurrence exceeds expected frequency.
+Statistical significance is computed using Fisher's exact test with the "greater" alternative by default, testing whether observed co-occurrence exceeds expected frequency.
 
 **Parameters:**
 - `sentences` (list): List of tokenized sentences (each sentence is a list of tokens)
@@ -28,7 +28,7 @@ Find words that co-occur with target words more frequently than expected by chan
 - `max_sentence_length` (int): Maximum sentence length for preprocessing. Longer sentences are truncated to avoid memory bloat. Default is 256. Set to `None` for no limit.
 - `batch_size` (int): Number of sentences to process per batch. Default is 10000. Controls memory usage - smaller batches use less RAM. For typical use cases, the default works well. Adjust only if memory-constrained (use smaller values) or have abundant RAM (use larger values for marginal speed gains).
 - `alternative` (str): Alternative hypothesis for Fisher's exact test. Options are `'greater'` (default), `'less'`, or `'two-sided'`.
-- `filters` (dict): Optional filters to apply *after* finding all collocates (statistics are computed on the full corpus first, then results are filtered):
+- `filters` (dict): Optional filters to apply *after* the statistics are computed on the full corpus:
   - `'max_p'`: Maximum p-value threshold for statistical significance
   - `'stopwords'`: List of words to exclude
   - `'min_length'`: Minimum character length for collocates
