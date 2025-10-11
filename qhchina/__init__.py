@@ -8,7 +8,7 @@ For more specialized functions, import from specific modules:
 - qhchina.educational: Educational visualization tools
 """
 
-__version__ = "0.0.54"
+__version__ = "0.0.55"
 
 # Import helper functions directly into the package namespace
 from .helpers.fonts import load_fonts, current_font, set_font, list_available_fonts, list_font_aliases
