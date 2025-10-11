@@ -13,7 +13,7 @@ The `qhchina.analytics.topicmodels` module provides Latent Dirichlet Allocation 
 ### Initialization
 
 ```python
-LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=1000, burnin=0, 
+LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=100, burnin=0, 
                 random_state=None, log_interval=None, min_word_count=1, 
                 max_vocab_size=None, min_word_length=1, stopwords=None, 
                 use_cython=True, estimate_alpha=1)
@@ -22,9 +22,9 @@ LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=1000, burnin=0,
 ### Parameters
 
 - `n_topics` (int): Number of topics (default: 10)
-- `alpha` (float): Document-topic prior. If None, uses `50/n_topics` (Griffiths & Steyvers, 2004) (default: None)
+- `alpha` (float or array): Document-topic prior. Can be a float (symmetric prior) or array of floats (asymmetric prior, one value per topic). If None, uses `50/n_topics` (Griffiths & Steyvers, 2004) (default: None)
 - `beta` (float): Topic-word prior. If None, uses `1/n_topics` (Griffiths & Steyvers, 2004) (default: None)
-- `iterations` (int): Number of Gibbs sampling iterations (default: 1000)
+- `iterations` (int): Number of Gibbs sampling iterations (default: 100)
 - `burnin` (int): Initial iterations before alpha optimization (default: 0)
 - `random_state` (int): Random seed for reproducibility (default: None)
 - `log_interval` (int): Calculate and print perplexity every N iterations (default: None)
@@ -253,14 +253,24 @@ Documents are automatically colored by dominant topic, or by k-means clusters if
 save(filepath)
 ```
 
-```python
-load(filepath)
-```
-
-Save or load model to/from file.
+Save model to file.
 
 **Parameters:**
-- `filepath` (str): Path to save/load model
+- `filepath` (str): Path to save the model
+
+<br>
+
+```python
+LDAGibbsSampler.load(filepath)
+```
+
+Load model from file. This is a class method.
+
+**Parameters:**
+- `filepath` (str): Path to load the model from
+
+**Returns:**
+- Loaded LDAGibbsSampler instance
 
 <br>
 
@@ -286,9 +296,9 @@ documents = [
 # Create and fit model
 lda = LDAGibbsSampler(
     n_topics=5,
-    iterations=1000,
-    burnin=100,
-    log_interval=100,
+    iterations=100,
+    burnin=20,
+    log_interval=20,
     stopwords=stopwords,
     min_word_count=2,
     estimate_alpha=1
@@ -307,6 +317,9 @@ lda.plot_topic_words(n_words=10, figsize=(12, 20), filename="topics.png")
 
 # Save model
 lda.save("lda_model.npy")
+
+# Load model later
+loaded_lda = LDAGibbsSampler.load("lda_model.npy")
 ```
 
 ### Analyzing Documents and Topics

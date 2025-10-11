@@ -12,8 +12,7 @@ The `qhchina.analytics.collocations` module provides tools for identifying words
 
 ```python
 find_collocates(sentences, target_words, method='window', horizon=5, filters=None, 
-                as_dataframe=True, max_sentence_length=256, batch_size=10000, 
-                alternative='greater')
+                as_dataframe=True, max_sentence_length=256, alternative='greater')
 ```
 
 Statistical significance is computed using Fisher's exact test with the "greater" alternative by default, testing whether observed co-occurrence exceeds expected frequency.
@@ -25,8 +24,7 @@ Statistical significance is computed using Fisher's exact test with the "greater
   - `'window'`: Use sliding window of specified horizon (default)
   - `'sentence'`: Use whole sentences as context
 - `horizon` (int): Context window size (only used if `method='window'`)
-- `max_sentence_length` (int): Maximum sentence length for preprocessing. Longer sentences are truncated to avoid memory bloat. Default is 256. Set to `None` for no limit.
-- `batch_size` (int): Number of sentences to process per batch. Default is 10000. Controls memory usage - smaller batches use less RAM. For typical use cases, the default works well. Adjust only if memory-constrained (use smaller values) or have abundant RAM (use larger values for marginal speed gains).
+- `max_sentence_length` (int): Maximum sentence length for preprocessing. Sentences longer than this value are truncated to avoid excessive memory usage from outliers. Default is 256 tokens. Set to `None` for no limit. Used by both `'window'` and `'sentence'` methods.
 - `alternative` (str): Alternative hypothesis for Fisher's exact test. Options are `'greater'` (default), `'less'`, or `'two-sided'`.
 - `filters` (dict): Optional filters to apply *after* the statistics are computed on the full corpus:
   - `'max_p'`: Maximum p-value threshold for statistical significance
@@ -50,6 +48,40 @@ Statistical significance is computed using Fisher's exact test with the "greater
 - `ratio_local`: Ratio of observed to expected frequency
 - `obs_global`: Total frequency of the collocate
 - `p_value`: Statistical significance of the association
+
+<br>
+
+```python
+plot_collocates(collocates, x_col='ratio_local', y_col='p_value', 
+                x_scale='log', y_scale='log', color=None, colormap='viridis', 
+                color_by=None, title=None, figsize=(10, 8), fontsize=10, 
+                show_labels=False, label_top_n=None, alpha=0.6, marker_size=50, 
+                show_diagonal=False, diagonal_color='red', filename=None, 
+                xlabel=None, ylabel=None)
+```
+
+Visualize collocation results as a flexible 2D scatter plot.
+
+**Parameters:**
+- `collocates` (DataFrame or list): Output from `find_collocates`
+- `x_col` (str): Column for x-axis (default: `'ratio_local'`)
+- `y_col` (str): Column for y-axis (default: `'p_value'`)
+- `x_scale`, `y_scale` (str): Axis scales - `'log'` (default), `'linear'`, `'symlog'`, or `'logit'`
+- `color` (str or list): Color(s) for points
+- `colormap` (str): Matplotlib colormap when using `color_by` (default: `'viridis'`)
+- `color_by` (str): Column to color points by (e.g., `'ratio_local'`, `'obs_local'`)
+- `show_labels` (bool): Show text labels for collocates
+- `label_top_n` (int): Label only top N points. For `p_value`, labels smallest (most significant) values; for other columns, labels largest values.
+- `show_diagonal` (bool): Draw y=x diagonal reference line (useful for obs vs exp plots)
+- `diagonal_color` (str): Color for diagonal line (default: `'red'`)
+- `alpha` (float): Point transparency (0.0 to 1.0)
+- `marker_size` (int): Size of scatter points
+- `figsize` (tuple): Figure size (width, height) in inches
+- `fontsize` (int): Base font size
+- `filename` (str): Save plot to file (optional)
+- `xlabel`, `ylabel` (str): Custom axis labels (auto-generated if `None`)
+
+**Returns:** None (displays the plot)
 
 <br>
 
@@ -115,6 +147,46 @@ collocates = find_collocates(
 top_collocates = collocates.sort_values("p_value").head(10)
 for _, row in top_collocates.iterrows():
     print(f"{row['collocate']}: obs={row['obs_local']}, ratio={row['ratio_local']:.2f}, p={row['p_value']:.4f}")
+```
+
+### Visualizing Collocates
+
+```python
+from qhchina.analytics.collocations import find_collocates, plot_collocates
+
+# Find collocates
+collocates = find_collocates(
+    sentences=sentences,
+    target_words=["经济"],
+    alternative='two-sided',
+    filters={'max_p': 0.05, 'min_obs_local': 2}
+)
+
+# Default: ratio vs p-value (log scales)
+plot_collocates(collocates, title="Collocates of 经济")
+
+# Observed vs expected with diagonal reference line
+plot_collocates(
+    collocates,
+    x_col='exp_local',
+    y_col='obs_local',
+    x_scale='log',
+    y_scale='log',
+    show_diagonal=True,
+    title='Observed vs Expected'
+)
+
+# Color by ratio, label top 15 most strongly associated
+plot_collocates(
+    collocates,
+    x_col='obs_global',
+    y_col='p_value',
+    color_by='ratio_local',
+    colormap='RdYlBu_r',
+    show_labels=True,
+    label_top_n=15,
+    title='Corpus Frequency vs Significance'
+)
 ```
 
 ### Creating Co-occurrence Matrix

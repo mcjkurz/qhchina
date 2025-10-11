@@ -8,21 +8,33 @@
 """
 Collocation counting operations implemented in Cython.
 
-This module provides implementations of the core counting operations
-for collocation analysis using Cython.
+This module provides highly optimized implementations of core counting operations
+for collocation analysis. Key optimizations include:
+- C-level sentence encoding: Flattened contiguous buffer with offset array for O(1) access
+- Zero dictionary access in hot loops: All counting operates on pure C-level integer arrays
+- Active targets tracking: Window routine only iterates over targets actually seen in window
+- Epoch-based uniqueness: O(1) duplicate detection without linear search
+- Dense NumPy arrays for direct counting in nogil blocks (no sparse-to-dense conversion)
+- GIL-free hot loops with while-based iteration for maximum performance
+- Complete separation: Python dictionary access happens before any counting routine
 """
 
 import numpy as np
 cimport numpy as np
 from libc.stdlib cimport malloc, free
 from libc.string cimport memset
-from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
-from cython.operator cimport dereference, postincrement
 
 # Define C-level types for better performance
 ctypedef np.int32_t INT_t
 ctypedef np.int64_t LONG_t
+
+# C-level struct for encoded corpus
+cdef struct EncodedCorpus:
+    INT_t* tokens        # Flattened token array
+    LONG_t* offsets      # Sentence start offsets (n_sentences + 1)
+    int n_sentences      # Number of sentences
+    LONG_t total_tokens  # Total number of tokens
 
 def build_vocabulary(list tokenized_sentences):
     """
@@ -55,92 +67,136 @@ def build_vocabulary(list tokenized_sentences):
     
     return word2idx, idx2word
 
-def convert_sentences_to_indices(list tokenized_sentences, dict word2idx, int max_sentence_length=256):
+cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict word2idx, int max_sentence_length=256) except NULL:
     """
-    Convert tokenized sentences to indexed arrays.
+    Encode corpus into compact C-level buffers (flattened tokens + offsets).
     
-    Converts tokenized sentences to padded integer arrays for efficient processing.
+    This function performs all word-to-index lookups upfront and stores the result
+    in contiguous C memory for maximum cache efficiency. No per-sentence allocations.
     
     Args:
         tokenized_sentences: List of tokenized sentences (list of lists of strings)
-        word2idx: Dictionary mapping words to integer indices
-        max_sentence_length: Maximum sentence length to pad to (default 256)
+        word2idx: Dictionary mapping words to indices
+        max_sentence_length: Maximum sentence length to process (default 256)
         
     Returns:
-        tuple: (sentences_indices, sentence_lengths)
-            - sentences_indices: 2D numpy array (n_sentences, max_length) of int32
-            - sentence_lengths: 1D numpy array (n_sentences,) of int32
+        EncodedCorpus*: Pointer to encoded corpus structure (caller must free)
     """
     cdef int n_sentences = len(tokenized_sentences)
-    cdef int i, j, actual_len, sent_len
-    cdef int max_length = 0
+    cdef int i, j, sent_len, token_idx
+    cdef LONG_t estimated_tokens = 0
     cdef list sentence
     cdef str word
+    cdef object word2idx_get = word2idx.get
+    cdef vector[INT_t] tokens_vec
+    cdef vector[LONG_t] offsets_vec
+    cdef LONG_t current_offset = 0
+    cdef EncodedCorpus* corpus = NULL
     
-    # First pass: find max length
-    for i in range(n_sentences):
-        sent_len = len(tokenized_sentences[i])
-        if sent_len > max_length:
-            max_length = sent_len
-    
-    # Cap max_length to avoid memory bloat
-    if max_length > max_sentence_length:
-        max_length = max_sentence_length
-    
-    # Allocate arrays
-    cdef np.ndarray[INT_t, ndim=2] sentences_indices = np.zeros((n_sentences, max_length), dtype=np.int32)
-    cdef np.ndarray[INT_t, ndim=1] sentence_lengths = np.zeros(n_sentences, dtype=np.int32)
-    
-    # Second pass: convert to indices
+    # Calculate precise token count for optimal reservation
     for i in range(n_sentences):
         sentence = tokenized_sentences[i]
-        actual_len = len(sentence)
-        if actual_len > max_length:
-            actual_len = max_length
-        sentence_lengths[i] = actual_len
-        
-        for j in range(actual_len):
-            word = sentence[j]
-            sentences_indices[i, j] = word2idx[word]
+        sent_len = len(sentence)
+        if sent_len > max_sentence_length:
+            sent_len = max_sentence_length
+        estimated_tokens += sent_len
     
-    return sentences_indices, sentence_lengths
+    # Reserve exact space needed
+    offsets_vec.reserve(n_sentences + 1)
+    tokens_vec.reserve(estimated_tokens)
+    
+    # Build flattened token array and offsets
+    offsets_vec.push_back(0)
+    for i in range(n_sentences):
+        sentence = tokenized_sentences[i]
+        sent_len = len(sentence)
+        
+        # Cap sentence length if needed
+        if sent_len > max_sentence_length:
+            sent_len = max_sentence_length
+        
+        # Convert words to indices and append to flat buffer
+        for j in range(sent_len):
+            word = sentence[j]
+            token_idx = word2idx_get(word, -1)
+            if token_idx >= 0:
+                tokens_vec.push_back(token_idx)
+                current_offset += 1
+        
+        # Store offset for next sentence
+        offsets_vec.push_back(current_offset)
+    
+    # Allocate C struct
+    corpus = <EncodedCorpus*>malloc(sizeof(EncodedCorpus))
+    if corpus == NULL:
+        raise MemoryError("Failed to allocate EncodedCorpus")
+    
+    # Allocate and copy token array
+    corpus.total_tokens = <LONG_t>tokens_vec.size()
+    corpus.tokens = <INT_t*>malloc(corpus.total_tokens * sizeof(INT_t))
+    if corpus.tokens == NULL:
+        free(corpus)
+        raise MemoryError("Failed to allocate tokens array")
+    
+    for i in range(corpus.total_tokens):
+        corpus.tokens[i] = tokens_vec[i]
+    
+    # Allocate and copy offsets array
+    corpus.n_sentences = n_sentences
+    corpus.offsets = <LONG_t*>malloc((n_sentences + 1) * sizeof(LONG_t))
+    if corpus.offsets == NULL:
+        free(corpus.tokens)
+        free(corpus)
+        raise MemoryError("Failed to allocate offsets array")
+    
+    for i in range(n_sentences + 1):
+        corpus.offsets[i] = offsets_vec[i]
+    
+    return corpus
+
+cdef void free_encoded_corpus(EncodedCorpus* corpus) nogil:
+    """
+    Free memory allocated for encoded corpus.
+    
+    Args:
+        corpus: Pointer to encoded corpus structure
+    """
+    if corpus != NULL:
+        if corpus.tokens != NULL:
+            free(corpus.tokens)
+        if corpus.offsets != NULL:
+            free(corpus.offsets)
+        free(corpus)
 
 def calculate_collocations_window(list tokenized_sentences, list target_words, 
-                                  int horizon=5, int max_sentence_length=256, 
-                                  int batch_size=10000):
+                                  int horizon=5, int max_sentence_length=256):
     """
     Window-based collocation calculation.
+    
+    Encodes corpus into C-level buffers once, then processes them in fully optimized
+    hot loops without any Python dictionary access. Uses active targets tracking.
     
     Args:
         tokenized_sentences: List of tokenized sentences
         target_words: List of target words
         horizon: Window size on each side
         max_sentence_length: Maximum sentence length (default 256)
-        batch_size: Batch size for processing (default 10000)
         
     Returns:
         tuple: (T_count, candidate_counts, token_counter, total_tokens, word2idx, idx2word, target_indices)
     """
     # All variable declarations at the top
     cdef dict word2idx, idx2word
-    cdef int vocab_size, n_sentences, n_targets, n_batches
-    cdef int batch_start, batch_end, batch_idx, t_idx, candidate_idx
-    cdef list batch_sentences, target_words_filtered
-    cdef str word
-    cdef INT_t[:, ::1] batch_indices
-    cdef INT_t[::1] batch_lengths, target_indices_array
-    cdef LONG_t[::1] T_count_batch, token_counter_batch
-    cdef LONG_t[:, ::1] candidate_counts_batch
-    cdef LONG_t total_tokens_batch
-    cdef np.ndarray[LONG_t, ndim=1] T_count_total, token_counter_total
-    cdef np.ndarray[LONG_t, ndim=2] candidate_counts_total
+    cdef int vocab_size, n_targets
+    cdef list target_words_filtered
+    cdef INT_t[::1] target_indices_array
     cdef np.ndarray[INT_t, ndim=1] target_indices
-    cdef LONG_t total_tokens = 0
+    cdef EncodedCorpus* corpus = NULL
+    cdef tuple result
     
     # Build vocabulary
     word2idx, idx2word = build_vocabulary(tokenized_sentences)
     vocab_size = len(word2idx)
-    n_sentences = len(tokenized_sentences)
     
     # Filter target words and convert to indices
     target_words_filtered = [w for w in target_words if w in word2idx]
@@ -151,76 +207,52 @@ def calculate_collocations_window(list tokenized_sentences, list target_words,
     target_indices_array = target_indices
     n_targets = len(target_indices)
     
-    # Initialize accumulation arrays
-    T_count_total = np.zeros(n_targets, dtype=np.int64)
-    candidate_counts_total = np.zeros((n_targets, vocab_size), dtype=np.int64)
-    token_counter_total = np.zeros(vocab_size, dtype=np.int64)
+    # Encode corpus to C-level buffers (single allocation, contiguous memory)
+    corpus = encode_corpus_to_c_buffer(tokenized_sentences, word2idx, max_sentence_length)
     
-    # Process batches - all in Cython
-    n_batches = (n_sentences + batch_size - 1) // batch_size
-    
-    for batch_idx in range(n_batches):
-        batch_start = batch_idx * batch_size
-        batch_end = min(batch_start + batch_size, n_sentences)
-        batch_sentences = tokenized_sentences[batch_start:batch_end]
-        
-        # Convert batch to indices
-        batch_indices, batch_lengths = convert_sentences_to_indices(
-            batch_sentences, word2idx, max_sentence_length
+    try:
+        # Calculate counts from C-level buffers (no dictionary access, active targets optimization)
+        result = calculate_window_counts(
+            corpus, target_indices_array, horizon, vocab_size
         )
-        
-        # Calculate counts for this batch
-        T_count_batch, candidate_counts_batch, token_counter_batch, total_tokens_batch = calculate_window_counts(
-            batch_indices, batch_lengths, target_indices_array, horizon, vocab_size
-        )
-        
-        # Accumulate results in Cython
-        for t_idx in range(n_targets):
-            T_count_total[t_idx] += T_count_batch[t_idx]
-            for candidate_idx in range(vocab_size):
-                candidate_counts_total[t_idx, candidate_idx] += candidate_counts_batch[t_idx, candidate_idx]
-        
-        for candidate_idx in range(vocab_size):
-            token_counter_total[candidate_idx] += token_counter_batch[candidate_idx]
-        
-        total_tokens += total_tokens_batch
-    
-    return T_count_total, candidate_counts_total, token_counter_total, total_tokens, word2idx, idx2word, target_indices
+        return result[0], result[1], result[2], result[3], word2idx, idx2word, target_indices
+    finally:
+        # Always free the corpus memory
+        free_encoded_corpus(corpus)
 
-def calculate_collocations_sentence(list tokenized_sentences, list target_words,
-                                    int max_sentence_length=256, int batch_size=10000):
+def calculate_collocations_sentence(list tokenized_sentences, list target_words, int max_sentence_length=256):
     """
-    Sentence-based collocation calculation.
+    Optimized sentence-based collocation calculation.
+    
+    Encodes corpus into C-level buffers once, then processes them in fully optimized
+    hot loops without any Python dictionary access. Uses epoch-based uniqueness detection.
     
     Args:
-        tokenized_sentences: List of tokenized sentences
+        tokenized_sentences: List of tokenized sentences (list of lists of strings)
         target_words: List of target words
         max_sentence_length: Maximum sentence length (default 256)
-        batch_size: Batch size for processing (default 10000)
         
     Returns:
         tuple: (candidate_sentences, sentences_with_token, total_sentences, word2idx, idx2word, target_indices)
+            - candidate_sentences: 2D array (n_targets, vocab_size) counting co-occurrences
+            - sentences_with_token: 1D array (vocab_size,) counting sentences per token
+            - total_sentences: Total number of sentences processed
+            - word2idx: Dictionary mapping words to indices
+            - idx2word: Dictionary mapping indices to words
+            - target_indices: Array of target word indices
     """
-    # All variable declarations at the top
+    # Variable declarations
     cdef dict word2idx, idx2word
-    cdef int vocab_size, n_sentences, n_targets, n_batches
-    cdef int batch_start, batch_end, batch_idx, t_idx, candidate_idx
-    cdef list batch_sentences, target_words_filtered
-    cdef str word
-    cdef INT_t[:, ::1] batch_indices
-    cdef INT_t[::1] batch_lengths, target_indices_array
-    cdef LONG_t[:, ::1] candidate_sentences_batch
-    cdef LONG_t[::1] sentences_with_token_batch
-    cdef LONG_t n_sentences_batch
-    cdef np.ndarray[LONG_t, ndim=2] candidate_sentences_total
-    cdef np.ndarray[LONG_t, ndim=1] sentences_with_token_total
+    cdef int vocab_size, n_targets
+    cdef list target_words_filtered
     cdef np.ndarray[INT_t, ndim=1] target_indices
-    cdef LONG_t total_sentences = 0
+    cdef INT_t[::1] target_indices_array
+    cdef EncodedCorpus* corpus = NULL
+    cdef tuple result
     
     # Build vocabulary
     word2idx, idx2word = build_vocabulary(tokenized_sentences)
     vocab_size = len(word2idx)
-    n_sentences = len(tokenized_sentences)
     
     # Filter target words and convert to indices
     target_words_filtered = [w for w in target_words if w in word2idx]
@@ -231,53 +263,172 @@ def calculate_collocations_sentence(list tokenized_sentences, list target_words,
     target_indices_array = target_indices
     n_targets = len(target_indices)
     
-    # Initialize accumulation arrays
-    candidate_sentences_total = np.zeros((n_targets, vocab_size), dtype=np.int64)
-    sentences_with_token_total = np.zeros(vocab_size, dtype=np.int64)
+    # Encode corpus to C-level buffers (single allocation, contiguous memory)
+    corpus = encode_corpus_to_c_buffer(tokenized_sentences, word2idx, max_sentence_length)
     
-    # Process batches - all in Cython
-    n_batches = (n_sentences + batch_size - 1) // batch_size
-    
-    for batch_idx in range(n_batches):
-        batch_start = batch_idx * batch_size
-        batch_end = min(batch_start + batch_size, n_sentences)
-        batch_sentences = tokenized_sentences[batch_start:batch_end]
-        
-        # Convert batch to indices
-        batch_indices, batch_lengths = convert_sentences_to_indices(
-            batch_sentences, word2idx, max_sentence_length
+    try:
+        # Call optimized counting function with C-level buffers (epoch-based uniqueness)
+        result = calculate_sentence_counts(
+            corpus, target_indices_array, vocab_size, max_sentence_length, word2idx, idx2word, target_indices
         )
-        
-        # Calculate counts for this batch
-        candidate_sentences_batch, sentences_with_token_batch, n_sentences_batch = calculate_sentence_counts(
-            batch_indices, batch_lengths, target_indices_array, vocab_size
-        )
-        
-        # Accumulate results in Cython
-        for t_idx in range(n_targets):
-            for candidate_idx in range(vocab_size):
-                candidate_sentences_total[t_idx, candidate_idx] += candidate_sentences_batch[t_idx, candidate_idx]
-        
-        for candidate_idx in range(vocab_size):
-            sentences_with_token_total[candidate_idx] += sentences_with_token_batch[candidate_idx]
-        
-        total_sentences += n_sentences_batch
-    
-    return candidate_sentences_total, sentences_with_token_total, total_sentences, word2idx, idx2word, target_indices
+        return result
+    finally:
+        # Always free the corpus memory
+        free_encoded_corpus(corpus)
 
-def calculate_window_counts(
-    INT_t[:, ::1] sentences_indices,
-    INT_t[::1] sentence_lengths,
+cdef calculate_sentence_counts(
+    EncodedCorpus* corpus,
+    INT_t[::1] target_indices,
+    int vocab_size,
+    int max_sentence_length,
+    dict word2idx,
+    dict idx2word,
+    np.ndarray[INT_t, ndim=1] target_indices_np
+):
+    """
+    Core sentence counting logic operating on C-level encoded corpus.
+    
+    Processes corpus from contiguous C buffers without any Python dictionary access.
+    Uses epoch-based uniqueness detection for O(1) duplicate checking with overflow guard.
+    Uses dense NumPy arrays for counting directly in nogil blocks.
+    All hot loops are GIL-free and operate purely on C-level memory.
+    """
+    cdef int n_targets = target_indices.shape[0]
+    cdef int n_sentences = corpus.n_sentences
+    cdef int s, t, i, j, token_idx, n_unique, n_targets_in_sent
+    cdef LONG_t sent_start, sent_end, sent_len
+    cdef char* is_target = NULL
+    cdef INT_t* target_idx_map = NULL
+    cdef INT_t* seen_epoch = NULL  # Epoch-based uniqueness tracking
+    cdef INT_t current_epoch = 1
+    cdef vector[INT_t] unique_tokens_buffer
+    cdef vector[INT_t] targets_in_sent_buffer
+    
+    # Allocate all NumPy arrays upfront
+    cdef np.ndarray[LONG_t, ndim=2] candidate_sentences_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    cdef np.ndarray[LONG_t, ndim=1] sentences_with_token_arr = np.zeros(vocab_size, dtype=np.int64)
+    
+    # Create typed memoryviews for direct access in nogil blocks
+    cdef LONG_t[:, ::1] candidate_sentences = candidate_sentences_arr
+    cdef LONG_t[::1] sentences_with_token = sentences_with_token_arr
+    
+    # Build target lookup table for O(1) checking
+    is_target = <char*>malloc(vocab_size * sizeof(char))
+    if is_target == NULL:
+        raise MemoryError("Failed to allocate memory for is_target")
+    memset(is_target, 0, vocab_size * sizeof(char))
+    
+    # Build reverse mapping: vocab_idx -> target_position (initialize to -1 for safety)
+    target_idx_map = <INT_t*>malloc(vocab_size * sizeof(INT_t))
+    if target_idx_map == NULL:
+        free(is_target)
+        raise MemoryError("Failed to allocate memory for target_idx_map")
+    memset(target_idx_map, 0xFF, vocab_size * sizeof(INT_t))  # -1 for all entries
+    
+    for t in range(n_targets):
+        if target_indices[t] < vocab_size:
+            is_target[target_indices[t]] = 1
+            target_idx_map[target_indices[t]] = t
+    
+    # Allocate epoch array for O(1) uniqueness detection
+    seen_epoch = <INT_t*>malloc(vocab_size * sizeof(INT_t))
+    if seen_epoch == NULL:
+        free(is_target)
+        free(target_idx_map)
+        raise MemoryError("Failed to allocate memory for seen_epoch")
+    memset(seen_epoch, 0, vocab_size * sizeof(INT_t))
+    
+    # Reserve space for buffers to minimize reallocations
+    # Use max_sentence_length since that's the maximum possible unique tokens in a sentence
+    unique_tokens_buffer.reserve(max_sentence_length)
+    # Reserve space for targets buffer (estimate: min of n_targets or max_sentence_length)
+    targets_in_sent_buffer.reserve(n_targets if n_targets < max_sentence_length else max_sentence_length)
+    
+    # Main counting loop - Process C-level encoded corpus (fully nogil!)
+    with nogil:
+        for s in range(n_sentences):
+            # Check for epoch overflow and reset if necessary
+            if current_epoch == 2147483647:  # INT32_MAX
+                memset(seen_epoch, 0, vocab_size * sizeof(INT_t))
+                current_epoch = 1
+            
+            # Get sentence bounds from offset array
+            sent_start = corpus.offsets[s]
+            sent_end = corpus.offsets[s + 1]
+            sent_len = sent_end - sent_start
+            
+            # Clear buffers for this sentence
+            unique_tokens_buffer.clear()
+            targets_in_sent_buffer.clear()
+            
+            # Build list of unique token indices using epoch-based detection (O(1))
+            for i in range(sent_len):
+                token_idx = corpus.tokens[sent_start + i]
+                
+                if token_idx >= vocab_size:
+                    continue
+                
+                # O(1) uniqueness check using epochs
+                if seen_epoch[token_idx] != current_epoch:
+                    seen_epoch[token_idx] = current_epoch
+                    unique_tokens_buffer.push_back(token_idx)
+                    
+                    # Check if this token is a target
+                    if is_target[token_idx]:
+                        targets_in_sent_buffer.push_back(token_idx)
+            
+            n_unique = <int>unique_tokens_buffer.size()
+            
+            # Update global sentence counts for all unique tokens
+            i = 0
+            while i < n_unique:
+                token_idx = unique_tokens_buffer[i]
+                sentences_with_token[token_idx] += 1
+                i += 1
+            
+            # For each target in this sentence, count all unique tokens
+            n_targets_in_sent = <int>targets_in_sent_buffer.size()
+            i = 0
+            while i < n_targets_in_sent:
+                token_idx = targets_in_sent_buffer[i]
+                t = target_idx_map[token_idx]
+                
+                # Safety check (should never be -1 if logic is correct)
+                if t >= 0:
+                    # Count all unique tokens in sentence for this target
+                    j = 0
+                    while j < n_unique:
+                        candidate_sentences[t, unique_tokens_buffer[j]] += 1
+                        j += 1
+                i += 1
+            
+            # Increment epoch for next sentence
+            current_epoch += 1
+    
+    # Free allocated memory
+    free(is_target)
+    free(target_idx_map)
+    free(seen_epoch)
+    
+    # Return the arrays directly (word2idx passed from caller)
+    return candidate_sentences_arr, sentences_with_token_arr, n_sentences, word2idx, idx2word, target_indices_np
+
+cdef calculate_window_counts(
+    EncodedCorpus* corpus,
     INT_t[::1] target_indices,
     int horizon,
     int vocab_size
 ):
     """
-    Window-based collocation counting using sparse C++ hash maps.
+    Window-based collocation counting operating on C-level encoded corpus.
+    
+    Processes corpus from contiguous C buffers without any Python dictionary access.
+    Uses epoch-based active targets tracking: eliminates memset per position and only
+    iterates over targets actually seen in window. Hot loops operate without GIL
+    on C-level memory. Uses dense NumPy arrays for counting directly in nogil blocks.
     
     Args:
-        sentences_indices: 2D array of sentence tokens as indices (n_sentences, max_length)
-        sentence_lengths: Actual length of each sentence (n_sentences,)
+        corpus: Pointer to encoded corpus structure
         target_indices: Indices of target words (n_targets,)
         horizon: Window size on each side
         vocab_size: Size of the vocabulary
@@ -289,24 +440,27 @@ def calculate_window_counts(
             - token_counter: Global count of each token
             - total_tokens: Total number of token positions
     """
-    cdef int n_sentences = sentences_indices.shape[0]
+    cdef int n_sentences = corpus.n_sentences
     cdef int n_targets = target_indices.shape[0]
-    cdef int i, j, s, t, start, end, doc_len, token_idx, target_idx, context_idx
+    cdef int i, j, s, t, start, end, token_idx, context_idx, max_active
+    cdef LONG_t sent_start, sent_end, sent_len
     cdef LONG_t total_tokens = 0
-    cdef char* is_target
-    cdef char* context_has_target
-    cdef INT_t* target_idx_map
+    cdef char* is_target = NULL
+    cdef INT_t* target_idx_map = NULL
+    cdef INT_t* target_epoch = NULL  # Epoch-based tracking instead of memset
+    cdef INT_t window_epoch = 1
+    cdef vector[INT_t] active_targets  # Only targets actually in window
+    cdef int n_active
     
-    # T_count remains as NumPy array (small, based on n_targets)
+    # Allocate all NumPy arrays upfront
     cdef np.ndarray[LONG_t, ndim=1] T_count_arr = np.zeros(n_targets, dtype=np.int64)
+    cdef np.ndarray[LONG_t, ndim=2] candidate_counts_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    cdef np.ndarray[LONG_t, ndim=1] token_counter_arr = np.zeros(vocab_size, dtype=np.int64)
+    
+    # Create typed memoryviews for direct access in nogil blocks
     cdef LONG_t[::1] T_count = T_count_arr
-    
-    # Declare C++ hash maps for sparse counting
-    cdef unordered_map[INT_t, LONG_t] token_counter_map
-    cdef vector[unordered_map[INT_t, LONG_t]] candidate_counts_maps
-    
-    # Initialize vector of maps (one per target)
-    candidate_counts_maps.resize(n_targets)
+    cdef LONG_t[:, ::1] candidate_counts = candidate_counts_arr
+    cdef LONG_t[::1] token_counter = token_counter_arr
     
     # Build target lookup table for O(1) checking
     is_target = <char*>malloc(vocab_size * sizeof(char))
@@ -314,237 +468,81 @@ def calculate_window_counts(
         raise MemoryError("Failed to allocate memory for is_target")
     memset(is_target, 0, vocab_size * sizeof(char))
     
-    # Build reverse mapping: vocab_idx -> target_position for O(1) lookup
+    # Build reverse mapping: vocab_idx -> target_position (initialize to -1 for safety)
     target_idx_map = <INT_t*>malloc(vocab_size * sizeof(INT_t))
     if target_idx_map == NULL:
         free(is_target)
         raise MemoryError("Failed to allocate memory for target_idx_map")
+    memset(target_idx_map, 0xFF, vocab_size * sizeof(INT_t))  # -1 for all entries
     
     for t in range(n_targets):
         if target_indices[t] < vocab_size:
             is_target[target_indices[t]] = 1
             target_idx_map[target_indices[t]] = t
     
-    # Allocate buffer for checking which targets are in context
-    context_has_target = <char*>malloc(n_targets * sizeof(char))
-    if context_has_target == NULL:
+    # Allocate epoch array for tracking which targets are in current window
+    target_epoch = <INT_t*>malloc(n_targets * sizeof(INT_t))
+    if target_epoch == NULL:
         free(is_target)
         free(target_idx_map)
-        raise MemoryError("Failed to allocate memory for context_has_target")
+        raise MemoryError("Failed to allocate memory for target_epoch")
+    memset(target_epoch, 0, n_targets * sizeof(INT_t))
     
-    # Main counting loop - release GIL for parallel processing potential
-    # Use C++ hash maps for sparse counting - better cache performance
+    # Reserve space for active targets buffer - at most min(n_targets, window_size)
+    max_active = n_targets if n_targets < (horizon * 2 + 1) else (horizon * 2 + 1)
+    active_targets.reserve(max_active)
+    
+    # Main counting loop - Process C-level encoded corpus (fully nogil!)
     with nogil:
         for s in range(n_sentences):
-            doc_len = sentence_lengths[s]
+            # Get sentence bounds from offset array
+            sent_start = corpus.offsets[s]
+            sent_end = corpus.offsets[s + 1]
+            sent_len = sent_end - sent_start
             
-            for i in range(doc_len):
-                token_idx = sentences_indices[s, i]
+            # Process each position in sentence with epoch-based active targets
+            for i in range(sent_len):
+                token_idx = corpus.tokens[sent_start + i]
                 total_tokens += 1
-                token_counter_map[token_idx] += 1
+                token_counter[token_idx] += 1
                 
-                # Define window bounds (excluding center token) - inline comparisons
+                # Define window bounds (excluding center token)
                 start = i - horizon if i >= horizon else 0
-                end = i + horizon + 1 if i + horizon + 1 <= doc_len else doc_len
+                end = i + horizon + 1 if i + horizon + 1 <= sent_len else sent_len
                 
-                # Reset context target flags
-                memset(context_has_target, 0, n_targets * sizeof(char))
+                # Clear active targets for this window (no memset needed!)
+                active_targets.clear()
                 
-                # Check which targets are in this context
+                # Check for epoch overflow and reset if necessary
+                if window_epoch == 2147483647:  # INT32_MAX
+                    memset(target_epoch, 0, n_targets * sizeof(INT_t))
+                    window_epoch = 1
+                
+                # Scan window and collect active targets using epoch tracking
                 for j in range(start, end):
-                    if j == i:  # Skip center token
-                        continue
-                    
-                    context_idx = sentences_indices[s, j]
-                    if context_idx < vocab_size and is_target[context_idx]:
-                        # O(1) lookup instead of O(n_targets) scan
-                        context_has_target[target_idx_map[context_idx]] = 1
+                    if j != i:  # Skip center token
+                        context_idx = corpus.tokens[sent_start + j]
+                        if context_idx < vocab_size and is_target[context_idx]:
+                            t = target_idx_map[context_idx]
+                            # O(1) check: has this target been seen in current window?
+                            if t >= 0 and target_epoch[t] != window_epoch:
+                                target_epoch[t] = window_epoch
+                                active_targets.push_back(t)
                 
-                # For each target that was in the context, count this token position
-                for t in range(n_targets):
-                    if context_has_target[t]:
-                        T_count[t] += 1
-                        candidate_counts_maps[t][token_idx] += 1
+                # Only iterate over active targets (not all targets!)
+                n_active = <int>active_targets.size()
+                for j in range(n_active):
+                    t = active_targets[j]
+                    T_count[t] += 1
+                    candidate_counts[t, token_idx] += 1
+                
+                # Increment window epoch for next position
+                window_epoch += 1
     
     # Free allocated memory
     free(is_target)
     free(target_idx_map)
-    free(context_has_target)
+    free(target_epoch)
     
-    # Transfer sparse map data to dense NumPy arrays for return
-    cdef np.ndarray[LONG_t, ndim=2] candidate_counts_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
-    cdef np.ndarray[LONG_t, ndim=1] token_counter_arr = np.zeros(vocab_size, dtype=np.int64)
-    cdef LONG_t[:, ::1] candidate_counts = candidate_counts_arr
-    cdef LONG_t[::1] token_counter = token_counter_arr
-    
-    # Populate token_counter array from map
-    cdef unordered_map[INT_t, LONG_t].iterator it_token = token_counter_map.begin()
-    while it_token != token_counter_map.end():
-        token_idx = dereference(it_token).first
-        if token_idx < vocab_size:
-            token_counter[token_idx] = dereference(it_token).second
-        postincrement(it_token)
-    
-    # Populate candidate_counts array from maps
-    cdef unordered_map[INT_t, LONG_t].iterator it_cand
-    for t in range(n_targets):
-        it_cand = candidate_counts_maps[t].begin()
-        while it_cand != candidate_counts_maps[t].end():
-            token_idx = dereference(it_cand).first
-            if token_idx < vocab_size:
-                candidate_counts[t, token_idx] = dereference(it_cand).second
-            postincrement(it_cand)
-    
+    # Return the arrays directly (no sparse-to-dense conversion needed)
     return T_count_arr, candidate_counts_arr, token_counter_arr, total_tokens
-
-
-def calculate_sentence_counts(
-    INT_t[:, ::1] sentences_indices,
-    INT_t[::1] sentence_lengths,
-    INT_t[::1] target_indices,
-    int vocab_size
-):
-    """
-    Sentence-based collocation counting using sparse C++ hash maps.
-    
-    Args:
-        sentences_indices: 2D array of sentence tokens as indices (n_sentences, max_length)
-        sentence_lengths: Actual length of each sentence (n_sentences,)
-        target_indices: Indices of target words (n_targets,)
-        vocab_size: Size of the vocabulary
-        
-    Returns:
-        tuple: (candidate_in_sentences, sentences_with_token, n_sentences)
-            - candidate_in_sentences: For each target, count of sentences containing both
-            - sentences_with_token: Count of sentences containing each token
-            - n_sentences: Total number of sentences
-    """
-    cdef int n_sentences = sentences_indices.shape[0]
-    cdef int n_targets = target_indices.shape[0]
-    cdef int max_doc_len = sentences_indices.shape[1]
-    cdef int i, s, t, doc_len, token_idx, unique_count, idx
-    cdef char* is_target
-    cdef char* token_in_sentence
-    cdef char* target_in_sentence
-    cdef INT_t* unique_tokens
-    cdef INT_t* target_idx_map
-    
-    # Declare C++ hash maps for sparse counting
-    cdef unordered_map[INT_t, LONG_t] sentences_with_token_map
-    cdef vector[unordered_map[INT_t, LONG_t]] candidate_sentences_maps
-    
-    # Initialize vector of maps (one per target)
-    candidate_sentences_maps.resize(n_targets)
-    
-    # Build target lookup table
-    is_target = <char*>malloc(vocab_size * sizeof(char))
-    if is_target == NULL:
-        raise MemoryError("Failed to allocate memory for is_target")
-    memset(is_target, 0, vocab_size * sizeof(char))
-    
-    # Build reverse mapping for O(1) target lookup
-    target_idx_map = <INT_t*>malloc(vocab_size * sizeof(INT_t))
-    if target_idx_map == NULL:
-        free(is_target)
-        raise MemoryError("Failed to allocate memory for target_idx_map")
-    
-    for t in range(n_targets):
-        if target_indices[t] < vocab_size:
-            is_target[target_indices[t]] = 1
-            target_idx_map[target_indices[t]] = t
-    
-    # Allocate buffers for tracking tokens in current sentence
-    token_in_sentence = <char*>malloc(vocab_size * sizeof(char))
-    if token_in_sentence == NULL:
-        free(is_target)
-        free(target_idx_map)
-        raise MemoryError("Failed to allocate memory for token_in_sentence")
-    
-    target_in_sentence = <char*>malloc(n_targets * sizeof(char))
-    if target_in_sentence == NULL:
-        free(is_target)
-        free(target_idx_map)
-        free(token_in_sentence)
-        raise MemoryError("Failed to allocate memory for target_in_sentence")
-    
-    # Buffer to store unique token indices in current sentence (avoid full vocab scan)
-    unique_tokens = <INT_t*>malloc(max_doc_len * sizeof(INT_t))
-    if unique_tokens == NULL:
-        free(is_target)
-        free(target_idx_map)
-        free(token_in_sentence)
-        free(target_in_sentence)
-        raise MemoryError("Failed to allocate memory for unique_tokens")
-    
-    # Main counting loop - release GIL for parallel processing potential
-    # Use C++ hash maps for sparse counting - better cache performance
-    with nogil:
-        for s in range(n_sentences):
-            doc_len = sentence_lengths[s]
-            
-            # Reset target flags (small buffer, OK to memset)
-            memset(target_in_sentence, 0, n_targets * sizeof(char))
-            unique_count = 0
-            
-            # Mark unique tokens in this sentence and track them
-            for i in range(doc_len):
-                token_idx = sentences_indices[s, i]
-                if token_idx < vocab_size:
-                    if not token_in_sentence[token_idx]:
-                        token_in_sentence[token_idx] = 1
-                        unique_tokens[unique_count] = token_idx
-                        unique_count += 1
-                        
-                        # Check if this token is a target (O(1) lookup)
-                        if is_target[token_idx]:
-                            target_in_sentence[target_idx_map[token_idx]] = 1
-            
-            # Update global sentence counts using hash map - only iterate unique tokens
-            for i in range(unique_count):
-                token_idx = unique_tokens[i]
-                sentences_with_token_map[token_idx] += 1
-            
-            # For each target in sentence, count all unique tokens using hash maps
-            for t in range(n_targets):
-                if target_in_sentence[t]:
-                    for i in range(unique_count):
-                        token_idx = unique_tokens[i]
-                        candidate_sentences_maps[t][token_idx] += 1
-            
-            # Clear only the tokens we actually used (much faster than memset entire vocab)
-            for i in range(unique_count):
-                token_in_sentence[unique_tokens[i]] = 0
-    
-    # Free allocated memory
-    free(is_target)
-    free(target_idx_map)
-    free(token_in_sentence)
-    free(target_in_sentence)
-    free(unique_tokens)
-    
-    # Transfer sparse map data to dense NumPy arrays for return
-    cdef np.ndarray[LONG_t, ndim=2] candidate_sentences_arr = np.zeros((n_targets, vocab_size), dtype=np.int64)
-    cdef np.ndarray[LONG_t, ndim=1] sentences_with_token_arr = np.zeros(vocab_size, dtype=np.int64)
-    cdef LONG_t[:, ::1] candidate_sentences = candidate_sentences_arr
-    cdef LONG_t[::1] sentences_with_token = sentences_with_token_arr
-    
-    # Populate sentences_with_token array from map
-    cdef unordered_map[INT_t, LONG_t].iterator it_token = sentences_with_token_map.begin()
-    while it_token != sentences_with_token_map.end():
-        token_idx = dereference(it_token).first
-        if token_idx < vocab_size:
-            sentences_with_token[token_idx] = dereference(it_token).second
-        postincrement(it_token)
-    
-    # Populate candidate_sentences array from maps
-    cdef unordered_map[INT_t, LONG_t].iterator it_cand
-    for t in range(n_targets):
-        it_cand = candidate_sentences_maps[t].begin()
-        while it_cand != candidate_sentences_maps[t].end():
-            token_idx = dereference(it_cand).first
-            if token_idx < vocab_size:
-                candidate_sentences[t, token_idx] = dereference(it_cand).second
-            postincrement(it_cand)
-    
-    return candidate_sentences_arr, sentences_with_token_arr, n_sentences
-

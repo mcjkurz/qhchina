@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 from typing import Dict, List, Optional, Union, TypedDict
+import matplotlib.pyplot as plt
 
 try:
     from .cython_ext.collocations import (
@@ -31,7 +32,7 @@ class FilterOptions(TypedDict, total=False):
     max_obs_global: int
 
 def _calculate_collocations_window_cython(tokenized_sentences, target_words, horizon=5, 
-                                         max_sentence_length=256, batch_size=10000, alternative='greater'):
+                                         max_sentence_length=256, alternative='greater'):
     """
     Cython implementation of window-based collocation calculation.
     
@@ -40,14 +41,13 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
         target_words: List or set of target words
         horizon: Window size on each side
         max_sentence_length: Maximum sentence length to consider (default 256)
-        batch_size: Number of sentences to process per batch (default 10000)
         alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
     
     Returns:
         List of dictionaries with collocation statistics
     """
     result = calculate_collocations_window(tokenized_sentences, target_words, horizon, 
-                                           max_sentence_length, batch_size)
+                                           max_sentence_length)
     
     T_count_total, candidate_counts_total, token_counter_total, total_tokens, word2idx, idx2word, target_indices = result
     
@@ -90,7 +90,7 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
     return results
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5, alternative='greater'):
-    """Pure Python implementation of window-based collocation calculation."""
+    """Window-based collocation calculation."""
     total_tokens = 0
     T_count = {target: 0 for target in target_words}
     candidate_in_context = {target: Counter() for target in target_words}
@@ -139,23 +139,23 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5,
 
     return results
 
-def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, 
-                                           max_sentence_length=256, batch_size=10000, alternative='greater'):
+def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, max_sentence_length=256, alternative='greater'):
     """
     Cython implementation of sentence-based collocation calculation.
+    
+    Pre-converts all sentences to integer arrays and uses lightweight buffers
+    for uniqueness checks. All hot loops run with nogil using memoryviews.
     
     Args:
         tokenized_sentences: List of tokenized sentences
         target_words: List or set of target words
         max_sentence_length: Maximum sentence length to consider (default 256)
-        batch_size: Number of sentences to process per batch (default 10000)
         alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
     
     Returns:
         List of dictionaries with collocation statistics
     """
-    result = calculate_collocations_sentence(tokenized_sentences, target_words, 
-                                             max_sentence_length, batch_size)
+    result = calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length)
     
     candidate_sentences_total, sentences_with_token_total, total_sentences, word2idx, idx2word, target_indices = result
     
@@ -198,14 +198,7 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words,
     return results
 
 def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length=256, alternative='greater'):
-    """
-    Pure Python implementation of sentence-based collocation calculation.
-    
-    Args:
-        tokenized_sentences: List of tokenized sentences
-        target_words: Set or list of target words
-        max_sentence_length: Maximum sentence length to consider (default 256)
-    """
+    """Sentence-based collocation calculation."""
     total_sentences = len(tokenized_sentences)
     results = []
     candidate_in_sentences = {target: Counter() for target in target_words}
@@ -256,7 +249,6 @@ def find_collocates(
     filters: Optional[FilterOptions] = None, 
     as_dataframe: bool = True,
     max_sentence_length: Optional[int] = 256,
-    batch_size: int = 10000,
     alternative: str = 'greater'
 ) -> Union[List[Dict], pd.DataFrame]:
     """
@@ -290,13 +282,9 @@ def find_collocates(
     as_dataframe : bool, default=True
         If True, return results as a pandas DataFrame.
     max_sentence_length : Optional[int], default=256
-        Maximum sentence length for preprocessing. Longer sentences will be 
-        truncated to avoid memory bloat from outliers. Set to None for no limit 
-        (may use a lot of memory if you have very long sentences).
-    batch_size : int, default=10000
-        Number of sentences to process in each batch when using Cython 
-        implementation. Larger batches are faster but use more memory. 
-        Adjust based on available RAM and corpus characteristics.
+        Maximum sentence length for preprocessing. Used by both 'window' and 'sentence' methods.
+        Longer sentences will be truncated to avoid memory bloat from outliers. 
+        Set to None for no limit (may use a lot of memory with very long sentences).
     alternative : str, default='greater'
         Alternative hypothesis for Fisher's exact test. Options are:
         - 'greater': Test if observed co-occurrence is greater than expected (default)
@@ -308,22 +296,29 @@ def find_collocates(
     Union[List[Dict], pd.DataFrame]
         List of dictionaries or DataFrame containing collocation statistics.
     """
+    if not sentences:
+        raise ValueError("sentences cannot be empty")
+    if not all(isinstance(s, list) for s in sentences):
+        raise ValueError("sentences must be a list of lists (tokenized sentences)")
+    
     if not isinstance(target_words, list):
         target_words = [target_words]
     target_words = list(set(target_words))
+    
+    if not target_words:
+        raise ValueError("target_words cannot be empty")
 
-    # Use Cython implementation if available, otherwise fall back to pure Python
     if CYTHON_AVAILABLE:
         if method == 'window':
             results = _calculate_collocations_window_cython(
                 sentences, target_words, horizon=horizon, 
-                max_sentence_length=max_sentence_length, batch_size=batch_size,
+                max_sentence_length=max_sentence_length,
                 alternative=alternative
             )
         elif method == 'sentence':
             results = _calculate_collocations_sentence_cython(
                 sentences, target_words, max_sentence_length=max_sentence_length,
-                batch_size=batch_size, alternative=alternative
+                alternative=alternative
             )
         else:
             raise NotImplementedError(f"The method {method} is not implemented.")
@@ -333,15 +328,12 @@ def find_collocates(
                                                     alternative=alternative)
         elif method == 'sentence':
             results = _calculate_collocations_sentence(
-                sentences, target_words, max_sentence_length=max_sentence_length,
-                alternative=alternative
+                sentences, target_words, alternative=alternative
             )
         else:
             raise NotImplementedError(f"The method {method} is not implemented.")
 
-    # Apply filters if specified
     if filters:
-        # Validate filter keys
         valid_keys = {
             'max_p', 'stopwords', 'min_length', 'min_exp_local', 'max_exp_local',
             'min_obs_local', 'max_obs_local', 'min_ratio_local', 'max_ratio_local',
@@ -351,14 +343,12 @@ def find_collocates(
         if invalid_keys:
             raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_keys}")
         
-        # Filter by p-value threshold
         if 'max_p' in filters:
             max_p = filters['max_p']
             if not isinstance(max_p, (int, float)) or max_p < 0 or max_p > 1:
                 raise ValueError("max_p must be a number between 0 and 1")
             results = [result for result in results if result["p_value"] <= max_p]
         
-        # Filter out stopwords
         if 'stopwords' in filters:
             stopwords = filters['stopwords']
             if not isinstance(stopwords, (list, set)):
@@ -366,14 +356,12 @@ def find_collocates(
             stopwords_set = set(stopwords)
             results = [result for result in results if result["collocate"] not in stopwords_set]
         
-        # Filter by minimum length
         if 'min_length' in filters:
             min_length = filters['min_length']
             if not isinstance(min_length, int) or min_length < 1:
                 raise ValueError("min_length must be a positive integer")
             results = [result for result in results if len(result["collocate"]) >= min_length]
         
-        # Filter by expected local frequency
         if 'min_exp_local' in filters:
             min_exp = filters['min_exp_local']
             if not isinstance(min_exp, (int, float)) or min_exp < 0:
@@ -386,7 +374,6 @@ def find_collocates(
                 raise ValueError("max_exp_local must be a non-negative number")
             results = [result for result in results if result["exp_local"] <= max_exp]
         
-        # Filter by observed local frequency
         if 'min_obs_local' in filters:
             min_obs = filters['min_obs_local']
             if not isinstance(min_obs, int) or min_obs < 0:
@@ -399,7 +386,6 @@ def find_collocates(
                 raise ValueError("max_obs_local must be a non-negative integer")
             results = [result for result in results if result["obs_local"] <= max_obs]
         
-        # Filter by local frequency ratio
         if 'min_ratio_local' in filters:
             min_ratio = filters['min_ratio_local']
             if not isinstance(min_ratio, (int, float)) or min_ratio < 0:
@@ -412,7 +398,6 @@ def find_collocates(
                 raise ValueError("max_ratio_local must be a non-negative number")
             results = [result for result in results if result["ratio_local"] <= max_ratio]
         
-        # Filter by global frequency
         if 'min_obs_global' in filters:
             min_global = filters['min_obs_global']
             if not isinstance(min_global, int) or min_global < 0:
@@ -467,65 +452,57 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
     If as_dataframe=False and use_sparse=True:
         tuple of (scipy sparse matrix, word_to_index dictionary)
     """
+    if not documents:
+        raise ValueError("documents cannot be empty")
+    if not all(isinstance(doc, list) for doc in documents):
+        raise ValueError("documents must be a list of lists (tokenized documents)")
+    
     if method not in ('window', 'document'):
         raise ValueError("method must be 'window' or 'document'")
     
-    # Import scipy sparse matrix if needed
     if use_sparse:
         from scipy import sparse
     
-    # Calculate word counts for all documents
     word_counts = Counter()
     document_counts = Counter()
     for document in documents:
         word_counts.update(document)
         document_counts.update(set(document))
     
-    # Filter words by minimum counts
     filtered_vocab = {word for word, count in word_counts.items() 
                      if count >= min_abs_count and document_counts[word] >= min_doc_count}
     
-    # If vocab is provided, intersect with filtered_vocab
     if vocab is not None:
         vocab = set(vocab)
         filtered_vocab = filtered_vocab.intersection(vocab)
     
-    # If vocab_size is provided, select the top vocab_size words
     if vocab_size and len(filtered_vocab) > vocab_size:
         filtered_vocab = set(sorted(filtered_vocab, 
                                    key=lambda word: word_counts[word], 
                                    reverse=True)[:vocab_size])
     
-    # Create vocabulary list and mapping
     vocab_list = sorted(filtered_vocab)
     word_to_index = {word: i for i, word in enumerate(vocab_list)}
     
-    # Filter documents to only include words in the final vocabulary
     filtered_documents = [[word for word in document if word in word_to_index] 
                          for document in documents]
     
-    # Initialize co-occurrence dictionary for sparse matrix
     cooc_dict = defaultdict(int)
 
-    # Function to update co-occurrence counts
     def update_cooc(word1_idx, word2_idx, count=1):
         if binary:
             cooc_dict[(word1_idx, word2_idx)] = 1
         else:
             cooc_dict[(word1_idx, word2_idx)] += count
 
-    # Calculate co-occurrences
     if method == 'window':
         for document in filtered_documents:
             for i, word1 in enumerate(document):
                 idx1 = word_to_index[word1]
                 start = max(0, i - horizon)
                 end = min(len(document), i + horizon + 1)
-
-                # Get context words (excluding the word itself)
                 context_words = document[start:i] + document[i+1:end]
 
-                # Update co-occurrence counts for each context word
                 for word2 in context_words:
                     idx2 = word_to_index[word2]
                     update_cooc(idx1, idx2, 1)
@@ -541,26 +518,21 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
                         idx2 = word_to_index[word2]
                         update_cooc(idx1, idx2, doc_word_counts[word2])
 
-    # Define the size of the vocabulary
     n = len(vocab_list)
 
-    # Convert co-occurrence dictionary to sparse matrix
     if use_sparse:
         row_indices, col_indices, data_values = zip(*((i, j, count) for (i, j), count in cooc_dict.items()))
         cooc_matrix_array = sparse.coo_matrix((data_values, (row_indices, col_indices)), shape=(n, n)).tocsr()
     else:
-        # Create a dense matrix for non-sparse case
         cooc_matrix_array = np.zeros((n, n))
         for (i, j), count in cooc_dict.items():
             cooc_matrix_array[i, j] = count
     
     del cooc_dict
     
-    # Return results based on parameters
     if as_dataframe:
         if use_sparse:
-            # Convert sparse matrix to dense for DataFrame
-            # Note: This could be memory-intensive for very large matrices
+            # Note: Converting sparse to dense could be memory-intensive for large matrices
             cooc_matrix_df = pd.DataFrame(
                 cooc_matrix_array.toarray(), 
                 index=vocab_list, 
@@ -575,3 +547,223 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
         return cooc_matrix_df
     else:
         return cooc_matrix_array, word_to_index
+
+def plot_collocates(
+    collocates: Union[List[Dict], pd.DataFrame],
+    x_col: str = 'ratio_local',
+    y_col: str = 'p_value',
+    x_scale: str = 'log',
+    y_scale: str = 'log',
+    color: Optional[Union[str, List[str]]] = None,
+    colormap: str = 'viridis',
+    color_by: Optional[str] = None,
+    title: Optional[str] = None,
+    figsize: tuple = (10, 8),
+    fontsize: int = 10,
+    show_labels: bool = False,
+    label_top_n: Optional[int] = None,
+    alpha: float = 0.6,
+    marker_size: int = 50,
+    show_diagonal: bool = False,
+    diagonal_color: str = 'red',
+    filename: Optional[str] = None,
+    xlabel: Optional[str] = None,
+    ylabel: Optional[str] = None
+) -> None:
+    """
+    Visualize collocation results as a 2D scatter plot.
+    
+    Creates a customizable scatter plot from collocation data. By default, plots
+    ratio_local (x-axis) vs p_value (y-axis) with logarithmic scales, but allows
+    full flexibility to plot any columns with any scale type.
+    
+    Parameters:
+    -----------
+    collocates : Union[List[Dict], pd.DataFrame]
+        Output from find_collocates, either as a list of dictionaries or DataFrame.
+    x_col : str, default='ratio_local'
+        Column name to plot on x-axis. Common choices: 'ratio_local', 'obs_local',
+        'exp_local', 'obs_global'.
+    y_col : str, default='p_value'
+        Column name to plot on y-axis. Common choices: 'p_value', 'obs_local',
+        'ratio_local', 'obs_global'.
+    x_scale : str, default='log'
+        Scale for x-axis. Options: 'log', 'linear', 'symlog', 'logit'.
+        For ratio_local, 'log' makes the scale symmetric around 1.
+    y_scale : str, default='log'
+        Scale for y-axis. Options: 'log', 'linear', 'symlog', 'logit'.
+        For p_value, 'log' is recommended to visualize small values.
+    color : Optional[Union[str, List[str]]], default=None
+        Color(s) for the points. Can be a single color string, list of colors,
+        or None to use default.
+    colormap : str, default='viridis'
+        Matplotlib colormap to use when color_by is specified.
+    color_by : Optional[str], default=None
+        Column name to use for coloring points (e.g., 'obs_local', 'obs_global').
+    title : Optional[str], default=None
+        Title for the plot.
+    figsize : tuple, default=(10, 8)
+        Figure size as (width, height) in inches.
+    fontsize : int, default=10
+        Base font size for labels.
+    show_labels : bool, default=False
+        Whether to show collocate text labels next to points.
+    label_top_n : Optional[int], default=None
+        If specified, only label the top N points. When color_by is set, ranks by that
+        column; otherwise ranks by y-axis values. For p_value, labels smallest (most 
+        significant) values; for other metrics, labels largest values.
+    alpha : float, default=0.6
+        Transparency of points (0.0 to 1.0).
+    marker_size : int, default=50
+        Size of markers.
+    show_diagonal : bool, default=False
+        Whether to draw a diagonal reference line (y=x). Useful for observed vs
+        expected plots to show where values match perfectly.
+    diagonal_color : str, default='red'
+        Color of the diagonal reference line.
+    filename : Optional[str], default=None
+        If provided, saves the figure to the specified file path.
+    xlabel : Optional[str], default=None
+        Label for x-axis. If None, auto-generated from x_col and x_scale.
+    ylabel : Optional[str], default=None
+        Label for y-axis. If None, auto-generated from y_col and y_scale.
+    
+    Returns:
+    --------
+    None
+        Displays the plot using matplotlib. To further customize, use plt.gca() 
+        to get the current axes object after calling this function.
+    
+    Examples:
+    ---------
+    >>> # Basic usage: ratio vs p-value with log scales (default)
+    >>> collocates = find_collocates(sentences, ['天'])
+    >>> plot_collocates(collocates)
+    
+    >>> # Plot observed vs expected frequency
+    >>> plot_collocates(collocates, x_col='exp_local', y_col='obs_local',
+    ...                 x_scale='linear', y_scale='linear')
+    
+    >>> # Plot global frequency vs ratio with custom scales
+    >>> plot_collocates(collocates, x_col='obs_global', y_col='ratio_local',
+    ...                 x_scale='log', y_scale='log')
+    
+    >>> # With labels and custom styling
+    >>> plot_collocates(collocates, show_labels=True, label_top_n=20,
+    ...                 color='red', title='Collocates of 天')
+    
+    >>> # Color by a column
+    >>> plot_collocates(collocates, color_by='obs_local', colormap='plasma')
+    """
+    if isinstance(collocates, list):
+        if not collocates:
+            raise ValueError("Empty collocates list provided")
+        df = pd.DataFrame(collocates)
+    else:
+        df = collocates.copy()
+    
+    required_cols = [x_col, y_col, 'collocate']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}. Available: {list(df.columns)}")
+    
+    x = df[x_col].values
+    y = df[y_col].values
+    labels = df['collocate'].values
+    
+    # Handle zero/negative values for log scales
+    if x_scale == 'log':
+        zero_or_neg_x = (x <= 0).sum()
+        if zero_or_neg_x > 0:
+            print(f"Warning: {zero_or_neg_x} values in {x_col} are ≤ 0. Replacing with 1e-300 for log scale.")
+            x = np.where(x <= 0, 1e-300, x)
+    
+    if y_scale == 'log':
+        zero_or_neg_y = (y <= 0).sum()
+        if zero_or_neg_y > 0:
+            print(f"Warning: {zero_or_neg_y} values in {y_col} are ≤ 0. Replacing with 1e-300 for log scale.")
+            y = np.where(y <= 0, 1e-300, y)
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    if color is not None:
+        colors = color if isinstance(color, str) else color
+    elif color_by is not None:
+        if color_by not in df.columns:
+            raise ValueError(f"Column '{color_by}' not found in data. Available columns: {list(df.columns)}")
+        color_values = df[color_by].values
+        scatter = ax.scatter(x, y, c=color_values, cmap=colormap, alpha=alpha, 
+                           s=marker_size, edgecolors='black', linewidths=0.5)
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_label(color_by, fontsize=fontsize)
+    else:
+        colors = '#1f77b4'
+    
+    if color_by is None:
+        ax.scatter(x, y, c=colors, alpha=alpha, s=marker_size, 
+                  edgecolors='black', linewidths=0.5)
+    
+    if show_labels:
+        if label_top_n is not None:
+            if color_by is not None:
+                sort_values = df[color_by].values
+                if color_by == 'p_value':
+                    indices_to_label = np.argsort(sort_values)[:label_top_n]
+                else:
+                    indices_to_label = np.argsort(sort_values)[-label_top_n:][::-1]
+            else:
+                if y_col == 'p_value':
+                    indices_to_label = np.argsort(y)[:label_top_n]
+                else:
+                    indices_to_label = np.argsort(y)[-label_top_n:][::-1]
+        else:
+            indices_to_label = range(len(labels))
+        
+        for idx in indices_to_label:
+            ax.annotate(labels[idx], (x[idx], y[idx]), 
+                       fontsize=fontsize-2, alpha=0.8,
+                       xytext=(5, 5), textcoords='offset points')
+    
+    if xlabel is None:
+        scale_suffix = f' ({x_scale} scale)' if x_scale != 'linear' else ''
+        xlabel = f'{x_col}{scale_suffix}'
+    if ylabel is None:
+        scale_suffix = f' ({y_scale} scale)' if y_scale != 'linear' else ''
+        ylabel = f'{y_col}{scale_suffix}'
+    
+    ax.set_xlabel(xlabel, fontsize=fontsize+2)
+    ax.set_ylabel(ylabel, fontsize=fontsize+2)
+    if title:
+        ax.set_title(title, fontsize=fontsize+4)
+    
+    if x_scale != 'linear':
+        ax.set_xscale(x_scale)
+    
+    if y_scale != 'linear':
+        ax.set_yscale(y_scale)
+    
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    if show_diagonal:
+        x_data = df[x_col].values
+        y_data = df[y_col].values
+        min_val = max(np.min(x_data), np.min(y_data))
+        max_val = min(np.max(x_data), np.max(y_data))
+        ax.plot([min_val, max_val], [min_val, max_val], '--', 
+                color=diagonal_color, linewidth=2.5, zorder=1)
+    
+    if x_col == 'ratio_local':
+        ax.axvline(1, color='gray', linestyle='--', linewidth=1, alpha=0.7, 
+                   label='ratio = 1 (expected frequency)')
+    
+    legend_elements = ax.get_legend_handles_labels()[0]
+    
+    if len(legend_elements) > 0:
+        ax.legend(fontsize=fontsize-2, loc='best', framealpha=0.9)
+    
+    plt.tight_layout()
+    
+    if filename:
+        plt.savefig(filename, bbox_inches='tight', dpi=300)
+    
+    plt.show()

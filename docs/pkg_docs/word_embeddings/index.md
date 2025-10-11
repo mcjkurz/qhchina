@@ -188,29 +188,33 @@ Project word vectors to 2D space for visualization.
 <br>
 
 ```python
-calculate_bias(dimension_pairs, target_words, model)
+calculate_bias(anchors, targets, word_vectors)
 ```
 
-Calculate bias scores along a semantic dimension.
+Calculate bias scores for target words along an axis defined by anchor pairs.
 
 **Parameters:**
-- `dimension_pairs` (list): List of word pairs defining the dimension
-- `target_words` (list): Words to calculate bias for
-- `model`: Word2Vec model
+- `anchors` (tuple or list): Either a tuple like `("man", "woman")` or a list of tuples like `[("king", "queen"), ("man", "woman")]` defining the bias dimension
+- `targets` (list): List of words to calculate bias for
+- `word_vectors`: Dictionary-like object mapping words to vectors (e.g., `model.wv` from Word2Vec)
 
-**Returns:** (dict) Mapping of target words to bias scores
+**Returns:** (numpy.ndarray) Array of bias scores (dot products) for each target word
 
 <br>
 
 ```python
-align_vectors(model1, model2)
+align_vectors(source_vectors, target_vectors)
 ```
 
-Align vectors from two models for direct comparison.
+Align source vectors with target vectors using Procrustes analysis.
 
 **Parameters:**
-- `model1`: Reference Word2Vec model
-- `model2`: Model to align to model1's space
+- `source_vectors` (numpy.ndarray): Vectors to be aligned
+- `target_vectors` (numpy.ndarray): Vectors to align to
+
+**Returns:** (tuple) 
+- `aligned_vectors`: The aligned source vectors
+- `transformation_matrix`: The orthogonal transformation matrix that can be used to align other vectors
 
 <br>
 

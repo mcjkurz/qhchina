@@ -9,7 +9,7 @@ This module provides tools for:
 To use specific functionality, import directly from the appropriate submodule:
 - from qhchina.analytics.word2vec import Word2Vec
 - from qhchina.analytics.vectors import project_2d, cosine_similarity
-- from qhchina.analytics.collocations import find_collocates, cooc_matrix
+- from qhchina.analytics.collocations import find_collocates, cooc_matrix, plot_collocates
 - from qhchina.analytics.topicmodels import LDAGibbsSampler
 """
 
