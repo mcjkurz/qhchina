@@ -28,7 +28,7 @@ jobs:
       # Linux builds using cibuildwheel
       - name: Build Linux wheels
         if: runner.os == 'Linux'
-        uses: pypa/cibuildwheel@v2.16.2
+        uses: pypa/cibuildwheel@v3.2.0
         env:
           CIBW_ARCHS: "x86_64"  # Only build 64-bit wheels
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"  # Build for Python 3.0-3.13
@@ -47,10 +47,10 @@ jobs:
       # macOS builds
       - name: Build macOS wheels
         if: runner.os == 'macOS'
-        uses: pypa/cibuildwheel@v2.16.2
+        uses: pypa/cibuildwheel@v3.2.0
         env:
           CIBW_ARCHS: "x86_64 arm64"
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"  # Build for Python 3.10-3.13
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
           
       # Upload artifacts
       - name: Upload wheels

@@ -1,10 +1,11 @@
 from collections import Counter, defaultdict
-from scipy.stats import fisher_exact
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 from typing import Dict, List, Optional, Union, TypedDict
 import matplotlib.pyplot as plt
+
+from scipy.stats import fisher_exact as scipy_fisher_exact
 
 try:
     from .cython_ext.collocations import (
@@ -56,7 +57,8 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
     
     target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
     vocab_size = len(word2idx)
-    
+    table = np.zeros((2, 2), dtype=np.int64)
+
     results = []
     for t_idx, target in enumerate(target_words_filtered):
         target_word_idx = target_indices[t_idx]
@@ -74,9 +76,9 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
             expected = (a + b) * (a + c) / total_tokens if total_tokens > 0 else 0
             ratio = a / expected if expected > 0 else 0
             
-            table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative=alternative)[1]
-            
+            table[:] = [[a, b], [c, d]]
+            _, p_value = scipy_fisher_exact(table, alternative=alternative)
+
             results.append({
                 "target": target,
                 "collocate": candidate,
@@ -111,6 +113,8 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5,
                     candidate_in_context[target][token] += 1
 
     results = []
+    
+    table = np.zeros((2, 2), dtype=np.int64)
 
     for target in target_words:
         for candidate, a in candidate_in_context[target].items():
@@ -124,8 +128,9 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5,
             expected = (a + b) * (a + c) / total_tokens if total_tokens > 0 else 0
             ratio = a / expected if expected > 0 else 0
 
-            table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative=alternative)[1]
+            # Reuse array - update in-place
+            table[:] = [[a, b], [c, d]]
+            _, p_value = scipy_fisher_exact(table, alternative=alternative)
 
             results.append({
                 "target": target,
@@ -165,6 +170,8 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, m
     target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
     vocab_size = len(word2idx)
     
+    table = np.zeros((2, 2), dtype=np.int64)
+
     results = []
     for t_idx, target in enumerate(target_words_filtered):
         target_word_idx = target_indices[t_idx]
@@ -182,9 +189,9 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, m
             expected = (a + b) * (a + c) / total_sentences if total_sentences > 0 else 0
             ratio = a / expected if expected > 0 else 0
             
-            table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative=alternative)[1]
-            
+            table[:] = [[a, b], [c, d]]
+            _, p_value = scipy_fisher_exact(table, alternative=alternative)
+
             results.append({
                 "target": target,
                 "collocate": candidate,
@@ -215,6 +222,9 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sent
             if target in unique_tokens:
                 candidate_in_sentences[target].update(unique_tokens)
 
+    # Create reusable table array (avoid creating new array in each iteration)
+    table = np.zeros((2, 2), dtype=np.int64)
+
     for target in target_words:
         for candidate, a in candidate_in_sentences[target].items():
             if candidate == target:
@@ -226,8 +236,9 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sent
             expected = (a + b) * (a + c) / total_sentences if total_sentences > 0 else 0
             ratio = a / expected if expected > 0 else 0
 
-            table = np.array([[a, b], [c, d]])
-            p_value = fisher_exact(table, alternative=alternative)[1]
+            # Reuse array - update in-place
+            table[:] = [[a, b], [c, d]]
+            _, p_value = scipy_fisher_exact(table, alternative=alternative)
 
             results.append({
                 "target": target,
