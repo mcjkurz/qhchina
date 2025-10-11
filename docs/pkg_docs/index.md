@@ -40,7 +40,7 @@ text = "深度学习正在改变自然语言处理。机器学习模型变得越
 sentences = segmenter.segment(text)
 
 # Topic modeling
-lda = LDAGibbsSampler(n_topics=5, iterations=1000)
+lda = LDAGibbsSampler(n_topics=5, iterations=20)
 lda.fit(sentences)
 
 # Get topics
