@@ -22,7 +22,7 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             Default is 0, which includes words that appear in either corpus, even if absent in one.
           - 'max_p': float - Maximum p-value threshold for statistical significance
           - 'stopwords': list - Words to exclude from results
-          - 'min_length': int - Minimum character length for words
+          - 'min_word_length': int - Minimum character length for words
       as_dataframe (bool): Whether to return a pandas DataFrame.
       
     Returns:
@@ -33,12 +33,56 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
         List[dict]: Each dict contains information about a word's frequency in both corpora,
                     the p-value, and the ratio of relative frequencies.
     """
+    # Validate and print filters
+    if filters:
+        valid_keys = {'min_count', 'max_p', 'stopwords', 'min_word_length'}
+        invalid_keys = set(filters.keys()) - valid_keys
+        if invalid_keys:
+            raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_keys}")
+        
+        # Validate filter values
+        if 'min_count' in filters:
+            min_count_val = filters['min_count']
+            if isinstance(min_count_val, int):
+                if min_count_val < 0:
+                    raise ValueError("min_count must be non-negative")
+            elif isinstance(min_count_val, tuple):
+                if len(min_count_val) != 2 or any(v < 0 for v in min_count_val):
+                    raise ValueError("min_count tuple must have 2 non-negative values")
+            else:
+                raise ValueError("min_count must be an int or tuple of 2 ints")
+        
+        if 'max_p' in filters:
+            if not isinstance(filters['max_p'], (int, float)) or filters['max_p'] < 0 or filters['max_p'] > 1:
+                raise ValueError("max_p must be a number between 0 and 1")
+        
+        if 'stopwords' in filters:
+            if not isinstance(filters['stopwords'], (list, set)):
+                raise ValueError("stopwords must be a list or set")
+        
+        if 'min_word_length' in filters:
+            if not isinstance(filters['min_word_length'], int) or filters['min_word_length'] < 1:
+                raise ValueError("min_word_length must be a positive integer")
+        
+        # Print filters
+        filter_strs = []
+        if 'min_count' in filters:
+            filter_strs.append(f"min_count={filters['min_count']}")
+        if 'max_p' in filters:
+            filter_strs.append(f"max_p={filters['max_p']}")
+        if 'stopwords' in filters:
+            filter_strs.append(f"stopwords=<{len(filters['stopwords'])} words>")
+        if 'min_word_length' in filters:
+            filter_strs.append(f"min_word_length={filters['min_word_length']}")
+        print(f"Filters: {', '.join(filter_strs)}")
+    
     # Helper function to flatten list of sentences if needed
     def flatten(corpus):
         if not corpus:
             return []
         if isinstance(corpus[0], list): # if a list of sentences
-            return [word for sentence in corpus for word in sentence]
+            # Filter out empty sentences
+            return [word for sentence in corpus if sentence for word in sentence]
         return corpus
     
     # Flatten corpora if they are lists of sentences
@@ -52,6 +96,11 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
     totalB = sum(abs_freqB.values())
     del corpusB
     
+    if totalA == 0:
+        raise ValueError("corpusA is empty or contains only empty sentences")
+    if totalB == 0:
+        raise ValueError("corpusB is empty or contains only empty sentences")
+    
     # Create a union of all words
     all_words = set(abs_freqA.keys()).union(abs_freqB.keys())
     results = []
@@ -61,6 +110,7 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
     if isinstance(min_count, int):
         min_count = (min_count, min_count)
     
+    table = np.zeros((2, 2), dtype=np.int64)
     for word in tqdm(all_words):
         a = abs_freqA.get(word, 0)  # Count in Corpus A
         b = abs_freqB.get(word, 0)  # Count in Corpus B
@@ -72,15 +122,15 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
         c = totalA - a          # Other words in Corpus A
         d = totalB - b          # Other words in Corpus B
         
-        table = np.array([[a, b], [c, d]])
+        table[:] = [[a, b], [c, d]]
 
         # Compute the p-value using the selected statistical test.
         if method == 'fisher':
             p_value = fisher_exact(table, alternative='two-sided')[1]
         elif method == 'chi2':
-            _, p_value, _, _ = chi2_contingency(table, correction=True)
-        elif method == 'chi2_corrected':
             _, p_value, _, _ = chi2_contingency(table, correction=False)
+        elif method == 'chi2_corrected':
+            _, p_value, _, _ = chi2_contingency(table, correction=True)
         else:
             raise ValueError("Invalid method specified. Use 'fisher' or 'chi2'")
         
@@ -110,8 +160,8 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             results = [result for result in results if result["word"] not in filters['stopwords']]
         
         # Filter by minimum length
-        if 'min_length' in filters:
-            results = [result for result in results if len(result["word"]) >= filters['min_length']]
+        if 'min_word_length' in filters:
+            results = [result for result in results if len(result["word"]) >= filters['min_word_length']]
             
     if as_dataframe:
         import pandas as pd

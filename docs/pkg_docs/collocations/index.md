@@ -23,13 +23,15 @@ Statistical significance is computed using Fisher's exact test with the "greater
 - `method` (str): Collocation method
   - `'window'`: Use sliding window of specified horizon (default)
   - `'sentence'`: Use whole sentences as context
-- `horizon` (int): Context window size (only used if `method='window'`)
+- `horizon` (int or tuple): Context window size (only used if `method='window'`)
+  - `int`: Symmetric window (e.g., `5` means 5 words on each side)
+  - `tuple`: Asymmetric window `(left, right)` (e.g., `(0, 5)` means only 5 words to the right)
 - `max_sentence_length` (int): Maximum sentence length for preprocessing. Sentences longer than this value are truncated to avoid excessive memory usage from outliers. Default is 256 tokens. Set to `None` for no limit. Used by both `'window'` and `'sentence'` methods.
 - `alternative` (str): Alternative hypothesis for Fisher's exact test. Options are `'greater'` (default), `'less'`, or `'two-sided'`.
 - `filters` (dict): Optional filters to apply *after* the statistics are computed on the full corpus:
   - `'max_p'`: Maximum p-value threshold for statistical significance
   - `'stopwords'`: List of words to exclude
-  - `'min_length'`: Minimum character length for collocates
+  - `'min_word_length'`: Minimum character length for collocates
   - `'min_exp_local'`: Minimum expected local frequency
   - `'max_exp_local'`: Maximum expected local frequency
   - `'min_obs_local'`: Minimum observed local frequency
@@ -98,7 +100,9 @@ Create a co-occurrence matrix from a collection of documents.
 - `method` (str): Co-occurrence method
   - `'window'`: Use sliding window (default)
   - `'document'`: Use whole documents as context
-- `horizon` (int): Context window size (only used if `method='window'`)
+- `horizon` (int or tuple): Context window size (only used if `method='window'`)
+  - `int`: Symmetric window (e.g., `5` means 5 words on each side)
+  - `tuple`: Asymmetric window `(left, right)` (e.g., `(0, 5)` means only 5 words to the right)
 - `min_abs_count` (int): Minimum word frequency to include
 - `min_doc_count` (int): Minimum number of documents a word must appear in
 - `vocab_size` (int): Maximum vocabulary size (optional)
@@ -134,13 +138,31 @@ collocates = find_collocates(
     sentences=sentences,
     target_words=["经济"],
     method="window",
-    horizon=3,
+    horizon=3,  # 3 words on each side
     filters={
         'max_p': 0.05,          # Only statistically significant
         'stopwords': ["的", "了"],
-        'min_length': 2
+        'min_word_length': 2
     },
     as_dataframe=True
+)
+
+# Find words that appear to the RIGHT of "经济"
+# Use horizon=(3, 0) to look left from candidate positions
+right_collocates = find_collocates(
+    sentences=sentences,
+    target_words=["经济"],
+    horizon=(3, 0),  # Look 3 positions left from candidates → finds words to the right of target
+    filters={'max_p': 0.05}
+)
+
+# Find words that appear to the LEFT of "经济"
+# Use horizon=(0, 3) to look right from candidate positions
+left_collocates = find_collocates(
+    sentences=sentences,
+    target_words=["经济"],
+    horizon=(0, 3),  # Look 3 positions right from candidates → finds words to the left of target
+    filters={'max_p': 0.05}
 )
 
 # Display top collocates

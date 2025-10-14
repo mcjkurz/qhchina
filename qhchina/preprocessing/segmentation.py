@@ -17,7 +17,7 @@ class SegmentationWrapper:
             chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
                 - stopwords: List or set of stopwords to exclude (converted to set internally)
-                - min_length: Minimum length of tokens to include (default 1)
+                - min_word_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: List or set of POS tags to exclude (converted to set internally)
             sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
         """
@@ -30,7 +30,7 @@ class SegmentationWrapper:
         self.filters.setdefault('stopwords', set())
         if not isinstance(self.filters['stopwords'], set):
             self.filters['stopwords'] = set(self.filters['stopwords'])
-        self.filters.setdefault('min_length', 1)
+        self.filters.setdefault('min_word_length', 1)
         self.filters.setdefault('excluded_pos', set())
         if not isinstance(self.filters['excluded_pos'], set):
             self.filters['excluded_pos'] = set(self.filters['excluded_pos'])
@@ -179,7 +179,7 @@ class SpacySegmenter(SegmentationWrapper):
             strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
             chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
-                - min_length: Minimum length of tokens to include (default 1)
+                - min_word_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: Set of POS tags to exclude from token outputs
                 - stopwords: Set of stopwords to exclude
             sentence_end_pattern: Regular expression pattern for sentence endings
@@ -247,12 +247,12 @@ class SpacySegmenter(SegmentationWrapper):
     
     def _filter_tokens(self, tokens):
         """Filter tokens based on excluded POS tags and minimum length."""
-        min_length = self.filters.get('min_length', 1)
+        min_word_length = self.filters.get('min_word_length', 1)
         excluded_pos = self.filters.get('excluded_pos', [])
         stopwords = set(self.filters.get('stopwords', []))
         return [token for token in tokens 
                 if token.pos_ not in excluded_pos 
-                and len(token.text) >= min_length
+                and len(token.text) >= min_word_length
                 and token.text not in stopwords]
     
     def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
@@ -296,7 +296,7 @@ class JiebaSegmenter(SegmentationWrapper):
             strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
             chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
-                - min_length: Minimum length of tokens to include (default 1)
+                - min_word_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
                 - stopwords: Set of stopwords to exclude
             sentence_end_pattern: Regular expression pattern for sentence endings
@@ -325,19 +325,19 @@ class JiebaSegmenter(SegmentationWrapper):
     
     def _filter_tokens(self, tokens) -> List[str]:
         """Filter tokens based on filters."""
-        min_length = self.filters.get('min_length', 1)
+        min_word_length = self.filters.get('min_word_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
         
         # If POS tagging is enabled and we have tokens as (word, flag) tuples
         if self.pos_tagging:
             excluded_pos = set(self.filters.get('excluded_pos', []))
             return [word for word, flag in tokens 
-                    if len(word) >= min_length 
+                    if len(word) >= min_word_length 
                     and word not in stopwords
                     and flag not in excluded_pos]
         else:
             return [token for token in tokens 
-                    if len(token) >= min_length 
+                    if len(token) >= min_word_length 
                     and token not in stopwords]
     
     def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
@@ -409,7 +409,7 @@ class BertSegmenter(SegmentationWrapper):
             strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
             chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
-                - min_length: Minimum length of tokens to include (default 1)
+                - min_word_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: Set of POS tags to exclude from token outputs
                 - stopwords: Set of stopwords to exclude
             sentence_end_pattern: Regular expression pattern for sentence endings
@@ -492,11 +492,11 @@ class BertSegmenter(SegmentationWrapper):
         Returns:
             Filtered list of words
         """
-        min_length = self.filters.get('min_length', 1)
+        min_word_length = self.filters.get('min_word_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
         
         return [word for word in words 
-                if len(word) >= min_length 
+                if len(word) >= min_word_length 
                 and word not in stopwords]
     
     def _predict_tags_batch(self, texts: List[str]) -> List[List[str]]:
@@ -711,7 +711,7 @@ class LLMSegmenter(SegmentationWrapper):
             strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
             chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
-                - min_length: Minimum length of tokens to include (default 1)
+                - min_word_length: Minimum length of tokens to include (default 1)
                 - excluded_pos: Set of POS tags to exclude from token outputs
                 - stopwords: Set of stopwords to exclude
             sentence_end_pattern: Regular expression pattern for sentence endings
@@ -826,11 +826,11 @@ class LLMSegmenter(SegmentationWrapper):
     
     def _filter_tokens(self, tokens: List[str]) -> List[str]:
         """Apply filters to the tokens."""
-        min_length = self.filters.get('min_length', 1)
+        min_word_length = self.filters.get('min_word_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
         
         return [token for token in tokens 
-                if len(token) >= min_length 
+                if len(token) >= min_word_length 
                 and token not in stopwords]
     
     def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
@@ -867,7 +867,7 @@ def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size
         sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
         **kwargs: Additional arguments to pass to the segmenter constructor
             - filters: Dictionary of filters to apply during segmentation
-                - min_length: Minimum length of tokens to include (default 1)
+                - min_word_length: Minimum length of tokens to include (default 1)
                 - stopwords: Set of stopwords to exclude
                 - excluded_pos: Set of POS tags to exclude (for backends that support POS tagging)
             - Other backend-specific arguments

@@ -169,7 +169,7 @@ cdef void free_encoded_corpus(EncodedCorpus* corpus) nogil:
         free(corpus)
 
 def calculate_collocations_window(list tokenized_sentences, list target_words, 
-                                  int horizon=5, int max_sentence_length=256):
+                                  int left_horizon=5, int right_horizon=5, int max_sentence_length=256):
     """
     Window-based collocation calculation.
     
@@ -179,7 +179,8 @@ def calculate_collocations_window(list tokenized_sentences, list target_words,
     Args:
         tokenized_sentences: List of tokenized sentences
         target_words: List of target words
-        horizon: Window size on each side
+        left_horizon: Window size on the left side
+        right_horizon: Window size on the right side
         max_sentence_length: Maximum sentence length (default 256)
         
     Returns:
@@ -213,7 +214,7 @@ def calculate_collocations_window(list tokenized_sentences, list target_words,
     try:
         # Calculate counts from C-level buffers (no dictionary access, active targets optimization)
         result = calculate_window_counts(
-            corpus, target_indices_array, horizon, vocab_size
+            corpus, target_indices_array, left_horizon, right_horizon, vocab_size
         )
         return result[0], result[1], result[2], result[3], word2idx, idx2word, target_indices
     finally:
@@ -416,7 +417,8 @@ cdef calculate_sentence_counts(
 cdef calculate_window_counts(
     EncodedCorpus* corpus,
     INT_t[::1] target_indices,
-    int horizon,
+    int left_horizon,
+    int right_horizon,
     int vocab_size
 ):
     """
@@ -430,7 +432,8 @@ cdef calculate_window_counts(
     Args:
         corpus: Pointer to encoded corpus structure
         target_indices: Indices of target words (n_targets,)
-        horizon: Window size on each side
+        left_horizon: Window size on the left side
+        right_horizon: Window size on the right side
         vocab_size: Size of the vocabulary
         
     Returns:
@@ -489,7 +492,7 @@ cdef calculate_window_counts(
     memset(target_epoch, 0, n_targets * sizeof(INT_t))
     
     # Reserve space for active targets buffer - at most min(n_targets, window_size)
-    max_active = n_targets if n_targets < (horizon * 2 + 1) else (horizon * 2 + 1)
+    max_active = n_targets if n_targets < (left_horizon + right_horizon + 1) else (left_horizon + right_horizon + 1)
     active_targets.reserve(max_active)
     
     # Main counting loop - Process C-level encoded corpus (fully nogil!)
@@ -507,8 +510,8 @@ cdef calculate_window_counts(
                 token_counter[token_idx] += 1
                 
                 # Define window bounds (excluding center token)
-                start = i - horizon if i >= horizon else 0
-                end = i + horizon + 1 if i + horizon + 1 <= sent_len else sent_len
+                start = i - left_horizon if i >= left_horizon else 0
+                end = i + right_horizon + 1 if i + right_horizon + 1 <= sent_len else sent_len
                 
                 # Clear active targets for this window (no memset needed!)
                 active_targets.clear()

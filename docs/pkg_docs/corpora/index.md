@@ -22,15 +22,15 @@ Identify statistically significant differences in word usage between two corpora
 - `corpusB` (list): Second corpus - same format as corpusA
 - `method` (str): Statistical test to use
   - `'fisher'`: Fisher's exact test (default)
-  - `'chi2'`: Chi-square test with Yates' correction
-  - `'chi2_corrected'`: Chi-square test without correction
+  - `'chi2'`: Chi-square test without correction
+  - `'chi2_corrected'`: Chi-square test with Yates' correction
 - `filters` (dict): Optional filters to apply *after* the statistics are computed on the full corpora:
   - `'min_count'`: Minimum count threshold for a word to be included. Can be:
     - Single int (applies to both corpora)
     - Tuple of (min_countA, min_countB)
   - `'max_p'`: Maximum p-value threshold for statistical significance
   - `'stopwords'`: List of words to exclude
-  - `'min_length'`: Minimum character length for words
+  - `'min_word_length'`: Minimum character length for words
 - `as_dataframe` (bool): Return results as pandas DataFrame
 
 **Returns:** (DataFrame or list) Comparison statistics containing:
@@ -64,7 +64,7 @@ results = compare_corpora(
         "min_count": 3,      # Minimum count in both corpora
         "max_p": 0.05,       # Only statistically significant differences
         "stopwords": ["的", "了"],
-        "min_length": 2
+        "min_word_length": 2
     },
     as_dataframe=True
 )

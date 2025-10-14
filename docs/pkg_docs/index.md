@@ -32,7 +32,7 @@ stopwords = load_stopwords("zh_sim")
 segmenter = create_segmenter(
     backend="spacy",
     strategy="sentence",
-    filters={"stopwords": stopwords, "min_length": 2}
+    filters={"stopwords": stopwords, "min_word_length": 2}
 )
 
 # Segment text

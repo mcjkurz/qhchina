@@ -758,7 +758,7 @@ class LDAGibbsSampler:
             n_topics=model_data['n_topics'],
             alpha=model_data['alpha'],
             beta=model_data['beta'],
-            min_word_length=model_data.get('min_word_length', model_data.get('min_length', 1)),
+            min_word_length=model_data.get('min_word_length', 1),
             stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None,
             use_cython=use_cython,
             estimate_alpha=estimate_alpha,

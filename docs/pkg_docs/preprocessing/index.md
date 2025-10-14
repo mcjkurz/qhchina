@@ -28,7 +28,7 @@ Factory function to create a segmenter based on the specified backend.
 - `sentence_end_pattern` (str): Regular expression pattern for sentence endings
 - `**kwargs`: Additional backend-specific arguments and filters
   - `filters` (dict): Filters to apply during segmentation
-    - `'min_length'`: Minimum token length (default: 1)
+    - `'min_word_length'`: Minimum token length (default: 1)
     - `'stopwords'`: List or set of stopwords to exclude
     - `'excluded_pos'`: List or set of POS tags to exclude
 
@@ -142,7 +142,7 @@ segmenter = create_segmenter(
     strategy="sentence",
     user_dict=["量子计算", "深度学习"],
     filters={
-        "min_length": 2,
+        "min_word_length": 2,
         "excluded_pos": ["NUM", "SYM"],
         "stopwords": stopwords
     }
@@ -167,7 +167,7 @@ stopwords = load_stopwords("zh_sim")
 segmenter = create_segmenter(
     backend="jieba",
     strategy="sentence",
-    filters={"stopwords": stopwords, "min_length": 2}
+    filters={"stopwords": stopwords, "min_word_length": 2}
 )
 
 # Load and process texts

@@ -22,7 +22,7 @@ class FilterOptions(TypedDict, total=False):
     """Type definition for filter options in collocation analysis."""
     max_p: float
     stopwords: List[str]
-    min_length: int
+    min_word_length: int
     min_exp_local: float
     max_exp_local: float
     min_obs_local: int
@@ -40,14 +40,20 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
     Args:
         tokenized_sentences: List of tokenized sentences
         target_words: List or set of target words
-        horizon: Window size on each side
+        horizon: Window size - int for symmetric (left, right) or tuple (left, right)
         max_sentence_length: Maximum sentence length to consider (default 256)
         alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
     
     Returns:
         List of dictionaries with collocation statistics
     """
-    result = calculate_collocations_window(tokenized_sentences, target_words, horizon, 
+    # Normalize horizon to (left, right) tuple
+    if isinstance(horizon, int):
+        left_horizon, right_horizon = horizon, horizon
+    else:
+        left_horizon, right_horizon = horizon
+    
+    result = calculate_collocations_window(tokenized_sentences, target_words, left_horizon, right_horizon,
                                            max_sentence_length)
     
     T_count_total, candidate_counts_total, token_counter_total, total_tokens, word2idx, idx2word, target_indices = result
@@ -93,6 +99,12 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5, alternative='greater'):
     """Window-based collocation calculation."""
+    # Normalize horizon to (left, right) tuple
+    if isinstance(horizon, int):
+        left_horizon, right_horizon = horizon, horizon
+    else:
+        left_horizon, right_horizon = horizon
+    
     total_tokens = 0
     T_count = {target: 0 for target in target_words}
     candidate_in_context = {target: Counter() for target in target_words}
@@ -103,8 +115,8 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5,
             total_tokens += 1
             token_counter[token] += 1
 
-            start = max(0, i - horizon)
-            end = min(len(sentence), i + horizon + 1)
+            start = max(0, i - left_horizon)
+            end = min(len(sentence), i + right_horizon + 1)
             context = sentence[start:i] + sentence[i+1:end]
 
             for target in target_words:
@@ -256,7 +268,7 @@ def find_collocates(
     sentences: List[List[str]], 
     target_words: Union[str, List[str]], 
     method: str = 'window', 
-    horizon: int = 5, 
+    horizon: Union[int, tuple] = 5, 
     filters: Optional[FilterOptions] = None, 
     as_dataframe: bool = True,
     max_sentence_length: Optional[int] = 256,
@@ -275,13 +287,15 @@ def find_collocates(
         Method to use for calculating collocations. Either 'window' or 'sentence'.
         - 'window': Uses a sliding window of specified horizon around each token
         - 'sentence': Considers whole sentences as context units
-    horizon : int, default=5
-        Size of the context window on each side (only used if method='window').
+    horizon : Union[int, tuple], default=5
+        Context window size (only used if method='window').
+        - int: Symmetric window (e.g., 5 means 5 words on each side)
+        - tuple: Asymmetric window (left, right) (e.g., (0, 5) means only 5 words on the right)
     filters : Optional[FilterOptions], optional
         Dictionary of filters to apply to results, AFTER computation is done:
         - 'max_p': float - Maximum p-value threshold for statistical significance
         - 'stopwords': List[str] - Words to exclude from results
-        - 'min_length': int - Minimum character length for collocates
+        - 'min_word_length': int - Minimum character length for collocates
         - 'min_exp_local': float - Minimum expected local frequency
         - 'max_exp_local': float - Maximum expected local frequency
         - 'min_obs_local': int - Minimum observed local frequency
@@ -312,12 +326,44 @@ def find_collocates(
     if not all(isinstance(s, list) for s in sentences):
         raise ValueError("sentences must be a list of lists (tokenized sentences)")
     
+    # Filter out empty sentences
+    sentences = [s for s in sentences if s]
+    if not sentences:
+        raise ValueError("All sentences are empty")
+    
     if not isinstance(target_words, list):
         target_words = [target_words]
     target_words = list(set(target_words))
     
     if not target_words:
         raise ValueError("target_words cannot be empty")
+    
+    # Print filters if provided
+    if filters:
+        filter_strs = []
+        if 'max_p' in filters:
+            filter_strs.append(f"max_p={filters['max_p']}")
+        if 'stopwords' in filters:
+            filter_strs.append(f"stopwords=<{len(filters['stopwords'])} words>")
+        if 'min_word_length' in filters:
+            filter_strs.append(f"min_word_length={filters['min_word_length']}")
+        if 'min_exp_local' in filters:
+            filter_strs.append(f"min_exp_local={filters['min_exp_local']}")
+        if 'max_exp_local' in filters:
+            filter_strs.append(f"max_exp_local={filters['max_exp_local']}")
+        if 'min_obs_local' in filters:
+            filter_strs.append(f"min_obs_local={filters['min_obs_local']}")
+        if 'max_obs_local' in filters:
+            filter_strs.append(f"max_obs_local={filters['max_obs_local']}")
+        if 'min_ratio_local' in filters:
+            filter_strs.append(f"min_ratio_local={filters['min_ratio_local']}")
+        if 'max_ratio_local' in filters:
+            filter_strs.append(f"max_ratio_local={filters['max_ratio_local']}")
+        if 'min_obs_global' in filters:
+            filter_strs.append(f"min_obs_global={filters['min_obs_global']}")
+        if 'max_obs_global' in filters:
+            filter_strs.append(f"max_obs_global={filters['max_obs_global']}")
+        print(f"Filters: {', '.join(filter_strs)}")
 
     if CYTHON_AVAILABLE:
         if method == 'window':
@@ -346,7 +392,7 @@ def find_collocates(
 
     if filters:
         valid_keys = {
-            'max_p', 'stopwords', 'min_length', 'min_exp_local', 'max_exp_local',
+            'max_p', 'stopwords', 'min_word_length', 'min_exp_local', 'max_exp_local',
             'min_obs_local', 'max_obs_local', 'min_ratio_local', 'max_ratio_local',
             'min_obs_global', 'max_obs_global'
         }
@@ -367,11 +413,11 @@ def find_collocates(
             stopwords_set = set(stopwords)
             results = [result for result in results if result["collocate"] not in stopwords_set]
         
-        if 'min_length' in filters:
-            min_length = filters['min_length']
-            if not isinstance(min_length, int) or min_length < 1:
-                raise ValueError("min_length must be a positive integer")
-            results = [result for result in results if len(result["collocate"]) >= min_length]
+        if 'min_word_length' in filters:
+            min_word_length = filters['min_word_length']
+            if not isinstance(min_word_length, int) or min_word_length < 1:
+                raise ValueError("min_word_length must be a positive integer")
+            results = [result for result in results if len(result["collocate"]) >= min_word_length]
         
         if 'min_exp_local' in filters:
             min_exp = filters['min_exp_local']
@@ -436,8 +482,10 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
         List of tokenized documents, where each document is a list of tokens.
     method : str, default='window'
         Method to use for calculating co-occurrences. Either 'window' or 'document'.
-    horizon : int, default=5
-        Size of the context window (only used if method='window').
+    horizon : Union[int, tuple], default=5
+        Context window size (only used if method='window').
+        - int: Symmetric window (e.g., 5 means 5 words on each side)
+        - tuple: Asymmetric window (left, right) (e.g., (0, 5) means only 5 words on the right)
     min_abs_count : int, default=1
         Minimum absolute count for a word to be included in the vocabulary.
     min_doc_count : int, default=1
@@ -507,11 +555,17 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
             cooc_dict[(word1_idx, word2_idx)] += count
 
     if method == 'window':
+        # Normalize horizon to (left, right) tuple
+        if isinstance(horizon, int):
+            left_horizon, right_horizon = horizon, horizon
+        else:
+            left_horizon, right_horizon = horizon
+        
         for document in filtered_documents:
             for i, word1 in enumerate(document):
                 idx1 = word_to_index[word1]
-                start = max(0, i - horizon)
-                end = min(len(document), i + horizon + 1)
+                start = max(0, i - left_horizon)
+                end = min(len(document), i + right_horizon + 1)
                 context_words = document[start:i] + document[i+1:end]
 
                 for word2 in context_words:
