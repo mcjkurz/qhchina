@@ -1965,7 +1965,7 @@ class TempRefWord2Vec(Word2Vec):
                 # Add to index2word list
                 self.index2word.append(base_word)
                 # Add to word_counts
-                self.word_counts[base_word] = 1  # Count 1 just to avoid division by 0
+                self.word_counts[base_word] = 1  # Count 1 just to avoid division by 0 in the function _calculate_discard_probs
                 added_base_words += 1
         
         if added_base_words > 0:
