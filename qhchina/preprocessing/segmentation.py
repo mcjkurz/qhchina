@@ -4,9 +4,13 @@ import importlib
 import re
 import json
 from datetime import datetime
+import time
 
 class SegmentationWrapper:
     """Base segmentation wrapper class that can be extended for different segmentation tools."""
+    
+    # Valid filter keys
+    VALID_FILTER_KEYS = {'stopwords', 'min_word_length', 'excluded_pos'}
     
     def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: Dict[str, Any] = None, 
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
@@ -27,6 +31,10 @@ class SegmentationWrapper:
         
         self.chunk_size = chunk_size
         self.filters = filters or {}
+        
+        # Validate filter keys
+        self._validate_filters()
+        
         self.filters.setdefault('stopwords', set())
         if not isinstance(self.filters['stopwords'], set):
             self.filters['stopwords'] = set(self.filters['stopwords'])
@@ -35,6 +43,18 @@ class SegmentationWrapper:
         if not isinstance(self.filters['excluded_pos'], set):
             self.filters['excluded_pos'] = set(self.filters['excluded_pos'])
         self.sentence_end_pattern = sentence_end_pattern
+    
+    def _validate_filters(self):
+        """Validate that all filter keys are recognized."""
+        if not self.filters:
+            return
+        
+        invalid_keys = set(self.filters.keys()) - self.VALID_FILTER_KEYS
+        if invalid_keys:
+            raise ValueError(
+                f"Invalid filter key(s): {invalid_keys}. "
+                f"Valid filter keys are: {self.VALID_FILTER_KEYS}"
+            )
     
     def segment(self, text: str) -> Union[List[str], List[List[str]]]:
         """Segment text into tokens based on the selected strategy.
@@ -197,8 +217,10 @@ class SpacySegmenter(SegmentationWrapper):
         except ImportError:
             raise ImportError("spacy is not installed. Please install it with 'pip install spacy'")
         
+        print(f"Loading spaCy model '{model_name}'... This may take a moment.")
         try:
             self.nlp = spacy.load(model_name, disable=self.disable)
+            print(f"Model '{model_name}' loaded successfully.")
         except OSError:
             # Model not found, try to download it
             try:
@@ -210,7 +232,7 @@ class SpacySegmenter(SegmentationWrapper):
                     download(model_name)
                 # Load the model after downloading
                 self.nlp = spacy.load(model_name, disable=self.disable)
-                print(f"Model {model_name} successfully downloaded and loaded.")
+                print(f"Model '{model_name}' successfully downloaded and loaded.")
             except Exception as e:
                 raise ImportError(
                     f"Could not download model {model_name}. Error: {str(e)}. "
@@ -465,18 +487,20 @@ class BertSegmenter(SegmentationWrapper):
         # Initialize model and tokenizer
         if model is not None and tokenizer is not None:
             # Use provided model and tokenizer
+            print(f"Loading provided model to {self.device}... This may take a moment.")
             self.model = model.to(self.device)
             self.tokenizer = tokenizer
-            print(f"Using provided model and tokenizer on {self.device}")
+            print(f"Model loaded successfully on {self.device}.")
         else:
             # Load model and tokenizer from pretrained
+            print(f"Loading BERT model '{model_name}'... This may take a moment.")
             try:
                 self.tokenizer = self.AutoTokenizer.from_pretrained(model_name)
                 self.model = self.AutoModelForTokenClassification.from_pretrained(
                     model_name, 
                     num_labels=len(self.labels)
                 ).to(self.device)
-                print(f"Loaded model {model_name} on {self.device}")
+                print(f"Model '{model_name}' loaded successfully on {self.device}.")
             except Exception as e:
                 raise ImportError(f"Failed to load model {model_name}. Error: {str(e)}")
         
@@ -694,6 +718,7 @@ class LLMSegmenter(SegmentationWrapper):
                  system_message: str = None,
                  temperature: float = 1,
                  max_tokens: int = 2048,
+                 retry_patience: int = 1,
                  strategy: str = "whole",
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
@@ -708,6 +733,7 @@ class LLMSegmenter(SegmentationWrapper):
             system_message: Optional system message to prepend to API calls
             temperature: Temperature for model sampling (lower for more deterministic output)
             max_tokens: Maximum tokens in the response
+            retry_patience: Number of retry attempts for API calls (default 1, meaning try once with no retries)
             strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
             chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
@@ -725,6 +751,7 @@ class LLMSegmenter(SegmentationWrapper):
         self.system_message = system_message
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.retry_patience = max(1, retry_patience)  # Ensure at least 1 attempt
         
         # Try to import OpenAI
         try:
@@ -744,85 +771,98 @@ class LLMSegmenter(SegmentationWrapper):
             self.client = openai.OpenAI(api_key=api_key)
     
     def _call_llm_api(self, text: str) -> List[str]:
-        """Call the LLM API with the provided text and parse the response as a list of tokens."""
+        """Call the LLM API with the provided text and parse the response as a list of tokens.
+        
+        Implements retry logic with exponential backoff.
+        """
         prompt_text = self.prompt.format(text=text)
         
-        try:
-            # Prepare the messages
-            messages = []
-            
-            # Add system message if provided
-            if self.system_message:
-                messages.append({"role": "system", "content": self.system_message})
-                
-            # Add user message with the prompt
-            messages.append({"role": "user", "content": prompt_text})
-            
-            # Call the API
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                response_format={"type": "json_object"}
-            )
-            
-            # Parse the response
-            response_text = response.choices[0].message.content
-            
-            # Try to parse as JSON
+        for attempt in range(self.retry_patience):
             try:
-                # First check if response is already a list
-                if response_text.strip().startswith('[') and response_text.strip().endswith(']'):
-                    try:
-                        tokens = json.loads(response_text)
-                        if isinstance(tokens, list):
-                            return tokens
-                    except json.JSONDecodeError as je:
-                        print(f"Warning: Response looks like a list but isn't valid JSON: {str(je)}")
-                        print(f"Response text (first 100 chars): {response_text[:100]}...")
+                # Prepare the messages
+                messages = []
                 
-                # Try to extract JSON structure from the response
-                try:
-                    parsed_json = json.loads(response_text)
+                # Add system message if provided
+                if self.system_message:
+                    messages.append({"role": "system", "content": self.system_message})
                     
-                    # Check for common API response patterns
-                    if isinstance(parsed_json, list):
-                        return parsed_json
-                    elif 'tokens' in parsed_json:
-                        return parsed_json['tokens']
-                    elif 'words' in parsed_json:
-                        return parsed_json['words']
-                    elif 'segments' in parsed_json:
-                        return parsed_json['segments']
-                    elif 'result' in parsed_json:
-                        return parsed_json['result']
-                    elif 'results' in parsed_json:
-                        return parsed_json['results']
-                    else:
-                        # Just return the first list found in the JSON
-                        for value in parsed_json.values():
-                            if isinstance(value, list) and len(value) > 0:
-                                return value
+                # Add user message with the prompt
+                messages.append({"role": "user", "content": prompt_text})
+                
+                # Call the API
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    response_format={"type": "json_object"}
+                )
+                
+                # Parse the response
+                response_text = response.choices[0].message.content
+                
+                # Try to parse as JSON
+                try:
+                    # First check if response is already a list
+                    if response_text.strip().startswith('[') and response_text.strip().endswith(']'):
+                        try:
+                            tokens = json.loads(response_text)
+                            if isinstance(tokens, list):
+                                return tokens
+                        except json.JSONDecodeError as je:
+                            print(f"Warning: Response looks like a list but isn't valid JSON: {str(je)}")
+                            print(f"Response text (first 100 chars): {response_text[:100]}...")
+                    
+                    # Try to extract JSON structure from the response
+                    try:
+                        parsed_json = json.loads(response_text)
                         
-                        # If we didn't find any list, log this unusual response
-                        print(f"Warning: No list found in JSON response: {parsed_json}")
-                        # Fallback to raw tokens if no list found
+                        # Check for common API response patterns
+                        if isinstance(parsed_json, list):
+                            return parsed_json
+                        elif 'tokens' in parsed_json:
+                            return parsed_json['tokens']
+                        elif 'words' in parsed_json:
+                            return parsed_json['words']
+                        elif 'segments' in parsed_json:
+                            return parsed_json['segments']
+                        elif 'result' in parsed_json:
+                            return parsed_json['result']
+                        elif 'results' in parsed_json:
+                            return parsed_json['results']
+                        else:
+                            # Just return the first list found in the JSON
+                            for value in parsed_json.values():
+                                if isinstance(value, list) and len(value) > 0:
+                                    return value
+                            
+                            # If we didn't find any list, log this unusual response
+                            print(f"Warning: No list found in JSON response: {parsed_json}")
+                            # Fallback to raw tokens if no list found
+                            return []
+                    except json.JSONDecodeError as je:
+                        # Show detailed error for debugging
+                        print(f"JSON Decode Error: {str(je)}")
+                        print(f"Response text (first 100 chars): {response_text[:100]}...")
                         return []
-                except json.JSONDecodeError as je:
-                    # Show detailed error for debugging
-                    print(f"JSON Decode Error: {str(je)}")
+                        
+                except Exception as e:
+                    print(f"Error parsing API response: {str(e)}")
                     print(f"Response text (first 100 chars): {response_text[:100]}...")
                     return []
                     
             except Exception as e:
-                print(f"Error parsing API response: {str(e)}")
-                print(f"Response text (first 100 chars): {response_text[:100]}...")
-                return []
+                is_last_attempt = (attempt == self.retry_patience - 1)
                 
-        except Exception as e:
-            print(f"Error calling LLM API: {str(e)}")
-            return []
+                if is_last_attempt:
+                    print(f"Error calling LLM API (final attempt {attempt + 1}/{self.retry_patience}): {str(e)}")
+                    return []
+                else:
+                    # Calculate exponential backoff delay: 2^attempt seconds
+                    wait_time = 2 ** attempt
+                    print(f"Error calling LLM API (attempt {attempt + 1}/{self.retry_patience}): {str(e)}")
+                    print(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
     
     def _filter_tokens(self, tokens: List[str]) -> List[str]:
         """Apply filters to the tokens."""
@@ -870,6 +910,7 @@ def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size
                 - min_word_length: Minimum length of tokens to include (default 1)
                 - stopwords: Set of stopwords to exclude
                 - excluded_pos: Set of POS tags to exclude (for backends that support POS tagging)
+            - retry_patience: (LLM backend only) Number of retry attempts for API calls (default 1)
             - Other backend-specific arguments
         
     Returns:
