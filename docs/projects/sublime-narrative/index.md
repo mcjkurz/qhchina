@@ -6,7 +6,7 @@ permalink: /projects/sublime-narrative/
 
 # The Sublime as a Narrative Technology
 
-Words transmit not only semantic meaning but also affective energy. Drawing on cognitive science and computational criticism, this project conceptualizes the sublime as a synchronized distribution of two distinct vocabularies within a narrative. A steady accumulation of words describing powerful natural phenomena is strategically entangled with the narrative's plot-specific terms to culminate in a powerful, boundary-crossing experience for the reader.
+Words transmit not only semantic meaning but also affective energy. Drawing on cognitive science and computational criticism, this project conceptualizes the sublime as a synchronized distribution of two distinct vocabularies within a narrative. A steady accumulation of words describing powerful natural phenomena activates the reader's kinaesthetic involvement; this progression is in turn strategically entangled with the narrative's plot-specific terms to culminate in a powerful, boundary-crossing experience.
 
 ## Publications
 
