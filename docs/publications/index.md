@@ -12,13 +12,13 @@ permalink: /publications/
 
 **Cai, Zong-qi, Maciej Kurzynski, and Xiaotong Xu**, ["Good Things Come in Pairs: A Computational Study of Poetic Parallelism in the Six Dynasties"](#), *Journal of Chinese Literature and Culture* (*JCLC*), 2025(2), forthcoming.
 
-**Kurzynski, Maciej**, ["Poly-Temporal, Multi-Layered: A Techno-Cognitive Theory of Narrative Experience in Literature"](https://euppublishing.com/doi/full/10.3366/ijhac.2025.0343), *International Journal of Humanities and Arts Computing* (IJHAC) 19, 2025(1), 33-48.
+**Kurzynski, Maciej**, ["Poly-Temporal, Multi-Layered: A Techno-Cognitive Theory of Narrative Experience in Literature"](https://euppublishing.com/doi/full/10.3366/ijhac.2025.0343), *International Journal of Humanities and Arts Computing* (IJHAC) 19, 2025(1): 33-48.
 
 ## 2024
 
 **Kurzynski, Maciej**, ["Perplexity Games: Maoism vs. Literature through the Lens of Cognitive Stylometry,"](https://jdmdh.episciences.org/13429) *Journal of Data Mining and Digital Humanities*, NLP4DH, 29 April 2024.
 
-**Cai, Zong-qi, and Maciej Kurzynski**, ["Brevity and Breadth: A Linguistic, Aesthetic, and DH-Assisted Study of the *Book of Poetry* and 'Nineteen Old Poems,'"](https://read.dukeupress.edu/jclc/article-abstract/11/2/235/397123/Brevity-and-Breadth-A-Linguistic-Aesthetic-and-DH?redirectedFrom=fulltext), *Journal of Chinese Literature and Culture* (*JCLC*), 2024(2), 235–264.
+**Cai, Zong-qi, and Maciej Kurzynski**, ["Brevity and Breadth: A Linguistic, Aesthetic, and DH-Assisted Study of the *Book of Poetry* and 'Nineteen Old Poems,'"](https://read.dukeupress.edu/jclc/article-abstract/11/2/235/397123/Brevity-and-Breadth-A-Linguistic-Aesthetic-and-DH?redirectedFrom=fulltext), *Journal of Chinese Literature and Culture* (*JCLC*), 2024(2): 235–264.
 
 **Gilkison, Aaron, and Maciej Kurzynski**, ["Vectors of Violence: Legitimation and Distribution of State Power in the People's Liberation Army Daily (Jiefangjun Bao), 1956-1989"](https://culturalanalytics.org/article/115481-vectors-of-violence-legitimation-and-distribution-of-state-power-in-the-_people-s-liberation-army-daily_-_jiefangjun-bao_-1956-1989), *Journal of Cultural Analytics* 9(1), 2024.
 
