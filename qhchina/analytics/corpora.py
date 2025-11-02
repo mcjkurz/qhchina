@@ -16,6 +16,7 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
       corpusA: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
       corpusB: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
       method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' for the chi-square test.
+                    All tests use two-sided alternatives.
       filters (dict, optional): Dictionary of filters to apply to results:
           - 'min_count': int or tuple - Minimum count threshold(s) for a word to be included 
             (can be a single int for both corpora or tuple (min_countA, min_countB)).
@@ -32,6 +33,9 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
       If as_dataframe is False:
         List[dict]: Each dict contains information about a word's frequency in both corpora,
                     the p-value, and the ratio of relative frequencies.
+    
+    Notes:
+      Two-sided tests are used because we want to detect whether words are overrepresented in either corpus.
     """
     # Validate and print filters
     if filters:

@@ -20,7 +20,7 @@ Identify statistically significant differences in word usage between two corpora
 **Parameters:**
 - `corpusA` (list): First corpus - either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
 - `corpusB` (list): Second corpus - same format as corpusA
-- `method` (str): Statistical test to use
+- `method` (str): Statistical test to use (all tests use two-sided alternatives)
   - `'fisher'`: Fisher's exact test (default)
   - `'chi2'`: Chi-square test without correction
   - `'chi2_corrected'`: Chi-square test with Yates' correction
@@ -42,7 +42,7 @@ Identify statistically significant differences in word usage between two corpora
 - `rel_ratio`: Ratio of relative frequencies (A:B)
 - `p_value`: Statistical significance of the difference
 
-**Note:** A small p-value indicates that the difference in word frequency between corpora is statistically significant. A `rel_ratio` > 1 indicates the word is more common in corpus A; < 1 indicates more common in corpus B.
+**Note:** A small p-value indicates that the difference in word frequency between corpora is statistically significant. A `rel_ratio` > 1 indicates the word is more common in corpus A; < 1 indicates more common in corpus B. Two-sided tests are used because we want to detect whether words are overrepresented in either corpus.
 
 ## Examples
 
