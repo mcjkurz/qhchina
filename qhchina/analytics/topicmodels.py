@@ -1241,7 +1241,7 @@ class LDAGibbsSampler:
         elif format == 'html':
             self._plot_interactive_html(
                 coords_2d, colors, doc_labels, method, color_label,
-                title, filename, extra_info, highlight, n_topic_words
+                title, filename, extra_info, highlight, n_topic_words, size
             )
             return None
         
@@ -1390,7 +1390,8 @@ class LDAGibbsSampler:
         filename: Optional[str],
         extra_info: Dict[str, Any],
         highlight: Optional[List[int]],
-        n_topic_words: int = 4
+        n_topic_words: int = 4,
+        size: float = 50
     ) -> None:
         """Create interactive HTML visualization with JavaScript."""
         import json
@@ -1535,31 +1536,33 @@ class LDAGibbsSampler:
             background-color: #45a049;
         }}
         #legend {{
-            margin-top: 10px;
-            text-align: center;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 10px;
+            margin-top: 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 8px;
             max-width: {canvas_width}px;
             margin-left: auto;
             margin-right: auto;
+            padding: 0 10px;
         }}
         .legend-item {{
-            display: inline-flex;
+            display: flex;
             align-items: center;
             margin: 0;
-            white-space: nowrap;
             cursor: pointer;
-            padding: 5px 8px;
+            padding: 8px 10px;
             border-radius: 4px;
             transition: background-color 0.2s;
+            border: 1px solid #e0e0e0;
+            background-color: #fafafa;
         }}
         .legend-item:hover {{
-            background-color: #f0f0f0;
+            background-color: #e8f5e9;
+            border-color: #4CAF50;
         }}
         .legend-item.grayed {{
-            opacity: 0.4;
+            opacity: 0.5;
+            background-color: #f5f5f5;
         }}
         .legend-color {{
             display: inline-block;
@@ -1567,7 +1570,15 @@ class LDAGibbsSampler:
             height: 20px;
             border-radius: 50%;
             vertical-align: middle;
-            margin-right: 5px;
+            margin-right: 8px;
+            flex-shrink: 0;
+            border: 2px solid rgba(0,0,0,0.1);
+        }}
+        .legend-item span:last-child {{
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 13px;
         }}
     </style>
 </head>
@@ -1603,13 +1614,14 @@ class LDAGibbsSampler:
             }}
         }});
         
-        // Dynamically adjust point radius based on number of documents
+        // Dynamically adjust point radius based on number of documents and size parameter
         const numDocs = data.length;
-        let pointRadius = 5;
+        const baseSize = {size};  // Size parameter from Python
+        let pointRadius = baseSize / 10;  // Convert size to radius (50 -> 5)
         if (numDocs > 1000) {{
-            pointRadius = Math.max(2, 5 * (500 / numDocs));
+            pointRadius = Math.max(2, pointRadius * (500 / numDocs));
         }} else if (numDocs > 500) {{
-            pointRadius = 4;
+            pointRadius = Math.max(3, pointRadius * 0.8);
         }}
         const hoverThreshold = Math.max(pointRadius + 5, 10);
         

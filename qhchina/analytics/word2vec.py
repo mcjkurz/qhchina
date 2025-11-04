@@ -1119,7 +1119,7 @@ class Word2Vec:
               epochs: int = 1, 
               alpha: Optional[float] = None,
               min_alpha: Optional[float] = None,
-              batch_size: int = 10000, 
+              batch_size: int = 2000, 
               callbacks: List[Callable] = None,
               calculate_loss: bool = True) -> Optional[float]:
         """
@@ -1131,7 +1131,7 @@ class Word2Vec:
         epochs: Number of training iterations over the corpus
         alpha: Initial learning rate
         min_alpha: Minimum allowed learning rate
-        batch_size: Batch size for training; if 0, no batching is used; default is 10000;
+        batch_size: Batch size for training; if 0, no batching is used; default is 2000;
         callbacks: List of callback functions to call after each epoch
         calculate_loss: Whether to calculate and return the final loss
         

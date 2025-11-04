@@ -50,7 +50,7 @@ Build vocabulary from tokenized sentences.
 <br>
 
 ```python
-train(sentences, epochs=5, batch_size=None)
+train(sentences, epochs=5, batch_size=2000)
 ```
 
 Train the Word2Vec model.
@@ -58,7 +58,7 @@ Train the Word2Vec model.
 **Parameters:**
 - `sentences` (list): List of tokenized sentences
 - `epochs` (int): Number of training epochs
-- `batch_size` (int): Batch size for training (optional)
+- `batch_size` (int): Batch size for training (default: 2000)
 
 <br>
 
@@ -139,7 +139,7 @@ TempRefWord2Vec(corpora, labels, targets, vector_size=100, window=5,
 ### Main Methods
 
 ```python
-train(calculate_loss=True, batch_size=64)
+train(calculate_loss=True, batch_size=2000)
 ```
 
 Train the temporal reference model.

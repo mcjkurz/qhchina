@@ -839,6 +839,8 @@ def train_cbow_batch(
     # Pre-allocate buffers for processing one example at a time
     cdef np.ndarray[real_t, ndim=1] combined_input = np.zeros(vector_size, dtype=W.base.dtype)
     cdef np.ndarray[real_t, ndim=1] context_grad = np.zeros(vector_size, dtype=W.base.dtype)
+    cdef np.ndarray[real_t, ndim=1] center_grad = np.zeros(vector_size, dtype=W.base.dtype)
+    cdef np.ndarray[real_t, ndim=1] neg_grad = np.zeros(vector_size, dtype=W.base.dtype)
     
     # Generate all negative samples at once for efficiency
     cdef np.ndarray[ITYPE_t, ndim=2] neg_indices = np.zeros((batch_size, NEGATIVE), dtype=np.int32)
@@ -870,6 +872,10 @@ def train_cbow_batch(
             our_scal(&combined_input[0], scale_factor, vector_size)
         
         # === POSITIVE EXAMPLE (center word) ===
+        # Reset gradient accumulators using BLAS
+        our_zero(&center_grad[0], vector_size)
+        our_zero(&context_grad[0], vector_size)
+        
         # Compute dot product
         score = our_dot(&combined_input[0], &W_prime[center_idx, 0], vector_size)
         
@@ -879,13 +885,10 @@ def train_cbow_batch(
         # Compute gradient for positive example (target = 1)
         gradient = prediction - 1.0
         
-        # Update center word vector directly (for positive)
-        for j in range(vector_size):
-            W_prime[center_idx, j] += neg_lr * gradient * combined_input[j]
+        # Accumulate gradient for center word (positive)
+        our_axpy(&combined_input[0], &center_grad[0], gradient, vector_size)
             
         # Calculate context word gradients for positive sample
-        # Reset context_grad buffer using BLAS
-        our_zero(&context_grad[0], vector_size)
             
         # Compute context gradient scaling factor
         input_gradient_scale = gradient
@@ -915,9 +918,13 @@ def train_cbow_batch(
             # Compute gradient for negative example (target = 0)
             gradient = prediction
             
-            # Update negative center word vector directly
-            for j in range(vector_size):
-                W_prime[neg_idx, j] += neg_lr * gradient * combined_input[j]
+            # Compute gradient for this negative sample and clip it
+            our_zero(&neg_grad[0], vector_size)
+            our_axpy(&combined_input[0], &neg_grad[0], gradient, vector_size)
+            clip_gradient_norm(&neg_grad[0], vector_size, GRADIENT_CLIP)
+            
+            # Apply clipped gradient to negative word vector
+            our_axpy(&neg_grad[0], &W_prime[neg_idx, 0], neg_lr, vector_size)
             
             # Calculate context word gradients for negative sample
             # Compute context gradient scaling factor
@@ -931,7 +938,12 @@ def train_cbow_batch(
             # Compute loss for negative example
             total_loss -= fast_log_sigmoid(-score)
         
-        # After processing all examples, update all context word vectors
+        # After processing all positive and negative examples, update vectors with clipped gradients
+        
+        # Clip accumulated center gradient by norm before applying (positive center word)
+        clip_gradient_norm(&center_grad[0], vector_size, GRADIENT_CLIP)
+        our_axpy(&center_grad[0], &W_prime[center_idx, 0], neg_lr, vector_size)
+        
         # Clip accumulated context gradients by norm before applying
         clip_gradient_norm(&context_grad[0], vector_size, GRADIENT_CLIP)
         for j in range(context_size):
