@@ -18,8 +18,7 @@ Autoregressive language models generate text by predicting the next word from th
 
 Kurzynski, Maciej, ["Cognitive Stylometry: A Computational Study of Defamiliarization in Modern Chinese,"](https://www.cambridge.org/core/journals/computational-humanities-research/article/cognitive-stylometry-a-computational-study-of-defamiliarization-in-modern-chinese/806CD4721AEC85C07473396825C3D7DD) *Computational Humanities Research*, 5 December 2025, pp. 1-17.
 
-
----
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
 
 ### Perplexity Games: Maoism vs. Literature through the Lens of Cognitive Stylometry
 
@@ -29,8 +28,7 @@ The arrival of large language models (LLMs) has provoked an urgent search for st
 
 Kurzynski, Maciej, ["Perplexity Games: Maoism vs. Literature through the Lens of Cognitive Stylometry,"](https://jdmdh.episciences.org/13429) *Journal of Data Mining and Digital Humanities*, NLP4DH, 29 April 2024.
 
-
----
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
 
 ### The Stylometry of Maoism: Quantifying the Language of Mao Zedong
 
