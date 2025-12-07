@@ -8,7 +8,7 @@ permalink: /publications/
 
 ## 2025
 
-Kurzynski, Maciej, ["Cognitive Stylometry: A Computational Study of Defamiliarization in Modern Chinese,"](#) *Computational Humanities Research* (forthcoming).
+Kurzynski, Maciej, ["Cognitive Stylometry: A Computational Study of Defamiliarization in Modern Chinese,"](https://www.cambridge.org/core/journals/computational-humanities-research/article/cognitive-stylometry-a-computational-study-of-defamiliarization-in-modern-chinese/806CD4721AEC85C07473396825C3D7DD) *Computational Humanities Research*, 5 December 2025, pp. 1-17.
 
 Kurzynski, Maciej, Xiaotong Xu, and Yu Feng, "[The Game of Keys and Queries: Parallelism and Cognitive Geometry in Chinese Regulated Verse](https://www.euppublishing.com/doi/abs/10.3366/ijhac.2025.0355)," *International Journal of Humanities and Arts Computing (IJHAC)* 19, 2025(2): 143-157.
 
