@@ -8,6 +8,8 @@ permalink: /pkg_docs/stylometry/
 
 The `qhchina.analytics.stylometry` module provides tools for authorship attribution and document clustering using statistical analysis of writing style.
 
+> **Note:** This module is inspired by the R package [stylo](https://github.com/computationalstylistics/stylo), a much more comprehensive implementation for computational stylistics.
+
 ```python
 from qhchina.analytics.stylometry import Stylometry
 

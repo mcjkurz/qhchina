@@ -1,6 +1,9 @@
 """
 Stylometry module for authorship attribution and document clustering.
 
+Inspired by the R package 'stylo' (https://github.com/computationalstylistics/stylo),
+a much more comprehensive implementation for computational stylistics.
+
 Supports supervised (with fit) and unsupervised (without fit) analysis.
 Two modes for supervised learning:
 - 'centroid': Aggregate all author texts into one profile, compare disputed text to centroids
