@@ -299,7 +299,9 @@ class Stylometry:
                     - labels=['ch1', 'ch2', 'ch3'] → each doc is its own group (for clustering)
                     - labels=None → all docs grouped as {'unk': [doc1, doc2, ...]}
         
-        Document IDs are auto-generated as '{label}_{n}' (e.g., 'AuthorA_1', 'AuthorA_2', 'unk_1').
+        Document IDs are generated based on grouping: when a label has only one document,
+        the label is used directly as the ID (e.g., 'chapter1'). When multiple documents
+        share a label, IDs are suffixed with numbers (e.g., 'AuthorA_1', 'AuthorA_2').
         
         The process:
         1. Extract most frequent words (MFW) from all documents
@@ -372,7 +374,11 @@ class Stylometry:
         for author, texts in corpus.items():
             self._author_doc_rel_freqs[author] = {}
             for i, doc in enumerate(texts):
-                doc_id = f"{author}_{i+1}"
+                # Only append index suffix if author has multiple documents
+                if len(texts) == 1:
+                    doc_id = author
+                else:
+                    doc_id = f"{author}_{i+1}"
                 rel_freq_dict = get_relative_frequencies(doc)
                 rel_freq_vec = np.array([rel_freq_dict.get(f, 0.0) for f in self.features])
                 self._author_doc_rel_freqs[author][doc_id] = rel_freq_vec
