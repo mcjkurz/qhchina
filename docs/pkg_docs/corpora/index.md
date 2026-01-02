@@ -8,6 +8,15 @@ permalink: /pkg_docs/corpora/
 
 The `qhchina.analytics.corpora` module provides tools for comparing corpora and identifying linguistic patterns.
 
+```python
+from qhchina.analytics.corpora import compare_corpora
+
+results = compare_corpora(corpus_a, corpus_b, method="fisher")
+words_in_a = results[results["rel_ratio"] > 1]  # Words more common in corpus A
+```
+
+---
+
 ## Functions
 
 ```python

@@ -8,6 +8,16 @@ permalink: /pkg_docs/word_embeddings/
 
 The `qhchina.analytics.word2vec` module provides Word2Vec implementations for Chinese text analysis, including standard Word2Vec and TempRefWord2Vec for tracking semantic change over time.
 
+```python
+from qhchina.analytics.word2vec import Word2Vec
+
+model = Word2Vec(vector_size=100, window=5, min_word_count=5)
+model.train(sentences, epochs=5)
+similar = model.most_similar("经济", topn=10)  # Find words similar to "经济"
+```
+
+---
+
 ## Word2Vec
 
 Implementation of Word2Vec with both CBOW and Skip-gram architectures.

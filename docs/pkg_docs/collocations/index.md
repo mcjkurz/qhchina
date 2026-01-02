@@ -8,6 +8,15 @@ permalink: /pkg_docs/collocations/
 
 The `qhchina.analytics.collocations` module provides tools for identifying words that frequently co-occur together in text.
 
+```python
+from qhchina.analytics.collocations import find_collocates
+
+collocates = find_collocates(sentences, target_words=["经济"], horizon=5)
+top_collocates = collocates.sort_values("p_value").head(10)  # Most significant collocates
+```
+
+---
+
 ## Functions
 
 ```python

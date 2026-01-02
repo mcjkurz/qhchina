@@ -8,6 +8,16 @@ permalink: /pkg_docs/preprocessing/
 
 The `qhchina.preprocessing` module provides Chinese text segmentation (word tokenization) with various backends and processing strategies.
 
+```python
+from qhchina.preprocessing.segmentation import create_segmenter
+
+segmenter = create_segmenter(backend="spacy", strategy="sentence")
+sentences = segmenter.segment("深度学习正在改变世界。自然语言处理是其中一个领域。")
+# [['深度', '学习', '正在', '改变', '世界', '。'], ['自然', '语言', '处理', '是', '其中', '一个', '领域', '。']]
+```
+
+---
+
 ## Creating a Segmenter
 
 ```python

@@ -8,6 +8,16 @@ permalink: /pkg_docs/stylometry/
 
 The `qhchina.analytics.stylometry` module provides tools for authorship attribution and document clustering using statistical analysis of writing style.
 
+```python
+from qhchina.analytics.stylometry import Stylometry
+
+stylo = Stylometry(n_features=100, distance='cosine')
+stylo.fit({'author_a': [tokens_a1, tokens_a2], 'author_b': [tokens_b1, tokens_b2]})
+predicted = stylo.predict_author(unknown_text)  # Predict authorship
+```
+
+---
+
 ## Stylometry Class
 
 The main class for stylometric analysis supports both supervised (with labeled training data) and unsupervised (clustering) approaches.

@@ -8,6 +8,16 @@ permalink: /pkg_docs/topic_modeling/
 
 The `qhchina.analytics.topicmodels` module provides Latent Dirichlet Allocation (LDA) with Gibbs sampling for discovering thematic structure in document collections.
 
+```python
+from qhchina.analytics.topicmodels import LDAGibbsSampler
+
+lda = LDAGibbsSampler(n_topics=10, iterations=100)
+lda.fit(documents)  # documents = list of tokenized texts
+topics = lda.get_topics(n_words=10)  # Get top words per topic
+```
+
+---
+
 ## LDAGibbsSampler
 
 ### Initialization
