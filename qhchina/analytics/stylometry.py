@@ -279,11 +279,17 @@ class Stylometry:
                   {'AuthorA': [[tok1, tok2, ...], [tok1, ...]], 'AuthorB': [...]}
                 - List of tokenized documents (unsupervised):
                   [[tok1, tok2, ...], [tok1, ...], ...]
-            labels: Optional labels for list input. If provided, documents are grouped
-                    by label. If not provided, all documents get the 'unk' label.
-                    Ignored for dict input.
+            labels: Optional list of labels, one per document (must match corpus length).
+                    Documents sharing the same label are grouped together as belonging
+                    to the same author. If not provided, all documents are assigned the
+                    label 'unk'. Ignored for dict input.
+                    
+                    Examples:
+                    - labels=['A', 'A', 'B', 'B'] → groups into {'A': [doc1, doc2], 'B': [doc3, doc4]}
+                    - labels=['ch1', 'ch2', 'ch3'] → each doc is its own group (for clustering)
+                    - labels=None → all docs grouped as {'unk': [doc1, doc2, ...]}
         
-        Document IDs are auto-generated as '{author}_{n}' (e.g., 'AuthorA_1', 'AuthorA_2', 'unk_1').
+        Document IDs are auto-generated as '{label}_{n}' (e.g., 'AuthorA_1', 'AuthorA_2', 'unk_1').
         
         The process:
         1. Extract most frequent words (MFW) from all documents
@@ -427,12 +433,21 @@ class Stylometry:
         """
         Convert a list of documents to dict format, grouped by label.
         
+        Documents with the same label value are grouped together as belonging
+        to the same author. If labels is None, all documents get the 'unk' label.
+        
         Args:
             documents: List of tokenized documents
-            labels: Optional labels for each document
+            labels: Optional list of labels, one per document. Documents sharing
+                    the same label are grouped together.
         
         Returns:
-            Dict mapping label to list of documents
+            Dict mapping label to list of documents with that label
+        
+        Example:
+            documents = [doc1, doc2, doc3, doc4]
+            labels = ['A', 'A', 'B', 'B']
+            → {'A': [doc1, doc2], 'B': [doc3, doc4]}
         """
         if not documents:
             raise ValueError("documents cannot be empty")

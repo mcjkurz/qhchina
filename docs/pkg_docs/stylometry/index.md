@@ -64,9 +64,15 @@ Fit the model on a corpus and transform documents to z-score vectors.
 - `corpus`: Either:
   - **Dict** (supervised): `{'author_a': [[tok1, tok2, ...], [tok1, ...]], 'author_b': [...]}`
   - **List** (unsupervised): `[[tok1, tok2, ...], [tok1, ...], ...]`
-- `labels` (list): Optional labels for list input. If provided, documents are grouped by label. If not provided, all documents get the 'unk' label.
+- `labels` (list): Optional list of labels, **one per document** (must match corpus length). Documents sharing the same label are grouped together as belonging to the same author. If not provided, all documents are assigned the label `'unk'`. Ignored for dict input.
 
-Document IDs are auto-generated as `{author}_{n}` (e.g., `author_a_1`, `author_a_2`, `unk_1`).
+  | Labels | Result |
+  |--------|--------|
+  | `['A', 'A', 'B', 'B']` | Groups into `{'A': [doc1, doc2], 'B': [doc3, doc4]}` |
+  | `['ch1', 'ch2', 'ch3']` | Each doc is its own group (useful for clustering) |
+  | `None` | All docs grouped as `{'unk': [doc1, doc2, ...]}` |
+
+Document IDs are auto-generated as `{label}_{n}` (e.g., `author_a_1`, `author_a_2`, `unk_1`).
 
 **Returns:** self (for method chaining)
 
