@@ -480,11 +480,12 @@ class Stylometry:
         
         Args:
             text: List of tokens (the disputed text)
-            k: Number of nearest neighbors to consider (only used in 'instance' mode)
+            k: Number of top results to return. If k exceeds the number of 
+               available items, all items are returned.
         
         Returns:
-            List of (author, distance) tuples sorted by distance ascending.
-            - In 'centroid' mode: returns distances to each author centroid
+            List of (author, distance) tuples sorted by distance ascending (most similar first).
+            - In 'centroid' mode: returns top k author centroids by distance
             - In 'instance' mode: returns the k nearest documents, with their author labels
         """
         if not self._is_fitted:
@@ -493,13 +494,8 @@ class Stylometry:
         # Validate input
         self._validate_tokens(text, "text")
         
-        # Warn if k is passed in centroid mode (it's ignored)
-        if self.mode == 'centroid' and k != 1:
-            warnings.warn(
-                f"k={k} is ignored in 'centroid' mode. All author centroids are "
-                f"compared and returned. Use mode='instance' for k-NN behavior.",
-                UserWarning
-            )
+        if not isinstance(k, int) or k < 1:
+            raise ValueError(f"k must be a positive integer, got {k}")
         
         # Compute z-scores for the disputed text
         text_zscore = self._tokens_to_zscore(text)
@@ -513,7 +509,7 @@ class Stylometry:
                 dist = distance_fn(text_zscore, self.author_centroids[author])
                 results.append((author, float(dist)))
             results.sort(key=lambda x: x[1])
-            return results
+            return results[:k]
         
         else:  # mode == 'instance'
             # Compare to each individual document, find k nearest neighbors

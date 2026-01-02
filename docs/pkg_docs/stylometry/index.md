@@ -115,12 +115,10 @@ Predict the most likely author for a tokenized text.
 
 **Parameters:**
 - `text` (list): List of tokens (the disputed text)
-- `k` (int): Number of nearest neighbors to consider (only used in `'instance'` mode)
+- `k` (int): Number of top results to return (must be ≥ 1). If `k` exceeds the number of available items, all items are returned.
 
-> **Note:** In `'centroid'` mode, the `k` parameter is ignored and a warning is issued if `k != 1`. All author centroids are compared and returned. Use `mode='instance'` for k-NN behavior.
-
-**Returns:** (list) List of (author, distance) tuples sorted by distance ascending
-- In `'centroid'` mode: returns distances to each author centroid
+**Returns:** (list) List of (author, distance) tuples sorted by distance ascending (most similar first)
+- In `'centroid'` mode: returns top k author centroids by distance
 - In `'instance'` mode: returns the k nearest documents with their author labels
 
 <br>
@@ -133,11 +131,11 @@ Convenience method to get just the predicted author name.
 
 **Parameters:**
 - `text` (list): List of tokens
-- `k` (int): Number of nearest neighbors for majority vote (only in `'instance'` mode)
+- `k` (int): Number of top results to consider for prediction
 
 **Returns:** (str) Predicted author name
 
-In `'instance'` mode with `k > 1`, returns the majority vote among the k nearest neighbors.
+In `'instance'` mode with `k > 1`, returns the majority vote among the k nearest neighbors. In `'centroid'` mode, returns the most similar author (k only affects the underlying `predict()` call).
 
 <br>
 
@@ -341,7 +339,12 @@ stylo.fit_transform(corpus)
 
 # Predict authorship for an unknown text
 unknown_text = ['这', '篇', '文章', '的', '作者', '是', '谁', '...']
-results = stylo.predict(unknown_text)
+results = stylo.predict(unknown_text)  # Returns top 1 author
+for author, distance in results:
+    print(f"{author}: {distance:.4f}")
+
+# Get top 3 most similar authors
+results = stylo.predict(unknown_text, k=3)
 for author, distance in results:
     print(f"{author}: {distance:.4f}")
 
