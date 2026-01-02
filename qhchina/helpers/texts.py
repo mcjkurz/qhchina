@@ -1,3 +1,45 @@
+def detect_encoding(filename, num_bytes=10000):
+    """
+    Detects the encoding of a file.
+    
+    Parameters:
+    filename (str): The path to the file.
+    num_bytes (int): Number of bytes to read for detection. Default is 10000.
+                     Larger values may be more accurate but slower.
+    
+    Returns:
+    str: The detected encoding (e.g., 'utf-8', 'gb2312', 'gbk', 'big5').
+    
+    Raises:
+    ImportError: If chardet is not installed.
+    """
+    try:
+        import chardet
+    except ImportError:
+        raise ImportError(
+            "The 'chardet' package is required for automatic encoding detection. "
+            "Install it with: pip install chardet"
+        )
+    
+    with open(filename, 'rb') as file:
+        raw_data = file.read(num_bytes)
+    
+    result = chardet.detect(raw_data)
+    encoding = result['encoding']
+    
+    # Handle common encoding aliases and edge cases
+    if encoding is None:
+        return 'utf-8'  # Fallback to UTF-8
+    
+    # Normalize some common Chinese encoding names
+    encoding_lower = encoding.lower()
+    if encoding_lower in ('gb2312', 'gbk', 'gb18030'):
+        # Use gb18030 as it's a superset of GB2312 and GBK
+        return 'gb18030'
+    
+    return encoding
+
+
 def load_text(filename, encoding="utf-8"):
     """
     Loads text from a file.
@@ -5,12 +47,16 @@ def load_text(filename, encoding="utf-8"):
     Parameters:
     filename (str): The filename to load text from.
     encoding (str): The encoding of the file. Default is "utf-8".
+                    Use "auto" to automatically detect the encoding.
     
     Returns:
     str: The text content of the file.
     """
     if not isinstance(filename, str):
         raise ValueError("filename must be a string")
+    
+    if encoding == "auto":
+        encoding = detect_encoding(filename)
     
     with open(filename, 'r', encoding=encoding) as file:
         return file.read()
@@ -22,6 +68,7 @@ def load_texts(filenames, encoding="utf-8"):
     Parameters:
     filenames (list): A list of filenames to load text from.
     encoding (str): The encoding of the files. Default is "utf-8".
+                    Use "auto" to automatically detect encoding for each file.
     
     Returns:
     list: A list of text contents from the files.
@@ -39,10 +86,14 @@ def load_stopwords(language: str = "zh_sim") -> set:
     Load stopwords from a file for the specified language.
     
     Args:
-        language: Language code (default: "zh_sim" for simplified Chinese)
+        language: Language code (default: "zh_sim" for simplified Chinese).
+                  Use get_stopword_languages() to see available options.
     
     Returns:
         Set of stopwords
+    
+    Raises:
+        ValueError: If the specified language is not available.
     """
     import os
     
@@ -51,7 +102,8 @@ def load_stopwords(language: str = "zh_sim") -> set:
     
     # Go up one level to the qhchina package root and construct the path to stopwords
     package_root = os.path.abspath(os.path.join(current_dir, '..'))
-    stopwords_path = os.path.join(package_root, 'data', 'stopwords', f'{language}.txt')
+    stopwords_dir = os.path.join(package_root, 'data', 'stopwords')
+    stopwords_path = os.path.join(stopwords_dir, f'{language}.txt')
     
     # Load stopwords from file
     try:
@@ -59,8 +111,19 @@ def load_stopwords(language: str = "zh_sim") -> set:
             stopwords = {line.strip() for line in f if line.strip()}
         return stopwords
     except FileNotFoundError:
-        print(f"Warning: Stopwords file not found for language '{language}' at path {stopwords_path}")
-        return set()
+        # Get available stopword languages
+        available = []
+        try:
+            files = os.listdir(stopwords_dir)
+            available = sorted([f[:-4] for f in files if f.endswith('.txt')])
+        except FileNotFoundError:
+            pass
+        
+        raise ValueError(
+            f"Stopwords file not found for language '{language}'. "
+            f"Available options: {available}. "
+            f"Note: Do not include the file extension (use 'zh_sim' not 'zh_sim.txt')."
+        )
 
 def get_stopword_languages() -> list:
     """
@@ -110,16 +173,22 @@ def split_into_chunks(sequence, chunk_size, overlap=0.0):
         
     if not sequence:
         return []
+    
+    # Handle case where sequence is shorter than chunk_size
+    if len(sequence) <= chunk_size:
+        return [sequence]
         
     overlap_size = int(chunk_size * overlap)
     stride = chunk_size - overlap_size
     
     chunks = []
+    last_start = 0
     for i in range(0, len(sequence) - chunk_size + 1, stride):
         chunks.append(sequence[i:i + chunk_size])
+        last_start = i
     
     # Handle the last chunk if there are remaining tokens/characters
-    if i + chunk_size < len(sequence):
+    if last_start + chunk_size < len(sequence):
         chunks.append(sequence[-chunk_size:])
         
     return chunks

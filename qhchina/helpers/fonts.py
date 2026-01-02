@@ -1,10 +1,10 @@
 import shutil
+from typing import Optional
 try:
     import matplotlib
     import matplotlib.font_manager
 except Exception as e:
-    print(f"Error importing matplotlib: {e}")
-    raise e
+    raise ImportError(f"Failed to import matplotlib: {e}") from e
 from pathlib import Path
 import os
 
@@ -21,6 +21,13 @@ FONT_ALIASES = {
     'serif-sc': 'Noto Serif SC',
 }
 
+# Mapping from font names to font file names
+FONT_FILES = {
+    'Noto Sans CJK TC': 'NotoSansTCSC-Regular.otf',
+    'Noto Serif TC': 'NotoSerifTC-Regular.otf',
+    'Noto Serif SC': 'NotoSerifSC-Regular.otf',
+}
+
 # Global flag to track if bundled fonts have been loaded
 _fonts_loaded = False
 
@@ -33,6 +40,10 @@ def set_font(font='Noto Sans CJK TC') -> None:
               - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
               - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
               - Path to font file: '/path/to/font.otf' or '/path/to/font.ttf'
+    
+    Raises:
+        FileNotFoundError: If a font file path is provided but doesn't exist.
+        ValueError: If the font cannot be loaded or set.
     """
     global _fonts_loaded
     
@@ -48,6 +59,8 @@ def set_font(font='Noto Sans CJK TC') -> None:
             font_path = Path(font_str)
             if font_path.exists() and font_path.is_file():
                 is_file_path = True
+            elif not font_path.exists():
+                raise FileNotFoundError(f"Font file not found: {font_path}")
     
     if is_file_path:
         # Load custom font file
@@ -57,9 +70,7 @@ def set_font(font='Noto Sans CJK TC') -> None:
             font_props = matplotlib.font_manager.FontProperties(fname=str(font_path))
             resolved_font = font_props.get_name()
         except Exception as e:
-            print(f"Error loading custom font from: {font_path}")
-            print(f"Error: {e}")
-            return
+            raise ValueError(f"Error loading custom font from: {font_path}") from e
     else:
         # Auto-load bundled fonts if not already loaded
         if not _fonts_loaded:
@@ -83,10 +94,9 @@ def set_font(font='Noto Sans CJK TC') -> None:
         
         matplotlib.rcParams['axes.unicode_minus'] = False
     except Exception as e:
-        print(f"Error setting font: {resolved_font} (from input: {font})")
-        print(f"Error: {e}")
+        raise ValueError(f"Error setting font '{resolved_font}' (from input: '{font}')") from e
 
-def load_fonts(target_font : str = 'Noto Sans CJK TC', verbose=False) -> None:
+def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> str:
     """
     Load CJK fonts into matplotlib and optionally set a default font.
     
@@ -96,6 +106,12 @@ def load_fonts(target_font : str = 'Noto Sans CJK TC', verbose=False) -> None:
                      - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
                      - None: Load fonts but don't set a default
         verbose: If True, print detailed loading information
+    
+    Returns:
+        str: Path to the font file (for use with WordCloud, etc.)
+    
+    Raises:
+        OSError: If fonts cannot be copied to matplotlib directory.
     """
     global _fonts_loaded
     
@@ -105,6 +121,7 @@ def load_fonts(target_font : str = 'Noto Sans CJK TC', verbose=False) -> None:
         print(f"{MPL_FONT_PATH=}")
     cjk_fonts = [file.name for file in Path(f'{CJK_FONT_PATH}').glob('**/*') if not file.name.startswith(".")]
     
+    errors = []
     for font in cjk_fonts:
         try:
             source = Path(f'{CJK_FONT_PATH}/{font}').resolve()
@@ -114,9 +131,12 @@ def load_fonts(target_font : str = 'Noto Sans CJK TC', verbose=False) -> None:
             if verbose:
                 print(f"Loaded font: {font}")
         except Exception as e:
-            print(f"Error loading font: {font}")
-            print(f"Matplotlib font directory path: {MPL_FONT_PATH}")
-            print(f"Error: {e}")
+            errors.append(f"{font}: {e}")
+    
+    if errors and not _fonts_loaded:
+        # Only raise on first load attempt if all fonts failed
+        if len(errors) == len(cjk_fonts):
+            raise OSError(f"Failed to load any fonts. Errors: {errors}")
     
     # Mark fonts as loaded
     _fonts_loaded = True
@@ -129,14 +149,58 @@ def load_fonts(target_font : str = 'Noto Sans CJK TC', verbose=False) -> None:
                 print(f"Resolving alias '{target_font}' to '{resolved_font}'")
             print(f"Setting font to: {resolved_font}")
         set_font(target_font)
+        return get_font_path(target_font)
+    
+    # Return default font path if no target_font specified
+    return get_font_path('Noto Sans CJK TC')
 
-def current_font() -> str:
+def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
+    """
+    Get the file path for a CJK font (for use with WordCloud, etc.).
+    
+    Args:
+        font: Font name or alias. Can be:
+              - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
+              - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
+    
+    Returns:
+        str: Absolute path to the font file
+    
+    Example:
+        >>> font_path = qhchina.get_font_path()
+        >>> wc = WordCloud(font_path=font_path, ...)
+    """
+    # Resolve alias to font name
+    resolved_font = FONT_ALIASES.get(font, font)
+    
+    # Get font file name
+    font_file = FONT_FILES.get(resolved_font)
+    if font_file is None:
+        raise ValueError(f"Unknown font: '{font}'. Available fonts: {list(FONT_FILES.keys())}")
+    
+    return str(MPL_FONT_PATH / font_file)
+
+def current_font() -> Optional[str]:
+    """
+    Get the currently configured font name.
+    
+    Returns:
+        The current font name, or None if no font is configured.
+    
+    Raises:
+        RuntimeError: If there's an error accessing font configuration.
+    """
     try:
-        return matplotlib.rcParams['font.sans-serif'][0]
-    except Exception as e:
-        print(f"Error getting current font")
-        print(f"Error: {e}")
+        # Check serif first if family is serif
+        if matplotlib.rcParams.get('font.family') == ['serif']:
+            fonts = matplotlib.rcParams.get('font.serif', [])
+        else:
+            fonts = matplotlib.rcParams.get('font.sans-serif', [])
+        return fonts[0] if fonts else None
+    except (KeyError, IndexError):
         return None
+    except Exception as e:
+        raise RuntimeError(f"Error getting current font: {e}") from e
 
 def list_available_fonts() -> dict:
     """

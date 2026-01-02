@@ -133,7 +133,7 @@ Load text from a single file.
 
 **Parameters:**
 - `filepath` (str): Path to the text file
-- `encoding` (str): File encoding
+- `encoding` (str): File encoding. Use `'auto'` to automatically detect encoding.
 
 **Returns:** (str) Text content of the file
 
@@ -147,9 +147,25 @@ Load text from multiple files.
 
 **Parameters:**
 - `filepaths` (list): List of file paths
-- `encoding` (str): File encoding
+- `encoding` (str): File encoding. Use `'auto'` to automatically detect encoding for each file.
 
 **Returns:** (list) List of text contents
+
+<br>
+
+```python
+detect_encoding(filename, num_bytes=10000)
+```
+
+Detect the encoding of a file.
+
+**Parameters:**
+- `filename` (str): Path to the file
+- `num_bytes` (int): Number of bytes to read for detection (default: 10000)
+
+**Returns:** (str) Detected encoding (e.g., 'utf-8', 'gb18030')
+
+**Note:** Requires the `chardet` package (`pip install chardet`)
 
 <br>
 
@@ -237,12 +253,24 @@ plt.show()
 
 ```python
 from qhchina.helpers import load_text, load_texts, load_stopwords, split_into_chunks
+from qhchina.helpers.texts import detect_encoding, get_stopword_languages
 
 # Load a single text file
 text = load_text('document.txt')
 
+# Load with automatic encoding detection (requires chardet)
+text = load_text('古文.txt', encoding='auto')
+
+# Detect encoding manually
+encoding = detect_encoding('古文.txt')
+print(f"Detected encoding: {encoding}")
+
 # Load multiple files
 texts = load_texts(['file1.txt', 'file2.txt', 'file3.txt'])
+
+# See available stopword languages
+languages = get_stopword_languages()
+print(f"Available: {languages}")  # ['zh_cl_sim', 'zh_cl_tr', 'zh_sim', 'zh_tr']
 
 # Load stopwords
 stopwords = load_stopwords('zh_sim')

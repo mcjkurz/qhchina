@@ -3,7 +3,6 @@ from typing import List, Tuple, Dict, Optional, Union, Callable, Any
 import random
 import time
 import warnings
-import os
 from collections import defaultdict, Counter
 import matplotlib.pyplot as plt
 from tqdm.auto import trange
@@ -12,7 +11,6 @@ from scipy.special import psi, polygamma
 class LDAGibbsSampler:
     """
     Latent Dirichlet Allocation with Gibbs sampling implementation. 
-    Using Cython for speed.
     """
     
     def __init__(
@@ -29,7 +27,8 @@ class LDAGibbsSampler:
         min_word_length: int = 1,
         stopwords: Optional[set] = None,
         use_cython: bool = True,
-        estimate_alpha: int = 1
+        estimate_alpha: int = 1,
+        min_doc_length: int = 24
     ):
         """
         Initialize the LDA model with Gibbs sampling.
@@ -50,6 +49,7 @@ class LDAGibbsSampler:
             stopwords: Set of words to exclude from vocabulary
             use_cython: Whether to use Cython acceleration if available (default: True)
             estimate_alpha: Frequency for estimating alpha (0 = no estimation; default 1 = after every iteration, 2 = after every 2 iterations, etc.)
+            min_doc_length: Minimum document length (tokens) to trigger a warning during preprocessing (default: 24)
         """
         # Validate parameters
         if not isinstance(n_topics, int) or n_topics <= 0:
@@ -60,6 +60,9 @@ class LDAGibbsSampler:
             alpha_array = np.atleast_1d(alpha)
             if np.any(alpha_array <= 0):
                 raise ValueError(f"alpha must be positive, got values <= 0")
+            # Validate alpha array length matches n_topics
+            if not np.isscalar(alpha) and len(alpha_array) != n_topics:
+                raise ValueError(f"alpha array length ({len(alpha_array)}) must match n_topics ({n_topics})")
         if beta is not None and (not np.isscalar(beta) or beta <= 0):
             raise ValueError(f"beta must be a positive scalar, got {beta}")
         if not isinstance(iterations, int) or iterations <= 0:
@@ -74,6 +77,8 @@ class LDAGibbsSampler:
             raise ValueError(f"max_vocab_size must be a positive integer or None, got {max_vocab_size}")
         if not isinstance(estimate_alpha, int) or estimate_alpha < 0:
             raise ValueError(f"estimate_alpha must be a non-negative integer, got {estimate_alpha}")
+        if not isinstance(min_doc_length, int) or min_doc_length < 1:
+            raise ValueError(f"min_doc_length must be a positive integer, got {min_doc_length}")
         
         self.n_topics = n_topics
         # Use Griffiths and Steyvers (2004) heuristic if alpha is None
@@ -137,8 +142,8 @@ class LDAGibbsSampler:
         self.theta = None  # Document-topic distributions
         self.phi = None    # Topic-word distributions
         
-        # Private thresholds for internal processing
-        self._min_doc_length = 50  # Minimum document length threshold for warnings
+        # Minimum document length threshold for warnings
+        self.min_doc_length = min_doc_length
     
     def _attempt_cython_import(self) -> bool:
         """
@@ -200,13 +205,13 @@ class LDAGibbsSampler:
             if doc_ids:
                 docs_as_ids.append(doc_ids)
                 # Warn about short documents after filtering
-                if len(doc_ids) < self._min_doc_length:
+                if len(doc_ids) < self.min_doc_length:
                     short_doc_count += 1
         
         # Issue a single warning for all short documents
         if short_doc_count > 0:
             warnings.warn(
-                f"{short_doc_count} document(s) have fewer than {self._min_doc_length} tokens after filtering. "
+                f"{short_doc_count} document(s) have fewer than {self.min_doc_length} tokens after filtering. "
                 f"This may affect topic model quality, but training will continue.",
                 UserWarning
             )
@@ -426,15 +431,12 @@ class LDAGibbsSampler:
         # Ensure phi is C-contiguous after transpose
         self.phi = np.ascontiguousarray(phi.T)
         
-    def fit(self, documents: List[List[str]]) -> 'LDAGibbsSampler':
+    def fit(self, documents: List[List[str]]) -> None:
         """
         Fit the LDA model to the given documents.
         
         Args:
             documents: List of tokenized documents (each document is a list of tokens)
-            
-        Returns:
-            The fitted model instance (self)
         """
         # Validate input documents
         if not isinstance(documents, list):
@@ -467,8 +469,6 @@ class LDAGibbsSampler:
         self.initialize(self.docs_tokens)
         self.run_gibbs_sampling()
         self._update_distributions()
-        
-        return self
     
     def perplexity(self) -> float:
         """
@@ -711,15 +711,21 @@ class LDAGibbsSampler:
         Args:
             filepath: Path to save the model
         """
+        # Convert id_to_word keys to integers explicitly to preserve type after serialization
+        id_to_word_int_keys = {int(k): v for k, v in self.id_to_word.items()} if self.id_to_word else None
+        
         model_data = {
             'n_topics': self.n_topics,
-            'alpha': self.alpha,
+            'alpha': self.alpha.tolist() if isinstance(self.alpha, np.ndarray) else self.alpha,
             'beta': self.beta,
+            'min_word_count': self.min_word_count,
             'min_word_length': self.min_word_length,
+            'max_vocab_size': self.max_vocab_size,
             'stopwords': list(self.stopwords) if self.stopwords else None,
             'vocabulary': self.vocabulary,
+            'vocabulary_size': self.vocabulary_size,
             'word_to_id': self.word_to_id,
-            'id_to_word': self.id_to_word,
+            'id_to_word': id_to_word_int_keys,
             'n_wt': self.n_wt.tolist() if self.n_wt is not None else None,
             'n_dt': self.n_dt.tolist() if self.n_dt is not None else None,
             'n_t': self.n_t.tolist() if self.n_t is not None else None,
@@ -728,10 +734,14 @@ class LDAGibbsSampler:
             'z': self.z.tolist() if self.z is not None else None,
             'z_shape': self.z_shape,
             'doc_lengths': self.doc_lengths.tolist() if self.doc_lengths is not None else None,
+            'docs_tokens': self.docs_tokens.tolist() if self.docs_tokens is not None else None,
+            'total_tokens': self.total_tokens,
             'use_cython': self.use_cython,
             'estimate_alpha': self.estimate_alpha,
             'burnin': self.burnin,
-            'random_state': self.random_state
+            'random_state': self.random_state,
+            'iterations': self.iterations,
+            'min_doc_length': self.min_doc_length
         }
         
         np.save(filepath, model_data)
@@ -753,23 +763,35 @@ class LDAGibbsSampler:
         estimate_alpha = model_data.get('estimate_alpha', 0)
         burnin = model_data.get('burnin', 0)
         random_state = model_data.get('random_state', None)
+        iterations = model_data.get('iterations', 100)
         
         model = cls(
             n_topics=model_data['n_topics'],
             alpha=model_data['alpha'],
             beta=model_data['beta'],
+            iterations=iterations,
+            min_word_count=model_data.get('min_word_count', 1),
             min_word_length=model_data.get('min_word_length', 1),
+            max_vocab_size=model_data.get('max_vocab_size', None),
             stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None,
             use_cython=use_cython,
             estimate_alpha=estimate_alpha,
             burnin=burnin,
-            random_state=random_state
+            random_state=random_state,
+            min_doc_length=model_data.get('min_doc_length', 24)
         )
         
         model.vocabulary = model_data['vocabulary']
-        model.vocabulary_size = len(model.vocabulary)
+        model.vocabulary_size = model_data.get('vocabulary_size', len(model.vocabulary))
         model.word_to_id = model_data['word_to_id']
-        model.id_to_word = model_data['id_to_word']
+        
+        # Restore id_to_word with integer keys (they may have been converted to strings during serialization)
+        raw_id_to_word = model_data['id_to_word']
+        if raw_id_to_word is not None:
+            model.id_to_word = {int(k): v for k, v in raw_id_to_word.items()}
+        else:
+            model.id_to_word = None
+        
         model.alpha_sum = np.sum(model.alpha)
         
         if model_data['n_wt'] is not None:
@@ -779,14 +801,23 @@ class LDAGibbsSampler:
         if model_data['n_t'] is not None:
             model.n_t = np.array(model_data['n_t'], dtype=np.int32)
         if model_data['theta'] is not None:
-            model.theta = np.array(model_data['theta'])
+            model.theta = np.array(model_data['theta'], dtype=np.float64)
         if model_data['phi'] is not None:
-            model.phi = np.array(model_data['phi'])
+            model.phi = np.array(model_data['phi'], dtype=np.float64)
         if model_data['z'] is not None:
             model.z = np.array(model_data['z'], dtype=np.int32)
         model.z_shape = model_data.get('z_shape')
         if model_data.get('doc_lengths') is not None:
             model.doc_lengths = np.array(model_data['doc_lengths'], dtype=np.int32)
+        
+        # Restore docs_tokens (required for perplexity and coherence calculations)
+        if model_data.get('docs_tokens') is not None:
+            model.docs_tokens = np.array(model_data['docs_tokens'], dtype=np.int32)
+        
+        # Restore total_tokens
+        model.total_tokens = model_data.get('total_tokens', None)
+        if model.total_tokens is None and model.doc_lengths is not None:
+            model.total_tokens = int(np.sum(model.doc_lengths))
         
         if model.use_cython and model.lda_sampler is None:
             try:
@@ -840,6 +871,55 @@ class LDAGibbsSampler:
         
         return [(self.id_to_word[i], float(topic_word_probs[i])) for i in top_word_indices]
     
+    @staticmethod
+    def _compute_distribution_similarity(p: np.ndarray, q: np.ndarray, metric: str, eps: float = 1e-10) -> float:
+        """
+        Compute similarity/distance between two probability distributions.
+        
+        This is a shared implementation used by both topic_similarity and document_similarity.
+        
+        Args:
+            p: First probability distribution (1D numpy array)
+            q: Second probability distribution (1D numpy array)
+            metric: Similarity metric to use. Options:
+                    - 'jsd': Jensen-Shannon divergence (lower is more similar)
+                    - 'hellinger': Hellinger distance (lower is more similar)
+                    - 'cosine': Cosine similarity (higher is more similar)
+                    - 'kl': KL divergence (lower is more similar, asymmetric)
+            eps: Small constant to avoid numerical issues (default: 1e-10)
+            
+        Returns:
+            Similarity/distance value based on chosen metric
+            
+        Raises:
+            ValueError: If an unknown metric is specified
+        """
+        if metric == 'jsd':
+            # Jensen-Shannon Divergence: symmetric measure based on KL divergence
+            m = 0.5 * (p + q)
+            kl_pm = np.sum(np.where(p > 0, p * np.log((p + eps) / (m + eps)), 0))
+            kl_qm = np.sum(np.where(q > 0, q * np.log((q + eps) / (m + eps)), 0))
+            return 0.5 * (kl_pm + kl_qm)
+        
+        elif metric == 'hellinger':
+            # Hellinger distance: bounded in [0, 1]
+            return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / np.sqrt(2)
+        
+        elif metric == 'cosine':
+            # Cosine similarity: bounded in [-1, 1], typically [0, 1] for probability distributions
+            norm_p = np.linalg.norm(p)
+            norm_q = np.linalg.norm(q)
+            if norm_p == 0 or norm_q == 0:
+                return 0.0
+            return np.dot(p, q) / (norm_p * norm_q)
+        
+        elif metric == 'kl':
+            # KL divergence: asymmetric measure (p || q)
+            return np.sum(np.where(p > 0, p * np.log((p + eps) / (q + eps)), 0))
+        
+        else:
+            raise ValueError(f"Unknown metric: {metric}. Use 'jsd', 'hellinger', 'cosine', or 'kl'")
+    
     def topic_similarity(self, topic_i: int, topic_j: int, metric: str = 'jsd') -> float:
         """
         Calculate similarity between two topics.
@@ -859,28 +939,7 @@ class LDAGibbsSampler:
         if topic_i < 0 or topic_i >= self.n_topics or topic_j < 0 or topic_j >= self.n_topics:
             raise ValueError(f"Invalid topic IDs. Must be between 0 and {self.n_topics-1}")
         
-        p = self.phi[topic_i]
-        q = self.phi[topic_j]
-        
-        if metric == 'jsd':
-            m = 0.5 * (p + q)
-            eps = 1e-10
-            kl_pm = np.sum(np.where(p > 0, p * np.log((p + eps) / (m + eps)), 0))
-            kl_qm = np.sum(np.where(q > 0, q * np.log((q + eps) / (m + eps)), 0))
-            return 0.5 * (kl_pm + kl_qm)
-        
-        elif metric == 'hellinger':
-            return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / np.sqrt(2)
-        
-        elif metric == 'cosine':
-            return np.dot(p, q) / (np.linalg.norm(p) * np.linalg.norm(q))
-        
-        elif metric == 'kl':
-            eps = 1e-10
-            return np.sum(np.where(p > 0, p * np.log((p + eps) / (q + eps)), 0))
-        
-        else:
-            raise ValueError(f"Unknown metric: {metric}. Use 'jsd', 'hellinger', 'cosine', or 'kl'")
+        return self._compute_distribution_similarity(self.phi[topic_i], self.phi[topic_j], metric)
     
     def topic_correlation_matrix(self, metric: str = 'jsd') -> np.ndarray:
         """
@@ -928,28 +987,7 @@ class LDAGibbsSampler:
         if doc_i < 0 or doc_i >= n_docs or doc_j < 0 or doc_j >= n_docs:
             raise ValueError(f"Invalid document IDs. Must be between 0 and {n_docs-1}")
         
-        p = self.theta[doc_i]
-        q = self.theta[doc_j]
-        
-        if metric == 'jsd':
-            m = 0.5 * (p + q)
-            eps = 1e-10
-            kl_pm = np.sum(np.where(p > 0, p * np.log((p + eps) / (m + eps)), 0))
-            kl_qm = np.sum(np.where(q > 0, q * np.log((q + eps) / (m + eps)), 0))
-            return 0.5 * (kl_pm + kl_qm)
-        
-        elif metric == 'hellinger':
-            return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / np.sqrt(2)
-        
-        elif metric == 'cosine':
-            return np.dot(p, q) / (np.linalg.norm(p) * np.linalg.norm(q))
-        
-        elif metric == 'kl':
-            eps = 1e-10
-            return np.sum(np.where(p > 0, p * np.log((p + eps) / (q + eps)), 0))
-        
-        else:
-            raise ValueError(f"Unknown metric: {metric}. Use 'jsd', 'hellinger', 'cosine', or 'kl'")
+        return self._compute_distribution_similarity(self.theta[doc_i], self.theta[doc_j], metric)
     
     def document_similarity_matrix(self, doc_ids: Optional[List[int]] = None, 
                                    metric: str = 'jsd') -> np.ndarray:
@@ -982,6 +1020,459 @@ class LDAGibbsSampler:
                     sim_matrix[j, i] = sim
         
         return sim_matrix
+    
+    def _compute_word_cooccurrence(self, window_size: int = 10) -> Tuple[Dict[int, int], Dict[Tuple[int, int], int]]:
+        """
+        Compute word occurrence and co-occurrence counts from the corpus.
+        
+        Args:
+            window_size: Size of the sliding window for co-occurrence (default: 10).
+                        If window_size <= 0, uses document-level co-occurrence.
+        
+        Returns:
+            Tuple of:
+                - word_doc_count: Dict mapping word_id to number of documents containing it
+                - word_pair_doc_count: Dict mapping (word_id_1, word_id_2) to co-occurrence count
+        """
+        word_doc_count = defaultdict(int)
+        word_pair_doc_count = defaultdict(int)
+        
+        n_docs = len(self.doc_lengths)
+        
+        for d in range(n_docs):
+            doc_len = self.doc_lengths[d]
+            if doc_len == 0:
+                continue
+            
+            doc_tokens = self.docs_tokens[d, :doc_len]
+            
+            if window_size <= 0:
+                # Document-level co-occurrence
+                unique_words = set(doc_tokens)
+                for w in unique_words:
+                    word_doc_count[w] += 1
+                
+                # Count pairs (only once per document)
+                unique_list = list(unique_words)
+                for i, w1 in enumerate(unique_list):
+                    for w2 in unique_list[i+1:]:
+                        pair = (min(w1, w2), max(w1, w2))
+                        word_pair_doc_count[pair] += 1
+            else:
+                # Sliding window co-occurrence
+                seen_words = set()
+                seen_pairs = set()
+                
+                for i in range(doc_len):
+                    w1 = doc_tokens[i]
+                    seen_words.add(w1)
+                    
+                    # Look at words within the window
+                    window_end = min(i + window_size, doc_len)
+                    for j in range(i + 1, window_end):
+                        w2 = doc_tokens[j]
+                        pair = (min(w1, w2), max(w1, w2))
+                        seen_pairs.add(pair)
+                
+                for w in seen_words:
+                    word_doc_count[w] += 1
+                for pair in seen_pairs:
+                    word_pair_doc_count[pair] += 1
+        
+        return dict(word_doc_count), dict(word_pair_doc_count)
+    
+    def coherence_umass(self, n_words: int = 10, eps: float = 1e-12) -> Tuple[float, List[float]]:
+        """
+        Calculate UMass topic coherence (Mimno et al., 2011).
+        
+        UMass coherence uses document co-occurrence and is defined as:
+        C_UMass = (2 / (N*(N-1))) * sum_{i<j} log((D(w_i, w_j) + eps) / D(w_j))
+        
+        where D(w) is the document frequency of word w, and D(w_i, w_j) is the 
+        number of documents containing both words.
+        
+        Args:
+            n_words: Number of top words per topic to use for coherence calculation
+            eps: Small constant to avoid log(0)
+        
+        Returns:
+            Tuple of:
+                - Average coherence across all topics
+                - List of coherence values for each topic
+        """
+        if self.phi is None:
+            raise ValueError("Model has not been fitted yet. Call fit() first.")
+        
+        # Get document-level co-occurrence
+        word_doc_count, word_pair_doc_count = self._compute_word_cooccurrence(window_size=0)
+        
+        topic_coherences = []
+        
+        for k in range(self.n_topics):
+            # Get top n_words for this topic
+            top_word_indices = np.argsort(-self.phi[k])[:n_words]
+            
+            coherence = 0.0
+            n_pairs = 0
+            
+            for i, w_i in enumerate(top_word_indices):
+                for j in range(i):
+                    w_j = top_word_indices[j]
+                    
+                    # D(w_j) - document frequency of the more common word
+                    d_wj = word_doc_count.get(w_j, 0)
+                    if d_wj == 0:
+                        continue
+                    
+                    # D(w_i, w_j) - co-occurrence count
+                    pair = (min(w_i, w_j), max(w_i, w_j))
+                    d_wi_wj = word_pair_doc_count.get(pair, 0)
+                    
+                    coherence += np.log((d_wi_wj + eps) / d_wj)
+                    n_pairs += 1
+            
+            if n_pairs > 0:
+                coherence /= n_pairs
+            
+            topic_coherences.append(coherence)
+        
+        avg_coherence = np.mean(topic_coherences)
+        return avg_coherence, topic_coherences
+    
+    def coherence_npmi(self, n_words: int = 10, window_size: int = 10, 
+                       eps: float = 1e-12) -> Tuple[float, List[float]]:
+        """
+        Calculate NPMI (Normalized Pointwise Mutual Information) topic coherence.
+        
+        NPMI coherence uses sliding window co-occurrence and is defined as:
+        NPMI(w_i, w_j) = (log(P(w_i, w_j) / (P(w_i) * P(w_j)))) / (-log(P(w_i, w_j)))
+        
+        Values range from -1 (never co-occur) to +1 (always co-occur).
+        
+        Args:
+            n_words: Number of top words per topic to use
+            window_size: Size of the sliding window for co-occurrence
+            eps: Small constant to avoid division by zero
+        
+        Returns:
+            Tuple of:
+                - Average coherence across all topics
+                - List of coherence values for each topic
+        """
+        if self.phi is None:
+            raise ValueError("Model has not been fitted yet. Call fit() first.")
+        
+        # Get sliding window co-occurrence
+        word_doc_count, word_pair_doc_count = self._compute_word_cooccurrence(window_size=window_size)
+        
+        n_docs = len(self.doc_lengths)
+        topic_coherences = []
+        
+        for k in range(self.n_topics):
+            top_word_indices = np.argsort(-self.phi[k])[:n_words]
+            
+            coherence = 0.0
+            n_pairs = 0
+            
+            for i, w_i in enumerate(top_word_indices):
+                for j in range(i):
+                    w_j = top_word_indices[j]
+                    
+                    # P(w_i), P(w_j), P(w_i, w_j)
+                    p_wi = word_doc_count.get(w_i, 0) / n_docs
+                    p_wj = word_doc_count.get(w_j, 0) / n_docs
+                    
+                    pair = (min(w_i, w_j), max(w_i, w_j))
+                    p_wi_wj = word_pair_doc_count.get(pair, 0) / n_docs
+                    
+                    if p_wi > 0 and p_wj > 0 and p_wi_wj > eps:
+                        # NPMI formula
+                        pmi = np.log((p_wi_wj + eps) / (p_wi * p_wj + eps))
+                        npmi = pmi / (-np.log(p_wi_wj + eps))
+                        coherence += npmi
+                        n_pairs += 1
+            
+            if n_pairs > 0:
+                coherence /= n_pairs
+            
+            topic_coherences.append(coherence)
+        
+        avg_coherence = np.mean(topic_coherences)
+        return avg_coherence, topic_coherences
+    
+    def coherence(self, method: str = 'umass', n_words: int = 10, 
+                  window_size: Optional[int] = None, **kwargs) -> Tuple[float, List[float]]:
+        """
+        Calculate topic coherence using the specified method.
+        
+        Coherence measures how semantically similar the top words in each topic are.
+        Higher coherence generally indicates more interpretable topics.
+        
+        Args:
+            method: Coherence measure to use. Options:
+                   - 'umass': UMass coherence (Mimno et al., 2011). Uses document co-occurrence.
+                              Range: typically negative, higher (less negative) is better.
+                   - 'npmi': NPMI coherence. Uses sliding window co-occurrence.
+                            Range: -1 to 1, higher is better.
+            n_words: Number of top words per topic to use (default: 10)
+            window_size: Size of sliding window for 'npmi' method (default: 10).
+            **kwargs: Additional arguments passed to the specific coherence method
+        
+        Returns:
+            Tuple of:
+                - Average coherence across all topics
+                - List of coherence values for each topic
+        
+        Example:
+            >>> model.fit(documents)
+            >>> avg_coherence, topic_coherences = model.coherence('npmi')
+            >>> print(f"Average NPMI coherence: {avg_coherence:.4f}")
+        """
+        method = method.lower()
+        
+        if method == 'umass':
+            return self.coherence_umass(n_words=n_words, **kwargs)
+        elif method == 'npmi':
+            ws = window_size if window_size is not None else 10
+            return self.coherence_npmi(n_words=n_words, window_size=ws, **kwargs)
+        else:
+            raise ValueError(f"Unknown coherence method: {method}. Use 'umass' or 'npmi'")
+    
+    def evaluate(self, n_words: int = 10, verbose: bool = True) -> Dict[str, Any]:
+        """
+        Comprehensive evaluation of the topic model.
+        
+        Calculates multiple quality metrics including perplexity, coherence measures,
+        and topic diversity.
+        
+        Args:
+            n_words: Number of top words per topic for coherence calculation
+            verbose: Whether to print results
+        
+        Returns:
+            Dictionary containing all evaluation metrics
+        """
+        if self.phi is None:
+            raise ValueError("Model has not been fitted yet. Call fit() first.")
+        
+        results = {}
+        
+        # Perplexity
+        results['perplexity'] = self.perplexity()
+        
+        # Coherence measures
+        results['coherence_umass'], results['coherence_umass_per_topic'] = self.coherence_umass(n_words=n_words)
+        results['coherence_npmi'], results['coherence_npmi_per_topic'] = self.coherence_npmi(n_words=n_words)
+        
+        # Topic diversity (proportion of unique words in top-N across all topics)
+        all_top_words = set()
+        total_words = 0
+        for k in range(self.n_topics):
+            top_word_indices = np.argsort(-self.phi[k])[:n_words]
+            all_top_words.update(top_word_indices)
+            total_words += n_words
+        results['topic_diversity'] = len(all_top_words) / total_words
+        
+        # Average topic size (entropy of topic distribution across documents)
+        topic_dist = self.get_topic_distribution()
+        results['topic_entropy'] = -np.sum(topic_dist * np.log(topic_dist + 1e-10))
+        
+        if verbose:
+            print("=" * 50)
+            print("Topic Model Evaluation")
+            print("=" * 50)
+            print(f"Perplexity:         {results['perplexity']:.2f}")
+            print(f"UMass Coherence:    {results['coherence_umass']:.4f}")
+            print(f"NPMI Coherence:     {results['coherence_npmi']:.4f}")
+            print(f"Topic Diversity:    {results['topic_diversity']:.4f}")
+            print(f"Topic Entropy:      {results['topic_entropy']:.4f}")
+            print("=" * 50)
+        
+        return results
+    
+    @classmethod
+    def train_multiple(
+        cls,
+        documents: List[List[str]],
+        n_runs: int = 5,
+        n_topics: int = 10,
+        random_seeds: Optional[List[int]] = None,
+        return_all_models: bool = False,
+        verbose: bool = True,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Train multiple LDA models with different random seeds and analyze robustness.
+        
+        This method trains several models and computes stability metrics to assess
+        how consistent the discovered topics are across different random initializations.
+        
+        Args:
+            documents: List of tokenized documents
+            n_runs: Number of models to train (default: 5)
+            n_topics: Number of topics
+            random_seeds: Optional list of random seeds (if None, auto-generated)
+            return_all_models: Whether to return all trained models (default: False)
+            verbose: Whether to print progress and results
+            **kwargs: Additional arguments passed to LDAGibbsSampler
+        
+        Returns:
+            Dictionary containing:
+                - 'best_model': The model with highest coherence
+                - 'coherence_scores': List of coherence scores for each run
+                - 'perplexity_scores': List of perplexity scores for each run
+                - 'stability_score': Average pairwise topic similarity across runs
+                - 'topic_alignment': Topic alignment across runs
+                - 'all_models': List of all models (if return_all_models=True)
+        
+        Example:
+            >>> results = LDAGibbsSampler.train_multiple(
+            ...     documents, n_runs=5, n_topics=10, iterations=100
+            ... )
+            >>> print(f"Stability: {results['stability_score']:.4f}")
+            >>> best_model = results['best_model']
+        """
+        if random_seeds is None:
+            random_seeds = list(range(42, 42 + n_runs))
+        elif len(random_seeds) != n_runs:
+            raise ValueError(f"random_seeds length ({len(random_seeds)}) must match n_runs ({n_runs})")
+        
+        models = []
+        coherence_scores = []
+        perplexity_scores = []
+        
+        if verbose:
+            print(f"Training {n_runs} models with {n_topics} topics...")
+        
+        for i, seed in enumerate(random_seeds):
+            if verbose:
+                print(f"\n{'='*50}")
+                print(f"Run {i+1}/{n_runs} (seed={seed})")
+                print('='*50)
+            
+            model = cls(
+                n_topics=n_topics,
+                random_state=seed,
+                **kwargs
+            )
+            model.fit(documents)
+            
+            # Calculate metrics
+            perplexity = model.perplexity()
+            coherence, _ = model.coherence_umass()
+            
+            models.append(model)
+            coherence_scores.append(coherence)
+            perplexity_scores.append(perplexity)
+            
+            if verbose:
+                print(f"Perplexity: {perplexity:.2f}, UMass Coherence: {coherence:.4f}")
+        
+        # Find best model (highest coherence)
+        best_idx = np.argmax(coherence_scores)
+        best_model = models[best_idx]
+        
+        # Calculate stability (average pairwise topic similarity across models)
+        stability_scores = []
+        topic_alignments = []
+        
+        for i in range(n_runs):
+            for j in range(i + 1, n_runs):
+                # Calculate topic alignment using Hungarian algorithm
+                alignment, similarity = cls._align_topics(models[i], models[j])
+                topic_alignments.append({
+                    'run_i': i,
+                    'run_j': j,
+                    'alignment': alignment,
+                    'similarity': similarity
+                })
+                stability_scores.append(similarity)
+        
+        avg_stability = np.mean(stability_scores) if stability_scores else 0.0
+        
+        results = {
+            'best_model': best_model,
+            'best_run_index': best_idx,
+            'coherence_scores': coherence_scores,
+            'perplexity_scores': perplexity_scores,
+            'stability_score': avg_stability,
+            'topic_alignments': topic_alignments,
+            'coherence_mean': np.mean(coherence_scores),
+            'coherence_std': np.std(coherence_scores),
+            'perplexity_mean': np.mean(perplexity_scores),
+            'perplexity_std': np.std(perplexity_scores)
+        }
+        
+        if return_all_models:
+            results['all_models'] = models
+        
+        if verbose:
+            print("\n" + "=" * 50)
+            print("ROBUSTNESS ANALYSIS RESULTS")
+            print("=" * 50)
+            print(f"Number of runs:          {n_runs}")
+            print(f"Best run:                {best_idx + 1} (seed={random_seeds[best_idx]})")
+            print(f"Coherence (mean±std):    {results['coherence_mean']:.4f} ± {results['coherence_std']:.4f}")
+            print(f"Perplexity (mean±std):   {results['perplexity_mean']:.2f} ± {results['perplexity_std']:.2f}")
+            print(f"Topic Stability:         {avg_stability:.4f}")
+            print("=" * 50)
+            print("\nInterpretation:")
+            print("  - Stability close to 1.0 indicates highly robust topics")
+            print("  - Stability below 0.5 suggests topics are unstable")
+            print("  - Low std in coherence indicates consistent quality")
+        
+        return results
+    
+    @staticmethod
+    def _align_topics(model1: 'LDAGibbsSampler', model2: 'LDAGibbsSampler') -> Tuple[List[Tuple[int, int]], float]:
+        """
+        Align topics between two models using the Hungarian algorithm.
+        
+        Finds the optimal one-to-one mapping between topics from two models
+        that maximizes the total cosine similarity.
+        
+        Args:
+            model1: First LDA model
+            model2: Second LDA model
+        
+        Returns:
+            Tuple of:
+                - List of (topic_from_model1, topic_from_model2) pairs
+                - Average similarity of aligned topics
+        """
+        n_topics = model1.n_topics
+        if model2.n_topics != n_topics:
+            raise ValueError("Models must have the same number of topics")
+        
+        # Build similarity matrix using cosine similarity
+        similarity_matrix = np.zeros((n_topics, n_topics))
+        
+        for i in range(n_topics):
+            for j in range(n_topics):
+                # Cosine similarity between topic distributions
+                p = model1.phi[i]
+                q = model2.phi[j]
+                similarity_matrix[i, j] = np.dot(p, q) / (np.linalg.norm(p) * np.linalg.norm(q) + 1e-10)
+        
+        # Use Hungarian algorithm to find optimal assignment
+        # We want to maximize similarity, so we negate and use linear_sum_assignment
+        try:
+            from scipy.optimize import linear_sum_assignment
+            row_ind, col_ind = linear_sum_assignment(-similarity_matrix)
+        except ImportError:
+            # Fallback to greedy assignment if scipy is not available
+            row_ind = list(range(n_topics))
+            col_ind = []
+            available = set(range(n_topics))
+            for i in range(n_topics):
+                best_j = max(available, key=lambda j: similarity_matrix[i, j])
+                col_ind.append(best_j)
+                available.remove(best_j)
+        
+        alignment = list(zip(row_ind, col_ind))
+        avg_similarity = np.mean([similarity_matrix[i, j] for i, j in alignment])
+        
+        return alignment, avg_similarity
     
     def visualize_documents(
         self,

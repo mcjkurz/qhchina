@@ -268,7 +268,7 @@ def find_collocates(
     sentences: List[List[str]], 
     target_words: Union[str, List[str]], 
     method: str = 'window', 
-    horizon: Union[int, tuple] = 5, 
+    horizon: Optional[Union[int, tuple]] = None, 
     filters: Optional[FilterOptions] = None, 
     as_dataframe: bool = True,
     max_sentence_length: Optional[int] = 256,
@@ -286,11 +286,13 @@ def find_collocates(
     method : str, default='window'
         Method to use for calculating collocations. Either 'window' or 'sentence'.
         - 'window': Uses a sliding window of specified horizon around each token
-        - 'sentence': Considers whole sentences as context units
-    horizon : Union[int, tuple], default=5
-        Context window size (only used if method='window').
+        - 'sentence': Considers whole sentences as context units (horizon not applicable)
+    horizon : Optional[Union[int, tuple]], default=None
+        Context window size. Only applicable when method='window'. 
+        Must be None when method='sentence'.
         - int: Symmetric window (e.g., 5 means 5 words on each side)
         - tuple: Asymmetric window (left, right) (e.g., (0, 5) means only 5 words on the right)
+        - None: Uses default of 5 for 'window' method
     filters : Optional[FilterOptions], optional
         Dictionary of filters to apply to results, AFTER computation is done:
         - 'max_p': float - Maximum p-value threshold for statistical significance
@@ -337,6 +339,18 @@ def find_collocates(
     
     if not target_words:
         raise ValueError("target_words cannot be empty")
+    
+    # Validate horizon parameter based on method
+    if method == 'sentence':
+        if horizon is not None:
+            raise ValueError(
+                "The 'horizon' parameter is not applicable when method='sentence'. "
+                "Sentence-based collocation uses entire sentences as context units. "
+                "Please remove the 'horizon' argument or use method='window'."
+            )
+    elif method == 'window':
+        if horizon is None:
+            horizon = 5  # Default value for window method
     
     # Print filters if provided
     if filters:
@@ -471,7 +485,7 @@ def find_collocates(
         results = pd.DataFrame(results)
     return results
 
-def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, 
+def cooc_matrix(documents, method='window', horizon=None, min_abs_count=1, min_doc_count=1, 
                 vocab_size=None, binary=False, as_dataframe=True, vocab=None, use_sparse=False):
     """
     Calculate a co-occurrence matrix from a list of documents.
@@ -482,10 +496,12 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
         List of tokenized documents, where each document is a list of tokens.
     method : str, default='window'
         Method to use for calculating co-occurrences. Either 'window' or 'document'.
-    horizon : Union[int, tuple], default=5
-        Context window size (only used if method='window').
+    horizon : Optional[Union[int, tuple]], default=None
+        Context window size. Only applicable when method='window'.
+        Must be None when method='document'.
         - int: Symmetric window (e.g., 5 means 5 words on each side)
         - tuple: Asymmetric window (left, right) (e.g., (0, 5) means only 5 words on the right)
+        - None: Uses default of 5 for 'window' method
     min_abs_count : int, default=1
         Minimum absolute count for a word to be included in the vocabulary.
     min_doc_count : int, default=1
@@ -518,6 +534,18 @@ def cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_
     
     if method not in ('window', 'document'):
         raise ValueError("method must be 'window' or 'document'")
+    
+    # Validate horizon parameter based on method
+    if method == 'document':
+        if horizon is not None:
+            raise ValueError(
+                "The 'horizon' parameter is not applicable when method='document'. "
+                "Document-based co-occurrence uses entire documents as context units. "
+                "Please remove the 'horizon' argument or use method='window'."
+            )
+    elif method == 'window':
+        if horizon is None:
+            horizon = 5  # Default value for window method
     
     if use_sparse:
         from scipy import sparse

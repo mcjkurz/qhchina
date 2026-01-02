@@ -14,12 +14,23 @@ A Python toolkit for computational analysis of Chinese texts in humanities resea
 pip install qhchina
 ```
 
+## Modules
+
+- **Preprocessing**: Chinese text segmentation with multiple backends (spaCy, Jieba, BERT, LLM)
+- **Word Embeddings**: Word2Vec training and temporal semantic change analysis
+- **Topic Modeling**: LDA with Gibbs sampling for topic discovery
+- **Stylometry**: Authorship attribution and document clustering
+- **Collocations**: Statistical collocation analysis and co-occurrence matrices
+- **Corpora**: Corpus comparison and linguistic pattern identification
+- **Helpers**: Font management, text loading, and utility functions
+
 ## Quick Start
 
 ```python
 import qhchina
 from qhchina.preprocessing.segmentation import create_segmenter
 from qhchina.analytics.topicmodels import LDAGibbsSampler
+from qhchina.analytics.stylometry import Stylometry
 from qhchina.helpers import load_fonts, load_stopwords
 
 # Load fonts for visualization
@@ -49,4 +60,4 @@ for i, topic in enumerate(topics):
     print(f"Topic {i}: {[word for word, _ in topic]}")
 ```
 
-For detailed information about each module, please refer to the specific documentation pages linked above.
+For detailed information about each module, please refer to the specific documentation pages in the sidebar.
