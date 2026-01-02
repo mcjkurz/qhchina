@@ -30,8 +30,9 @@ stylo.fit_transform(corpus)
 
 # Analyze the transformed data
 predicted = stylo.predict_author(unknown_text)  # Predict authorship
-similar = stylo.most_similar('鲁迅_1')          # Find similar documents
-dist = stylo.distance('鲁迅_1', '沈从文_1')      # Compare two documents
+similar = stylo.most_similar('鲁迅_1')          # Find similar documents (returns similarity)
+sim = stylo.similarity('鲁迅_1', '沈从文_1')    # Compare two documents (higher = more similar)
+dist = stylo.distance('鲁迅_1', '沈从文_1')     # Compare two documents (lower = more similar)
 ```
 
 ---
@@ -44,7 +45,7 @@ The main class for stylometric analysis supports both supervised (with labeled t
 
 1. Create a `Stylometry` instance with desired parameters
 2. Call `fit_transform()` with your corpus (dict or list of tokenized documents)
-3. Analyze with: `plot()`, `dendrogram()`, `most_similar()`, `distance()`, `predict()`
+3. Analyze with: `plot()`, `dendrogram()`, `most_similar()`, `similarity()`, `distance()`, `predict()`
 
 ### Initialization
 
@@ -141,21 +142,33 @@ In `'instance'` mode with `k > 1`, returns the majority vote among the k nearest
 
 ---
 
-### Distance Methods
+### Similarity & Distance Methods
 
 ```python
-most_similar(query, k=None)
+most_similar(query, k=None, return_distance=False)
 ```
 
 Find the most similar documents to a query.
 
 **Parameters:**
-- `query`: Either:
-  - A document ID (str): find documents similar to this document
-  - A list of tokens: transform and find similar documents
-- `k` (int): Number of results to return. If None, returns all documents.
+- `query`: Document ID (str) or list of tokens.
+- `k` (int): Number of results to return. If None, returns all.
+- `return_distance` (bool): If False (default), returns similarity (higher = more similar). If True, returns distance.
 
-**Returns:** (list) List of (doc_id, distance) tuples sorted by distance ascending (most similar first). If query is a doc_id, that document is excluded from results.
+**Returns:** (list) List of (doc_id, value) tuples sorted by similarity.
+
+<br>
+
+```python
+similarity(a, b)
+```
+
+Compute the similarity between two documents. Higher = more similar.
+
+**Parameters:**
+- `a`, `b`: Document ID (str) or list of tokens.
+
+**Returns:** (float) Similarity value. For cosine: -1 to 1. For others: 0 to 1.
 
 <br>
 
@@ -163,13 +176,12 @@ Find the most similar documents to a query.
 distance(a, b)
 ```
 
-Compute the distance between two documents or texts.
+Compute the distance between two documents. Lower = more similar.
 
 **Parameters:**
-- `a`: First document - either a doc_id (str) or list of tokens
-- `b`: Second document - either a doc_id (str) or list of tokens
+- `a`, `b`: Document ID (str) or list of tokens.
 
-**Returns:** (float) Distance value (lower = more similar)
+**Returns:** (float) Distance value.
 
 <br>
 
@@ -232,9 +244,9 @@ Perform hierarchical clustering on fitted data.
 ### Visualization Methods
 
 ```python
-plot(method='pca', level='document', figsize=(10, 8), show_labels=True, 
-     title=None, colors=None, marker_size=100, fontsize=12, 
-     filename=None, random_state=42)
+plot(method='pca', level='document', figsize=(10, 8), show_labels=True,
+     labels=None, title=None, colors=None, marker_size=100, fontsize=12, 
+     filename=None, random_state=42, show=True)
 ```
 
 Create a 2D scatter plot of documents or authors.
@@ -244,18 +256,23 @@ Create a 2D scatter plot of documents or authors.
 - `level` (str): `'document'` for individual documents, `'author'` for author profiles
 - `figsize` (tuple): Figure size as (width, height)
 - `show_labels` (bool): Show text labels for points (default: True)
-- `title` (str): Plot title (auto-generated if None)
+- `labels` (list): Custom labels for points (overrides default doc_ids/author names)
+- `title` (str): Plot title (no title if None)
 - `colors` (dict): Custom colors for authors `{author: color}` (auto-assigned if None)
 - `marker_size` (int): Size of scatter points (default: 100)
 - `fontsize` (int): Base font size (default: 12)
 - `filename` (str): Save plot to file (displays only if None)
 - `random_state` (int): Random seed for t-SNE/MDS reproducibility (default: 42)
+- `show` (bool): If True, display plot. If False, return (fig, ax) for editing.
+
+**Returns:** None if show=True, otherwise (fig, ax) tuple.
 
 <br>
 
 ```python
 dendrogram(method='average', level='document', orientation='top', 
-           figsize=(12, 8), fontsize=10, filename=None)
+           figsize=(12, 8), labels=None, title=None, fontsize=10, 
+           color_threshold=None, filename=None, show=True)
 ```
 
 Visualize hierarchical clustering as a dendrogram.
@@ -265,8 +282,14 @@ Visualize hierarchical clustering as a dendrogram.
 - `level` (str): `'document'` or `'author'`
 - `orientation` (str): Dendrogram orientation (`'top'`, `'bottom'`, `'left'`, `'right'`)
 - `figsize` (tuple): Figure size
+- `labels` (list): Custom labels for leaves (overrides default doc_ids/author names)
+- `title` (str): Plot title (no title if None)
 - `fontsize` (int): Font size for labels
+- `color_threshold` (float): Distance threshold for coloring. Links below get cluster colors, links above get uniform color. Default uses 0.7 * max distance. Set high to color more from bottom, low to color from top.
 - `filename` (str): Save plot to file
+- `show` (bool): If True, display plot. If False, return result dict.
+
+**Returns:** None if show=True, otherwise dict with `'fig'`, `'ax'`, and scipy dendrogram data (`'ivl'`, `'leaves'`, `'color_list'`, etc.).
 
 <br>
 
@@ -356,23 +379,20 @@ print(f"Predicted author: {predicted}")
 ### Finding Similar Documents
 
 ```python
-# Find documents most similar to a specific document
+# Find documents most similar to a specific document (returns similarity by default)
 similar = stylo.most_similar('author_a_1', k=5)
-for doc_id, distance in similar:
-    print(f"{doc_id}: {distance:.4f}")
+for doc_id, sim in similar:
+    print(f"{doc_id}: {sim:.4f}")  # higher = more similar
 
 # Find documents similar to new text (without adding it to the corpus)
 similar = stylo.most_similar(['这', '是', '新', '文本', '...'], k=3)
-for doc_id, distance in similar:
-    print(f"{doc_id}: {distance:.4f}")
+for doc_id, sim in similar:
+    print(f"{doc_id}: {sim:.4f}")
 
 # Compare two specific documents
-dist = stylo.distance('author_a_1', 'author_b_1')
-print(f"Distance: {dist:.4f}")
-
-# Compare a document to new text
-dist = stylo.distance('author_a_1', ['新', '文本', '...'])
-print(f"Distance: {dist:.4f}")
+sim = stylo.similarity('author_a_1', 'author_b_1')  # higher = more similar
+dist = stylo.distance('author_a_1', 'author_b_1')   # lower = more similar
+print(f"Similarity: {sim:.4f}, Distance: {dist:.4f}")
 ```
 
 ### Analyzing Author Profiles

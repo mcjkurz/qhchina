@@ -1,10 +1,8 @@
-# pyproject.toml
-
 [build-system]
 requires = [
     "setuptools",
     "wheel",
-    "Cython >= 0.29.24",
+    "Cython >= 3.0.0",
     "numpy >= 2.0.2",
     "scipy >= 1.14.1"
 ]
@@ -20,10 +18,23 @@ description = "A Python package for NLP tasks related to Chinese text."
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = ["digital humanities", "nlp", "Chinese", "text analysis", "corpus linguistics", "topic modeling"]
-license = {file = "LICENSE"}
+license = "MIT"
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Cython",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Natural Language :: Chinese (Simplified)",
+    "Natural Language :: Chinese (Traditional)",
 ]
 
 dependencies = [
@@ -31,8 +42,8 @@ dependencies = [
     "scipy >= 1.14.1",
     "matplotlib >= 3.10.0",
     "scikit-learn >= 1.6.1",
-    "tqdm",
-    "pandas"
+    "tqdm >= 4.66.0",
+    "pandas >= 2.1.0"
 ]
 
 [tool.setuptools.packages.find]
@@ -51,4 +62,5 @@ zip-safe = false
 [project.urls]
 "Homepage" = "https://www.qhchina.org/"
 "Documentation" = "https://www.qhchina.org/pkg_docs"
+"Repository" = "https://github.com/mcjkurz/qhchina"
 "Bug Tracker" = "https://github.com/mcjkurz/qhchina/issues"

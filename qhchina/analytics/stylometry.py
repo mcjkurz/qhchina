@@ -7,7 +7,7 @@ a much more comprehensive implementation for computational stylistics.
 Workflow:
 1. Create a Stylometry instance with desired parameters
 2. Call fit_transform() with your corpus (dict or list of tokenized documents)
-3. Analyze with: plot(), dendrogram(), most_similar(), distance(), predict()
+3. Analyze with: plot(), dendrogram(), most_similar(), similarity(), distance(), predict()
 
 Two modes for supervised learning:
 - 'centroid': Aggregate all author texts into one profile, compare disputed text to centroids
@@ -255,7 +255,17 @@ class Stylometry:
         if isinstance(query, str):
             # It's a doc_id
             if query not in self._doc_id_to_index:
-                raise ValueError(f"Unknown document ID '{query}'. Available: {self.document_ids}")
+                # Check for partial matches to provide helpful suggestions
+                partial_matches = [doc_id for doc_id in self.document_ids if query in doc_id]
+                if partial_matches:
+                    hint = f"Did you mean one of: {partial_matches[:10]}"
+                    if len(partial_matches) > 10:
+                        hint += f" ... ({len(partial_matches)} matches)"
+                else:
+                    hint = f"Available: {self.document_ids[:10]}"
+                    if len(self.document_ids) > 10:
+                        hint += f" ... ({len(self.document_ids)} total)"
+                raise ValueError(f"Unknown document ID '{query}'. {hint}")
             idx = self._doc_id_to_index[query]
             return self.document_zscores[idx], query
         elif isinstance(query, list):
@@ -544,19 +554,19 @@ class Stylometry:
         self, 
         query: Union[str, List[str]], 
         k: Optional[int] = None,
+        return_distance: bool = False,
     ) -> List[Tuple[str, float]]:
         """
         Find the most similar documents to a query.
         
         Args:
-            query: Either:
-                - A document ID (str): find documents similar to this document
-                - A list of tokens: transform and find similar documents
-            k: Number of results to return. If None, returns all documents.
+            query: Document ID (str) or list of tokens.
+            k: Number of results to return. If None, returns all.
+            return_distance: If False (default), returns similarity (higher = more similar).
+                           If True, returns distance (lower = more similar).
         
         Returns:
-            List of (doc_id, distance) tuples sorted by distance ascending (most similar first).
-            If query is a doc_id, that document is excluded from results.
+            List of (doc_id, value) tuples sorted by similarity (most similar first).
         """
         if not self._is_fitted:
             raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
@@ -564,24 +574,32 @@ class Stylometry:
         query_zscore, query_doc_id = self._resolve_to_zscore(query)
         distance_fn = self.DISTANCE_FUNCTIONS[self.distance_metric]
         
-        # Compute distances to all documents
         results = []
         for i, doc_zscore in enumerate(self.document_zscores):
             doc_id = self.document_ids[i]
-            # Skip self if query was a doc_id
             if query_doc_id is not None and doc_id == query_doc_id:
                 continue
             dist = distance_fn(query_zscore, doc_zscore)
-            results.append((doc_id, float(dist)))
+            
+            if return_distance:
+                results.append((doc_id, float(dist)))
+            else:
+                similarity = self._distance_to_similarity(dist)
+                results.append((doc_id, float(similarity)))
         
-        # Sort by distance
-        results.sort(key=lambda x: x[1])
+        results.sort(key=lambda x: x[1], reverse=(not return_distance))
         
-        # Limit results
         if k is not None:
             results = results[:k]
         
         return results
+    
+    def _distance_to_similarity(self, dist: float) -> float:
+        """Convert distance to similarity based on the current metric."""
+        if self.distance_metric == 'cosine':
+            return 1.0 - dist  # similarity = 1 - distance, range: -1 to 1
+        else:
+            return 1.0 / (1.0 + dist)  # range: 0 to 1
     
     def distance(
         self, 
@@ -589,14 +607,13 @@ class Stylometry:
         b: Union[str, List[str]],
     ) -> float:
         """
-        Compute the distance between two documents or texts.
+        Compute the distance between two documents. Lower = more similar.
         
         Args:
-            a: First document - either a doc_id (str) or list of tokens
-            b: Second document - either a doc_id (str) or list of tokens
+            a, b: Document ID (str) or list of tokens.
         
         Returns:
-            Distance (float) - lower values indicate more similar texts.
+            Distance (float).
         """
         if not self._is_fitted:
             raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
@@ -606,6 +623,22 @@ class Stylometry:
         
         distance_fn = self.DISTANCE_FUNCTIONS[self.distance_metric]
         return float(distance_fn(zscore_a, zscore_b))
+    
+    def similarity(
+        self, 
+        a: Union[str, List[str]], 
+        b: Union[str, List[str]],
+    ) -> float:
+        """
+        Compute the similarity between two documents. Higher = more similar.
+        
+        Args:
+            a, b: Document ID (str) or list of tokens.
+        
+        Returns:
+            Similarity (float). For cosine: -1 to 1. For others: 0 to 1.
+        """
+        return self._distance_to_similarity(self.distance(a, b))
     
     def _compute_distance_matrix(self, vectors: List[np.ndarray]) -> np.ndarray:
         """Compute pairwise distance matrix for a list of z-score vectors."""
@@ -729,13 +762,15 @@ class Stylometry:
         level: str = 'document',
         figsize: Tuple[int, int] = (10, 8),
         show_labels: bool = True,
+        labels: Optional[List[str]] = None,
         title: Optional[str] = None,
         colors: Optional[Dict[str, str]] = None,
         marker_size: int = 100,
         fontsize: int = 12,
         filename: Optional[str] = None,
         random_state: int = 42,
-    ) -> None:
+        show: bool = True,
+    ) -> Optional[Tuple[plt.Figure, plt.Axes]]:
         """
         Create a 2D scatter plot of documents or authors.
         
@@ -746,12 +781,17 @@ class Stylometry:
             level: 'document' for individual documents, 'author' for author profiles
             figsize: Figure size as (width, height)
             show_labels: Whether to show text labels on points
+            labels: Custom labels for points (overrides default doc_ids/author names)
             title: Custom title (auto-generated if None)
             colors: Dict mapping author names to colors
             marker_size: Size of scatter points
             fontsize: Base font size
             filename: If provided, save figure to this path
             random_state: Random seed for t-SNE/MDS
+            show: If True, display plot. If False, return (fig, ax) for further editing.
+        
+        Returns:
+            None if show=True, otherwise (fig, ax) tuple.
         """
         import matplotlib
         
@@ -764,6 +804,12 @@ class Stylometry:
         vectors, doc_labels = self._get_vectors_and_labels(level)
         author_for_point = self.document_labels if level == 'document' else self.authors
         unique_authors = self.authors
+        
+        # Override labels if provided
+        if labels is not None:
+            if len(labels) != len(doc_labels):
+                raise ValueError(f"labels length ({len(labels)}) must match number of points ({len(doc_labels)})")
+            doc_labels = list(labels)
         
         vectors = np.array(vectors)
         
@@ -796,9 +842,6 @@ class Stylometry:
         
         if title:
             ax.set_title(title, fontsize=fontsize + 4)
-        else:
-            mode_str = 'Documents' if level == 'document' else 'Authors'
-            ax.set_title(f'Stylometric {mode_str} Analysis ({method.upper()})', fontsize=fontsize + 4)
         
         ax.grid(True, alpha=0.3, linestyle='--')
         plt.tight_layout()
@@ -806,7 +849,11 @@ class Stylometry:
         if filename:
             plt.savefig(filename, bbox_inches='tight', dpi=300)
         
-        plt.show()
+        if show:
+            plt.show()
+            return None
+        else:
+            return fig, ax
     
     def _reduce_dimensions(
         self,
@@ -910,9 +957,13 @@ class Stylometry:
         level: str = 'document',
         orientation: str = 'top',
         figsize: Tuple[int, int] = (12, 8),
+        labels: Optional[List[str]] = None,
+        title: Optional[str] = None,
         fontsize: int = 10,
+        color_threshold: Optional[float] = None,
         filename: Optional[str] = None,
-    ) -> None:
+        show: bool = True,
+    ) -> Optional[Dict]:
         """
         Visualize hierarchical clustering as a dendrogram.
         
@@ -923,8 +974,18 @@ class Stylometry:
             level: 'document' for individual documents, 'author' for author profiles
             orientation: Dendrogram orientation - 'top', 'bottom', 'left', or 'right'
             figsize: Figure size as (width, height)
+            labels: Custom labels for leaves (overrides default doc_ids/author names)
+            title: Plot title (no title if None)
             fontsize: Font size for labels
+            color_threshold: Distance threshold for coloring. Links below this get cluster colors,
+                           links above get uniform color. Default (None) uses 0.7 * max distance.
+                           Set to 0 for uniform color, or high value to color more clusters.
             filename: If provided, save figure to this path
+            show: If True, display plot. If False, return dendrogram result dict.
+        
+        Returns:
+            None if show=True, otherwise dict with 'fig', 'ax', and scipy dendrogram data
+            ('ivl', 'leaves', 'color_list', 'icoord', 'dcoord').
         """
         from scipy.cluster.hierarchy import dendrogram as scipy_dendrogram
         
@@ -940,19 +1001,33 @@ class Stylometry:
             level=level,
         )
         
+        # Override labels if provided
+        if labels is not None:
+            if len(labels) != len(doc_labels):
+                raise ValueError(f"labels length ({len(labels)}) must match number of leaves ({len(doc_labels)})")
+            doc_labels = list(labels)
+        
         fig, ax = plt.subplots(figsize=figsize)
-        scipy_dendrogram(
+        dendro_result = scipy_dendrogram(
             linkage_matrix,
             labels=doc_labels,
             orientation=orientation,
             leaf_font_size=fontsize,
+            color_threshold=color_threshold,
             ax=ax,
         )
         
-        mode_str = 'Document' if level == 'document' else 'Author'
-        ax.set_title(f'Stylometric {mode_str} Clustering (method={method})', fontsize=fontsize + 4)
+        if title:
+            ax.set_title(title, fontsize=fontsize + 4)
         
         plt.tight_layout()
         if filename:
             plt.savefig(filename, bbox_inches='tight', dpi=300)
-        plt.show()
+        
+        if show:
+            plt.show()
+            return None
+        else:
+            dendro_result['fig'] = fig
+            dendro_result['ax'] = ax
+            return dendro_result
