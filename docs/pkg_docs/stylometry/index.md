@@ -14,8 +14,12 @@ The `qhchina.analytics.stylometry` module provides tools for authorship attribut
 from qhchina.analytics.stylometry import Stylometry
 
 stylo = Stylometry(n_features=100, distance='cosine')
-stylo.fit({'author_a': [tokens_a1, tokens_a2], 'author_b': [tokens_b1, tokens_b2]})
+stylo.fit_transform({'author_a': [tokens_a1, tokens_a2], 'author_b': [tokens_b1, tokens_b2]})
+
+# Analyze the transformed data
 predicted = stylo.predict_author(unknown_text)  # Predict authorship
+similar = stylo.most_similar('author_a_1')      # Find similar documents
+dist = stylo.distance('author_a_1', 'author_b_1')  # Compare two documents
 ```
 
 ---
@@ -23,6 +27,12 @@ predicted = stylo.predict_author(unknown_text)  # Predict authorship
 ## Stylometry Class
 
 The main class for stylometric analysis supports both supervised (with labeled training data) and unsupervised (clustering) approaches.
+
+### Workflow
+
+1. Create a `Stylometry` instance with desired parameters
+2. Call `fit_transform()` with your corpus (dict or list of tokenized documents)
+3. Analyze with: `plot()`, `dendrogram()`, `most_similar()`, `distance()`, `predict()`
 
 ### Initialization
 
@@ -40,24 +50,44 @@ Stylometry(n_features=100, distance='cosine', mode='centroid')
   - `'centroid'`: Aggregate all author texts into one profile per author (default)
   - `'instance'`: Keep individual texts separate (k-NN style)
 
-### Supervised Methods
+---
+
+### Core Method
 
 ```python
-fit(corpus)
+fit_transform(corpus, labels=None)
 ```
 
-Fit the model on a labeled corpus for supervised authorship analysis.
+Fit the model on a corpus and transform documents to z-score vectors.
 
 **Parameters:**
-- `corpus` (dict): Dictionary mapping author names to their documents. Each document is a list of tokens.
-  ```python
-  {'author_a': [['word1', 'word2', ...], ['more', 'tokens', ...]], 
-   'author_b': [['other', 'words', ...]], ...}
-  ```
+- `corpus`: Either:
+  - **Dict** (supervised): `{'author_a': [[tok1, tok2, ...], [tok1, ...]], 'author_b': [...]}`
+  - **List** (unsupervised): `[[tok1, tok2, ...], [tok1, ...], ...]`
+- `labels` (list): Optional labels for list input. If provided, documents are grouped by label. If not provided, all documents get the 'unk' label.
+
+Document IDs are auto-generated as `{author}_{n}` (e.g., `author_a_1`, `author_a_2`, `unk_1`).
 
 **Returns:** self (for method chaining)
 
 <br>
+
+```python
+transform(tokens)
+```
+
+Transform a tokenized text to a z-score vector using fitted features. This allows you to transform new documents without modifying the model's internal state.
+
+**Parameters:**
+- `tokens` (list): List of tokens (a tokenized document)
+
+**Returns:** (numpy.ndarray) Z-score vector of shape (n_features,)
+
+<br>
+
+---
+
+### Prediction Methods
 
 ```python
 predict(text, k=1)
@@ -67,9 +97,13 @@ Predict the most likely author for a tokenized text.
 
 **Parameters:**
 - `text` (list): List of tokens (the disputed text)
-- `k` (int): Number of nearest neighbors (only used in 'instance' mode)
+- `k` (int): Number of nearest neighbors to consider (only used in `'instance'` mode)
+
+> **Note:** In `'centroid'` mode, the `k` parameter is ignored and a warning is issued if `k != 1`. All author centroids are compared and returned. Use `mode='instance'` for k-NN behavior.
 
 **Returns:** (list) List of (author, distance) tuples sorted by distance ascending
+- In `'centroid'` mode: returns distances to each author centroid
+- In `'instance'` mode: returns the k nearest documents with their author labels
 
 <br>
 
@@ -81,27 +115,49 @@ Convenience method to get just the predicted author name.
 
 **Parameters:**
 - `text` (list): List of tokens
-- `k` (int): Number of nearest neighbors for majority vote in 'instance' mode
+- `k` (int): Number of nearest neighbors for majority vote (only in `'instance'` mode)
 
 **Returns:** (str) Predicted author name
 
+In `'instance'` mode with `k > 1`, returns the majority vote among the k nearest neighbors.
+
 <br>
 
-### Unsupervised Methods
+---
+
+### Distance Methods
 
 ```python
-transform(documents, labels=None)
+most_similar(query, k=None)
 ```
 
-Transform documents to z-score vectors for clustering/visualization without prior fitting.
+Find the most similar documents to a query.
 
 **Parameters:**
-- `documents` (list): List of tokenized documents
-- `labels` (list): Optional labels for each document (defaults to Doc_1, Doc_2, ...)
+- `query`: Either:
+  - A document ID (str): find documents similar to this document
+  - A list of tokens: transform and find similar documents
+- `k` (int): Number of results to return. If None, returns all documents.
 
-**Returns:** (tuple) (z_score_vectors, labels)
+**Returns:** (list) List of (doc_id, distance) tuples sorted by distance ascending (most similar first). If query is a doc_id, that document is excluded from results.
 
 <br>
+
+```python
+distance(a, b)
+```
+
+Compute the distance between two documents or texts.
+
+**Parameters:**
+- `a`: First document - either a doc_id (str) or list of tokens
+- `b`: Second document - either a doc_id (str) or list of tokens
+
+**Returns:** (float) Distance value (lower = more similar)
+
+<br>
+
+---
 
 ### Analysis Methods
 
@@ -142,64 +198,63 @@ Compute pairwise distance matrix from fitted data.
 <br>
 
 ```python
-hierarchical_clustering(documents=None, labels=None, method='average', level='document')
+hierarchical_clustering(method='average', level='document')
 ```
 
-Perform hierarchical clustering.
+Perform hierarchical clustering on fitted data.
 
 **Parameters:**
-- `documents` (list): Optional documents for unsupervised mode
-- `labels` (list): Optional labels for documents
 - `method` (str): Linkage method (`'single'`, `'complete'`, `'average'`, `'weighted'`, `'ward'`)
-- `level` (str): `'document'` or `'author'` (only for supervised mode)
+- `level` (str): `'document'` or `'author'`
 
 **Returns:** (tuple) (linkage_matrix, labels) for scipy dendrogram
 
 <br>
 
+---
+
 ### Visualization Methods
 
 ```python
-plot(documents=None, labels=None, method='pca', level='document', figsize=(10, 8),
-     show_labels=True, title=None, colors=None, marker_size=100, fontsize=12,
+plot(method='pca', level='document', figsize=(10, 8), show_labels=True, 
+     title=None, colors=None, marker_size=100, fontsize=12, 
      filename=None, random_state=42)
 ```
 
 Create a 2D scatter plot of documents or authors.
 
 **Parameters:**
-- `documents` (list): Optional documents for unsupervised mode
-- `labels` (list): Optional labels for documents
 - `method` (str): Dimensionality reduction method (`'pca'`, `'tsne'`, or `'mds'`)
-- `level` (str): `'document'` or `'author'` (only for supervised mode)
-- `figsize` (tuple): Figure size
-- `show_labels` (bool): Show text labels for points
-- `title` (str): Plot title
-- `colors` (dict): Custom colors for authors `{author: color}`
-- `marker_size` (int): Size of scatter points
-- `fontsize` (int): Base font size
-- `filename` (str): Save plot to file
+- `level` (str): `'document'` for individual documents, `'author'` for author profiles
+- `figsize` (tuple): Figure size as (width, height)
+- `show_labels` (bool): Show text labels for points (default: True)
+- `title` (str): Plot title (auto-generated if None)
+- `colors` (dict): Custom colors for authors `{author: color}` (auto-assigned if None)
+- `marker_size` (int): Size of scatter points (default: 100)
+- `fontsize` (int): Base font size (default: 12)
+- `filename` (str): Save plot to file (displays only if None)
+- `random_state` (int): Random seed for t-SNE/MDS reproducibility (default: 42)
 
 <br>
 
 ```python
-dendrogram(documents=None, labels=None, method='average', level='document',
-           orientation='top', figsize=(12, 8), fontsize=10, filename=None)
+dendrogram(method='average', level='document', orientation='top', 
+           figsize=(12, 8), fontsize=10, filename=None)
 ```
 
 Visualize hierarchical clustering as a dendrogram.
 
 **Parameters:**
-- `documents` (list): Optional documents for unsupervised mode
-- `labels` (list): Optional labels for documents
 - `method` (str): Linkage method
-- `level` (str): `'document'` or `'author'` (only for supervised mode)
+- `level` (str): `'document'` or `'author'`
 - `orientation` (str): Dendrogram orientation (`'top'`, `'bottom'`, `'left'`, `'right'`)
 - `figsize` (tuple): Figure size
 - `fontsize` (int): Font size for labels
 - `filename` (str): Save plot to file
 
 <br>
+
+---
 
 ## Utility Functions
 
@@ -240,6 +295,8 @@ Compute relative word frequencies for a tokenized text.
 
 <br>
 
+---
+
 ## Examples
 
 ### Authorship Attribution
@@ -262,7 +319,7 @@ corpus = {
 
 # Create and fit the model
 stylo = Stylometry(n_features=100, distance='cosine', mode='centroid')
-stylo.fit(corpus)
+stylo.fit_transform(corpus)
 
 # Predict authorship for an unknown text
 unknown_text = ['这', '篇', '文章', '的', '作者', '是', '谁', '...']
@@ -273,6 +330,28 @@ for author, distance in results:
 # Get predicted author directly
 predicted = stylo.predict_author(unknown_text)
 print(f"Predicted author: {predicted}")
+```
+
+### Finding Similar Documents
+
+```python
+# Find documents most similar to a specific document
+similar = stylo.most_similar('author_a_1', k=5)
+for doc_id, distance in similar:
+    print(f"{doc_id}: {distance:.4f}")
+
+# Find documents similar to new text (without adding it to the corpus)
+similar = stylo.most_similar(['这', '是', '新', '文本', '...'], k=3)
+for doc_id, distance in similar:
+    print(f"{doc_id}: {distance:.4f}")
+
+# Compare two specific documents
+dist = stylo.distance('author_a_1', 'author_b_1')
+print(f"Distance: {dist:.4f}")
+
+# Compare a document to new text
+dist = stylo.distance('author_a_1', ['新', '文本', '...'])
+print(f"Distance: {dist:.4f}")
 ```
 
 ### Analyzing Author Profiles
@@ -300,15 +379,13 @@ documents = [
     ['文档', '二', '的', '内容', '...'],
     ['文档', '三', '的', '内容', '...'],
 ]
-labels = ['Doc 1', 'Doc 2', 'Doc 3']
 
-# Create model for unsupervised analysis
+# Create model and fit on documents (unsupervised mode)
 stylo = Stylometry(n_features=50, distance='burrows_delta')
+stylo.fit_transform(documents)  # All docs get 'unk' author, IDs: unk_1, unk_2, unk_3
 
 # Visualize documents in 2D space
 stylo.plot(
-    documents=documents,
-    labels=labels,
     method='pca',
     title='Document Clustering',
     filename='clustering.png'
@@ -316,18 +393,19 @@ stylo.plot(
 
 # Create dendrogram
 stylo.dendrogram(
-    documents=documents,
-    labels=labels,
     method='average',
     filename='dendrogram.png'
 )
+
+# Find similar documents
+similar = stylo.most_similar('unk_1')
 ```
 
 ### Supervised Visualization
 
 ```python
 # After fitting on labeled corpus
-stylo.fit(corpus)
+stylo.fit_transform(corpus)
 
 # Plot at document level (colored by author)
 stylo.plot(
@@ -353,3 +431,36 @@ stylo.dendrogram(
 )
 ```
 
+### Instance Mode with k-NN
+
+```python
+# Use instance mode for k-nearest neighbor attribution
+stylo = Stylometry(n_features=100, distance='cosine', mode='instance')
+stylo.fit_transform(corpus)
+
+# Find the 5 nearest training documents to a disputed text
+results = stylo.predict(unknown_text, k=5)
+for author, distance in results:
+    print(f"{author}: {distance:.4f}")
+
+# Get predicted author via majority vote among 5 nearest neighbors
+predicted = stylo.predict_author(unknown_text, k=5)
+print(f"Predicted author (majority vote): {predicted}")
+```
+
+### Corpus Balance Warning
+
+The module automatically warns when author corpus sizes are highly imbalanced (3x difference or more), as this can skew the Most Frequent Words calculation toward the larger corpus:
+
+```python
+# This will trigger a warning if corpus sizes are imbalanced
+corpus = {
+    'prolific_author': [doc1, doc2, doc3, ..., doc100],  # Many documents
+    'rare_author': [doc1, doc2],  # Few documents
+}
+stylo.fit_transform(corpus)
+# UserWarning: Imbalanced corpus: 'prolific_author' has X tokens while 
+# 'rare_author' has only Y tokens (Z.Zx difference)...
+```
+
+Consider balancing text sizes across authors for more reliable results.

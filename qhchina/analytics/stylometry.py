@@ -4,7 +4,11 @@ Stylometry module for authorship attribution and document clustering.
 Inspired by the R package 'stylo' (https://github.com/computationalstylistics/stylo),
 a much more comprehensive implementation for computational stylistics.
 
-Supports supervised (with fit) and unsupervised (without fit) analysis.
+Workflow:
+1. Create a Stylometry instance with desired parameters
+2. Call fit_transform() with your corpus (dict or list of tokenized documents)
+3. Analyze with: plot(), dendrogram(), most_similar(), distance(), predict()
+
 Two modes for supervised learning:
 - 'centroid': Aggregate all author texts into one profile, compare disputed text to centroids
 - 'instance': Keep individual texts separate, find nearest neighbor among all texts
@@ -48,11 +52,7 @@ def burrows_delta(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
 
 def cosine_distance(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
     """Cosine distance (1 - cosine_similarity)."""
-    similarity = _cosine_similarity(vec_a, vec_b)
-    # Handle case where _cosine_similarity returns a matrix (for 2D inputs)
-    if hasattr(similarity, '__len__') and not isinstance(similarity, (int, float)):
-        similarity = float(similarity)
-    return 1.0 - similarity
+    return 1.0 - _cosine_similarity(vec_a, vec_b)
 
 
 def manhattan_distance(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
@@ -89,6 +89,18 @@ class Stylometry:
                           When predicting, compare to author centroids.
             - 'instance': Keep individual texts separate.
                           When predicting, find the nearest text (k-NN style).
+    
+    Example usage:
+        >>> stylo = Stylometry(n_features=100, distance='cosine')
+        >>> # Supervised: dict with author -> documents
+        >>> stylo.fit_transform({'AuthorA': [doc1, doc2], 'AuthorB': [doc3, doc4]})
+        >>> # Unsupervised: list of documents
+        >>> stylo.fit_transform([doc1, doc2, doc3])
+        >>> # Analyze
+        >>> stylo.plot()
+        >>> stylo.dendrogram()
+        >>> stylo.most_similar('AuthorA_1')
+        >>> stylo.distance('AuthorA_1', 'AuthorB_1')
     """
     
     DISTANCE_FUNCTIONS = {
@@ -125,7 +137,7 @@ class Stylometry:
             raise ValueError(f"mode must be one of {self.VALID_MODES}, got '{mode}'")
         
         self.n_features = n_features
-        self.distance = distance
+        self.distance_metric = distance
         self.mode = mode
         
         # Feature vocabulary learned from corpus
@@ -148,7 +160,30 @@ class Stylometry:
         self.document_labels: List[str] = []  # Author name for each document
         self.document_ids: List[str] = []     # Unique ID for each document
         
+        # Mapping from doc_id to index for fast lookup
+        self._doc_id_to_index: Dict[str, int] = {}
+        
         self._is_fitted: bool = False
+    
+    def _validate_tokens(self, tokens: List[str], name: str = "tokens") -> None:
+        """
+        Validate that tokens is a non-empty list of strings.
+        
+        Args:
+            tokens: The tokens to validate
+            name: Name to use in error messages (e.g., "tokens", "text")
+        
+        Raises:
+            TypeError: If tokens is not a list or contains non-strings
+            ValueError: If tokens is empty
+        """
+        if not isinstance(tokens, list):
+            raise TypeError(f"{name} must be a list, got {type(tokens).__name__}")
+        if not tokens:
+            raise ValueError(f"{name} cannot be empty")
+        for i, token in enumerate(tokens):
+            if not isinstance(token, str):
+                raise TypeError(f"Token {i} must be a string, got {type(token).__name__}")
     
     def _compute_zscore(self, rel_freq_vector: np.ndarray) -> np.ndarray:
         """
@@ -193,33 +228,84 @@ class Stylometry:
             vectors = [self._get_author_zscore(author) for author in self.authors]
             return vectors, self.authors.copy()
     
-    def fit(self, corpus: Dict[str, List[List[str]]]) -> 'Stylometry':
+    def _tokens_to_zscore(self, tokens: List[str]) -> np.ndarray:
         """
-        Fit the model on a labeled corpus for supervised authorship analysis.
+        Transform raw tokens to a z-score vector using fitted features and statistics.
         
         Args:
-            corpus: Dict mapping author names to their documents.
-                    Each document is a list of tokens.
-                    Example: {'author_a': [['word1', 'word2', ...], ...], ...}
+            tokens: List of tokens
         
-        The fitting process:
+        Returns:
+            Z-score vector
+        """
+        rel_freq_dict = get_relative_frequencies(tokens)
+        rel_freq_vec = np.array([rel_freq_dict.get(f, 0.0) for f in self.features])
+        return self._compute_zscore(rel_freq_vec)
+    
+    def _resolve_to_zscore(self, query: Union[str, List[str]]) -> Tuple[np.ndarray, Optional[str]]:
+        """
+        Resolve a query (doc_id or tokens) to a z-score vector.
+        
+        Args:
+            query: Either a document ID (str) or list of tokens
+        
+        Returns:
+            Tuple of (z-score vector, doc_id if query was a doc_id else None)
+        """
+        if isinstance(query, str):
+            # It's a doc_id
+            if query not in self._doc_id_to_index:
+                raise ValueError(f"Unknown document ID '{query}'. Available: {self.document_ids}")
+            idx = self._doc_id_to_index[query]
+            return self.document_zscores[idx], query
+        elif isinstance(query, list):
+            # It's tokens
+            self._validate_tokens(query, "query")
+            return self._tokens_to_zscore(query), None
+        else:
+            raise TypeError(f"query must be a string (doc_id) or list of tokens, got {type(query).__name__}")
+    
+    def fit_transform(
+        self, 
+        corpus: Union[Dict[str, List[List[str]]], List[List[str]]],
+        labels: Optional[List[str]] = None,
+    ) -> 'Stylometry':
+        """
+        Fit the model on a corpus and transform documents to z-score vectors.
+        
+        Args:
+            corpus: Either:
+                - Dict mapping author names to their documents (supervised):
+                  {'AuthorA': [[tok1, tok2, ...], [tok1, ...]], 'AuthorB': [...]}
+                - List of tokenized documents (unsupervised):
+                  [[tok1, tok2, ...], [tok1, ...], ...]
+            labels: Optional labels for list input. If provided, documents are grouped
+                    by label. If not provided, all documents get the 'unk' label.
+                    Ignored for dict input.
+        
+        Document IDs are auto-generated as '{author}_{n}' (e.g., 'AuthorA_1', 'AuthorA_2', 'unk_1').
+        
+        The process:
         1. Extract most frequent words (MFW) from all documents
         2. Compute relative frequencies for each document
         3. Calculate corpus-wide mean and std for z-score normalization
-        4. Depending on mode:
-           - 'centroid': Aggregate each author's texts and compute one z-score profile per author
-           - 'instance': Compute z-scores for each individual document
+        4. Compute z-scores for all documents
+        5. In centroid mode: compute author centroids
         
         Returns:
             self (for method chaining)
         """
-        # Validate input
-        if not isinstance(corpus, dict):
-            raise TypeError(f"corpus must be a dict, got {type(corpus).__name__}")
+        # Convert list input to dict format
+        if isinstance(corpus, list):
+            corpus = self._list_to_dict(corpus, labels)
+        elif not isinstance(corpus, dict):
+            raise TypeError(f"corpus must be a dict or list, got {type(corpus).__name__}")
+        
+        # Validate corpus
         if not corpus:
             raise ValueError("corpus cannot be empty")
-        if len(corpus) < 2:
-            raise ValueError("corpus must contain at least 2 authors")
+        if len(corpus) < 2 and len(list(corpus.values())[0]) < 2:
+            raise ValueError("corpus must contain at least 2 documents")
         
         for author, documents in corpus.items():
             if not isinstance(author, str):
@@ -233,25 +319,26 @@ class Stylometry:
         self.authors = list(corpus.keys())
         
         # Check for imbalanced corpus sizes and warn if necessary
-        author_token_counts = {}
-        for author, documents in corpus.items():
-            total_tokens = sum(len(doc) for doc in documents)
-            author_token_counts[author] = total_tokens
-        
-        min_tokens = min(author_token_counts.values())
-        max_tokens = max(author_token_counts.values())
-        
-        if min_tokens > 0 and max_tokens >= 3 * min_tokens:
-            min_author = min(author_token_counts, key=author_token_counts.get)
-            max_author = max(author_token_counts, key=author_token_counts.get)
-            ratio = max_tokens / min_tokens
-            warnings.warn(
-                f"Imbalanced corpus: '{max_author}' has {max_tokens:,} tokens while "
-                f"'{min_author}' has only {min_tokens:,} tokens ({ratio:.1f}x difference). "
-                f"This may skew MFW calculation toward the larger corpus. "
-                f"Consider balancing text sizes across authors.",
-                UserWarning
-            )
+        if len(self.authors) >= 2:
+            author_token_counts = {}
+            for author, documents in corpus.items():
+                total_tokens = sum(len(doc) for doc in documents)
+                author_token_counts[author] = total_tokens
+            
+            min_tokens = min(author_token_counts.values())
+            max_tokens = max(author_token_counts.values())
+            
+            if min_tokens > 0 and max_tokens >= 3 * min_tokens:
+                min_author = min(author_token_counts, key=author_token_counts.get)
+                max_author = max(author_token_counts, key=author_token_counts.get)
+                ratio = max_tokens / min_tokens
+                warnings.warn(
+                    f"Imbalanced corpus: '{max_author}' has {max_tokens:,} tokens while "
+                    f"'{min_author}' has only {min_tokens:,} tokens ({ratio:.1f}x difference). "
+                    f"This may skew MFW calculation toward the larger corpus. "
+                    f"Consider balancing text sizes across authors.",
+                    UserWarning
+                )
         
         # Step 1: Collect all documents and extract MFW
         all_documents = []
@@ -285,12 +372,15 @@ class Stylometry:
         self.document_labels = []
         self.document_ids = []
         self.document_zscores = []
+        self._doc_id_to_index = {}
         
         for author in self.authors:
             for doc_id, rel_freq_vec in self._author_doc_rel_freqs[author].items():
+                idx = len(self.document_ids)
                 self.document_labels.append(author)
                 self.document_ids.append(doc_id)
                 self.document_zscores.append(self._compute_zscore(rel_freq_vec))
+                self._doc_id_to_index[doc_id] = idx
         
         # Step 5: In centroid mode, compute author centroids
         if self.mode == 'centroid':
@@ -303,6 +393,67 @@ class Stylometry:
         
         self._is_fitted = True
         return self
+    
+    def transform(self, tokens: List[str]) -> np.ndarray:
+        """
+        Transform a tokenized text to a z-score vector using fitted features.
+        
+        This method allows you to transform new documents after fitting,
+        without modifying the model's internal state.
+        
+        Args:
+            tokens: List of tokens (a tokenized document)
+        
+        Returns:
+            Z-score vector (numpy array) of shape (n_features,)
+        
+        Example:
+            >>> stylo = Stylometry(n_features=100)
+            >>> stylo.fit_transform({'AuthorA': [doc1, doc2], 'AuthorB': [doc3]})
+            >>> new_doc_vector = stylo.transform(['new', 'document', 'tokens'])
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
+        
+        self._validate_tokens(tokens)
+        
+        return self._tokens_to_zscore(tokens)
+    
+    def _list_to_dict(
+        self, 
+        documents: List[List[str]], 
+        labels: Optional[List[str]] = None,
+    ) -> Dict[str, List[List[str]]]:
+        """
+        Convert a list of documents to dict format, grouped by label.
+        
+        Args:
+            documents: List of tokenized documents
+            labels: Optional labels for each document
+        
+        Returns:
+            Dict mapping label to list of documents
+        """
+        if not documents:
+            raise ValueError("documents cannot be empty")
+        
+        if labels is None:
+            # All documents get 'unk' label
+            return {'unk': documents}
+        
+        if len(labels) != len(documents):
+            raise ValueError(f"labels length ({len(labels)}) must match documents length ({len(documents)})")
+        
+        # Group documents by label
+        result: Dict[str, List[List[str]]] = {}
+        for label, doc in zip(labels, documents):
+            if not isinstance(label, str):
+                raise TypeError(f"labels must be strings, got {type(label).__name__}")
+            if label not in result:
+                result[label] = []
+            result[label].append(doc)
+        
+        return result
     
     def predict(
         self, 
@@ -322,23 +473,23 @@ class Stylometry:
             - In 'instance' mode: returns the k nearest documents, with their author labels
         """
         if not self._is_fitted:
-            raise RuntimeError("Model has not been fitted. Call fit() first.")
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
         
         # Validate input
-        if not isinstance(text, list):
-            raise TypeError(f"text must be a list of tokens, got {type(text).__name__}")
-        if not text:
-            raise ValueError("text cannot be empty")
-        for i, token in enumerate(text):
-            if not isinstance(token, str):
-                raise TypeError(f"Token {i} must be a string, got {type(token).__name__}")
+        self._validate_tokens(text, "text")
+        
+        # Warn if k is passed in centroid mode (it's ignored)
+        if self.mode == 'centroid' and k != 1:
+            warnings.warn(
+                f"k={k} is ignored in 'centroid' mode. All author centroids are "
+                f"compared and returned. Use mode='instance' for k-NN behavior.",
+                UserWarning
+            )
         
         # Compute z-scores for the disputed text
-        rel_freq_dict = get_relative_frequencies(text)
-        text_rel_freq = np.array([rel_freq_dict.get(f, 0.0) for f in self.features])
-        text_zscore = self._compute_zscore(text_rel_freq)
+        text_zscore = self._tokens_to_zscore(text)
         
-        distance_fn = self.DISTANCE_FUNCTIONS[self.distance]
+        distance_fn = self.DISTANCE_FUNCTIONS[self.distance_metric]
         
         if self.mode == 'centroid':
             # Compare to each author centroid
@@ -378,56 +529,72 @@ class Stylometry:
             author_counts = Counter(author for author, _ in results)
             return author_counts.most_common(1)[0][0]
     
-    def transform(self, documents: List[List[str]], labels: Optional[List[str]] = None) -> Tuple[List[np.ndarray], List[str]]:
+    def most_similar(
+        self, 
+        query: Union[str, List[str]], 
+        k: Optional[int] = None,
+    ) -> List[Tuple[str, float]]:
         """
-        Transform documents to z-score vectors (unsupervised mode).
-        
-        This is for clustering/visualization without prior fitting.
-        Computes MFW, means, and stds from the provided documents themselves.
+        Find the most similar documents to a query.
         
         Args:
-            documents: List of tokenized documents
-            labels: Optional labels for each document (defaults to Doc_1, Doc_2, ...)
+            query: Either:
+                - A document ID (str): find documents similar to this document
+                - A list of tokens: transform and find similar documents
+            k: Number of results to return. If None, returns all documents.
         
         Returns:
-            (z_score_vectors, labels)
+            List of (doc_id, distance) tuples sorted by distance ascending (most similar first).
+            If query is a doc_id, that document is excluded from results.
         """
-        if not isinstance(documents, list):
-            raise TypeError("documents must be a list")
-        if len(documents) < 2:
-            raise ValueError("Need at least 2 documents")
+        if not self._is_fitted:
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
         
-        for i, doc in enumerate(documents):
-            if not isinstance(doc, list) or len(doc) == 0:
-                raise ValueError(f"Document {i} must be a non-empty list of tokens")
+        query_zscore, query_doc_id = self._resolve_to_zscore(query)
+        distance_fn = self.DISTANCE_FUNCTIONS[self.distance_metric]
         
-        if labels is None:
-            labels = [f"Doc_{i+1}" for i in range(len(documents))]
-        elif len(labels) != len(documents):
-            raise ValueError("labels length must match documents length")
+        # Compute distances to all documents
+        results = []
+        for i, doc_zscore in enumerate(self.document_zscores):
+            doc_id = self.document_ids[i]
+            # Skip self if query was a doc_id
+            if query_doc_id is not None and doc_id == query_doc_id:
+                continue
+            dist = distance_fn(query_zscore, doc_zscore)
+            results.append((doc_id, float(dist)))
         
-        # Extract features from these documents
-        features = extract_mfw(documents, self.n_features)
-        if len(features) == 0:
-            raise ValueError("No features extracted")
+        # Sort by distance
+        results.sort(key=lambda x: x[1])
         
-        # Compute relative frequencies
-        rel_freq_vectors = []
-        for doc in documents:
-            rel_freq_dict = get_relative_frequencies(doc)
-            rel_freq_vec = np.array([rel_freq_dict.get(f, 0.0) for f in features])
-            rel_freq_vectors.append(rel_freq_vec)
+        # Limit results
+        if k is not None:
+            results = results[:k]
         
-        # Compute means and stds
-        rel_freq_matrix = np.array(rel_freq_vectors)
-        means = np.mean(rel_freq_matrix, axis=0)
-        stds = np.std(rel_freq_matrix, axis=0)
-        stds[stds < 1e-10] = 1.0
+        return results
+    
+    def distance(
+        self, 
+        a: Union[str, List[str]], 
+        b: Union[str, List[str]],
+    ) -> float:
+        """
+        Compute the distance between two documents or texts.
         
-        # Compute z-scores
-        z_scores = [(rfv - means) / stds for rfv in rel_freq_vectors]
+        Args:
+            a: First document - either a doc_id (str) or list of tokens
+            b: Second document - either a doc_id (str) or list of tokens
         
-        return z_scores, labels
+        Returns:
+            Distance (float) - lower values indicate more similar texts.
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
+        
+        zscore_a, _ = self._resolve_to_zscore(a)
+        zscore_b, _ = self._resolve_to_zscore(b)
+        
+        distance_fn = self.DISTANCE_FUNCTIONS[self.distance_metric]
+        return float(distance_fn(zscore_a, zscore_b))
     
     def _compute_distance_matrix(self, vectors: List[np.ndarray]) -> np.ndarray:
         """Compute pairwise distance matrix for a list of z-score vectors."""
@@ -442,11 +609,11 @@ class Stylometry:
             'manhattan': 'cityblock',
         }
         
-        metric = metric_map[self.distance]
+        metric = metric_map[self.distance_metric]
         dist_matrix = cdist(vectors_array, vectors_array, metric=metric)
         
         # Burrows' Delta is mean absolute difference, not sum
-        if self.distance == 'burrows_delta':
+        if self.distance_metric == 'burrows_delta':
             dist_matrix = dist_matrix / vectors_array.shape[1]
         
         # Ensure diagonal is exactly zero (floating-point precision can cause tiny values)
@@ -461,7 +628,7 @@ class Stylometry:
         Returns a DataFrame with 'feature' and 'zscore' columns, sorted by z-score descending.
         """
         if not self._is_fitted:
-            raise RuntimeError("Model has not been fitted. Call fit() first.")
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
         if not isinstance(author, str):
             raise TypeError(f"author must be a string, got {type(author).__name__}")
         if author not in self.authors:
@@ -481,7 +648,7 @@ class Stylometry:
         Returns a DataFrame with one column per author plus a 'variance' column.
         """
         if not self._is_fitted:
-            raise RuntimeError("Model has not been fitted. Call fit() first.")
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
         
         data = {'feature': self.features}
         
@@ -505,24 +672,22 @@ class Stylometry:
             (distance_matrix, labels)
         """
         if not self._is_fitted:
-            raise RuntimeError("Model has not been fitted. Call fit() first.")
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
         
         vectors, labels = self._get_vectors_and_labels(level)
         return self._compute_distance_matrix(vectors), labels
     
     def hierarchical_clustering(
         self,
-        documents: Optional[List[List[str]]] = None,
-        labels: Optional[List[str]] = None,
         method: str = 'average',
         level: str = 'document',
     ) -> Tuple[np.ndarray, List[str]]:
         """
-        Perform hierarchical clustering.
+        Perform hierarchical clustering on fitted data.
         
-        Two modes:
-        - Unsupervised: Pass documents directly to cluster them (level param ignored)
-        - Supervised: Omit documents to use fitted data at the specified level
+        Args:
+            method: Linkage method - 'single', 'complete', 'average', 'weighted', or 'ward'
+            level: 'document' for individual documents, 'author' for author profiles
         
         Returns:
             (linkage_matrix, labels) for scipy dendrogram
@@ -530,17 +695,13 @@ class Stylometry:
         from scipy.cluster.hierarchy import linkage
         from scipy.spatial.distance import squareform
         
+        if not self._is_fitted:
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
+        
         if method not in self.VALID_CLUSTERING_METHODS:
             raise ValueError(f"method must be one of {self.VALID_CLUSTERING_METHODS}, got '{method}'")
         
-        if documents is not None:
-            # Unsupervised mode
-            vectors, doc_labels = self.transform(documents, labels)
-        else:
-            # Supervised mode - use fitted data
-            if not self._is_fitted:
-                raise RuntimeError("No documents provided and model not fitted. Call fit() first.")
-            vectors, doc_labels = self._get_vectors_and_labels(level)
+        vectors, doc_labels = self._get_vectors_and_labels(level)
         
         if len(vectors) < 2:
             raise ValueError("Need at least 2 items for hierarchical clustering")
@@ -553,8 +714,6 @@ class Stylometry:
     
     def plot(
         self,
-        documents: Optional[List[List[str]]] = None,
-        labels: Optional[List[str]] = None,
         method: str = 'pca',
         level: str = 'document',
         figsize: Tuple[int, int] = (10, 8),
@@ -569,30 +728,31 @@ class Stylometry:
         """
         Create a 2D scatter plot of documents or authors.
         
-        Two modes:
-        - Unsupervised: Pass documents directly (level param ignored, uniform coloring)
-        - Supervised: Omit documents to visualize fitted data (colored by author)
+        Must call fit_transform() first.
         
-        Dimensionality reduction: 'pca', 'tsne', or 'mds'.
+        Args:
+            method: Dimensionality reduction - 'pca', 'tsne', or 'mds'
+            level: 'document' for individual documents, 'author' for author profiles
+            figsize: Figure size as (width, height)
+            show_labels: Whether to show text labels on points
+            title: Custom title (auto-generated if None)
+            colors: Dict mapping author names to colors
+            marker_size: Size of scatter points
+            fontsize: Base font size
+            filename: If provided, save figure to this path
+            random_state: Random seed for t-SNE/MDS
         """
         import matplotlib
+        
+        if not self._is_fitted:
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
         
         if method not in ('pca', 'tsne', 'mds'):
             raise ValueError(f"method must be 'pca', 'tsne', or 'mds', got '{method}'")
         
-        is_unsupervised = documents is not None
-        
-        if is_unsupervised:
-            vectors, doc_labels = self.transform(documents, labels)
-            author_for_point = None
-            unique_authors = None
-        else:
-            if not self._is_fitted:
-                raise RuntimeError("No documents provided and model not fitted. Call fit() first.")
-            
-            vectors, doc_labels = self._get_vectors_and_labels(level)
-            author_for_point = self.document_labels if level == 'document' else self.authors
-            unique_authors = self.authors
+        vectors, doc_labels = self._get_vectors_and_labels(level)
+        author_for_point = self.document_labels if level == 'document' else self.authors
+        unique_authors = self.authors
         
         vectors = np.array(vectors)
         
@@ -607,6 +767,9 @@ class Stylometry:
             coords = np.column_stack([coords.flatten(), np.zeros(len(vectors))])
         
         fig, ax = plt.subplots(figsize=figsize)
+        
+        # Check if unsupervised (single 'unk' author)
+        is_unsupervised = len(unique_authors) == 1 and unique_authors[0] == 'unk'
         
         if is_unsupervised:
             self._plot_unsupervised(ax, coords, doc_labels, show_labels, marker_size, fontsize)
@@ -623,7 +786,7 @@ class Stylometry:
         if title:
             ax.set_title(title, fontsize=fontsize + 4)
         else:
-            mode_str = 'Documents' if is_unsupervised else ('Documents' if level == 'document' else 'Authors')
+            mode_str = 'Documents' if level == 'document' else 'Authors'
             ax.set_title(f'Stylometric {mode_str} Analysis ({method.upper()})', fontsize=fontsize + 4)
         
         ax.grid(True, alpha=0.3, linestyle='--')
@@ -732,8 +895,6 @@ class Stylometry:
     
     def dendrogram(
         self,
-        documents: Optional[List[List[str]]] = None,
-        labels: Optional[List[str]] = None,
         method: str = 'average',
         level: str = 'document',
         orientation: str = 'top',
@@ -744,19 +905,26 @@ class Stylometry:
         """
         Visualize hierarchical clustering as a dendrogram.
         
-        Two modes:
-        - Unsupervised: Pass documents directly (level param ignored)
-        - Supervised: Omit documents to use fitted data
+        Must call fit_transform() first.
+        
+        Args:
+            method: Linkage method - 'single', 'complete', 'average', 'weighted', or 'ward'
+            level: 'document' for individual documents, 'author' for author profiles
+            orientation: Dendrogram orientation - 'top', 'bottom', 'left', or 'right'
+            figsize: Figure size as (width, height)
+            fontsize: Font size for labels
+            filename: If provided, save figure to this path
         """
         from scipy.cluster.hierarchy import dendrogram as scipy_dendrogram
+        
+        if not self._is_fitted:
+            raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
         
         valid_orientations = ('top', 'bottom', 'left', 'right')
         if orientation not in valid_orientations:
             raise ValueError(f"orientation must be one of {valid_orientations}, got '{orientation}'")
         
         linkage_matrix, doc_labels = self.hierarchical_clustering(
-            documents=documents,
-            labels=labels,
             method=method,
             level=level,
         )
@@ -770,8 +938,7 @@ class Stylometry:
             ax=ax,
         )
         
-        is_unsupervised = documents is not None
-        mode_str = 'Unsupervised' if is_unsupervised else ('Document' if level == 'document' else 'Author')
+        mode_str = 'Document' if level == 'document' else 'Author'
         ax.set_title(f'Stylometric {mode_str} Clustering (method={method})', fontsize=fontsize + 4)
         
         plt.tight_layout()
