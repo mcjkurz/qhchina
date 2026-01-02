@@ -85,7 +85,7 @@ Fit the model on a corpus and transform documents to z-score vectors.
   | `['ch1', 'ch2', 'ch3']` | Each doc is its own group (useful for clustering) |
   | `None` | All docs grouped as `{'unk': [doc1, doc2, ...]}` |
 
-Document IDs are auto-generated as `{label}_{n}` (e.g., `author_a_1`, `author_a_2`, `unk_1`).
+Document IDs are generated based on grouping: when a label has only one document, the label is used directly as the ID (e.g., `chapter1`). When multiple documents share a label, IDs are suffixed with numbers (e.g., `author_a_1`, `author_a_2`).
 
 **Returns:** self (for method chaining)
 
