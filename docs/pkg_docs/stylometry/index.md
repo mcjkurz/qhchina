@@ -13,13 +13,25 @@ The `qhchina.analytics.stylometry` module provides tools for authorship attribut
 ```python
 from qhchina.analytics.stylometry import Stylometry
 
+# Corpus: dict mapping author names to lists of tokenized documents
+corpus = {
+    '鲁迅': [
+        ['照', '我', '自己', '想', '虽然', '不', '是', '恶人', ...],
+        ['当初', '他', '还', '只是', '冷笑', '随后', '眼光', '便', '凶狠', '起来', ...],
+    ],
+    '沈从文': [
+        ['小溪', '流', '下去', '绕', '山岨', '流', ...],
+        ['那', '条', '河水', '便是', '历史', '上', '知名', '的', '酉水', ...],
+    ],
+}
+
 stylo = Stylometry(n_features=100, distance='cosine')
-stylo.fit_transform({'author_a': [tokens_a1, tokens_a2], 'author_b': [tokens_b1, tokens_b2]})
+stylo.fit_transform(corpus)
 
 # Analyze the transformed data
 predicted = stylo.predict_author(unknown_text)  # Predict authorship
-similar = stylo.most_similar('author_a_1')      # Find similar documents
-dist = stylo.distance('author_a_1', 'author_b_1')  # Compare two documents
+similar = stylo.most_similar('鲁迅_1')          # Find similar documents
+dist = stylo.distance('鲁迅_1', '沈从文_1')      # Compare two documents
 ```
 
 ---
