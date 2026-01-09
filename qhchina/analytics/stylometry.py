@@ -515,7 +515,7 @@ class Stylometry:
         self, 
         corpus: Union[Dict[str, List[List[str]]], List[List[str]]],
         labels: Optional[List[str]] = None,
-    ) -> 'Stylometry':
+    ) -> None:
         """
         Fit the model on a corpus and transform documents to feature vectors.
         
@@ -536,9 +536,6 @@ class Stylometry:
         5. Compute feature vectors for each document
         6. Apply transformation (z-score or TF-IDF)
         7. Compute author centroids (if mode='centroid')
-        
-        Returns:
-            self (for method chaining)
         """
         # Convert list input to dict format
         if isinstance(corpus, list):
@@ -700,7 +697,6 @@ class Stylometry:
         self._svm_model = None
         
         self._is_fitted = True
-        return self
     
     def transform(self, tokens: List[str], warn_oov: bool = True) -> np.ndarray:
         """
@@ -843,7 +839,7 @@ class Stylometry:
         classes = self._svm_model.classes_
         
         # Sort by probability (descending)
-        results = [(cls, float(prob)) for cls, prob in zip(classes, probas)]
+        results = [(str(cls), float(prob)) for cls, prob in zip(classes, probas)]
         results.sort(key=lambda x: x[1], reverse=True)
         
         return results[:k]
@@ -1024,7 +1020,7 @@ class Stylometry:
                 distribution[author] = 0.0
         
         distances_stats = {
-            author: (np.mean(dists), np.std(dists))
+            author: (float(np.mean(dists)), float(np.std(dists)))
             for author, dists in author_distances.items()
         }
         

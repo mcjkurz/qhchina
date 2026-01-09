@@ -6,7 +6,7 @@ permalink: /pkg_docs/stylometry/
 
 # Stylometry
 
-The `qhchina.analytics.stylometry` module provides tools for authorship attribution and document clustering using statistical analysis of writing style.
+The `qhchina.analytics.stylometry` module provides tools for authorship attribution and document clustering using statistical analysis of writing style. By default, the module uses z-score normalization to transform word frequencies, which standardizes feature values across documents and makes them comparable regardless of document length.
 
 > **Note:** This module is inspired by the R package [stylo](https://github.com/computationalstylistics/stylo), a much more comprehensive implementation for computational stylistics.
 
@@ -431,7 +431,7 @@ stylo = Stylometry(n_features=100, distance='cosine', mode='centroid')
 stylo.fit_transform(corpus)
 
 # Predict authorship for an unknown text
-unknown_text = ['这', '篇', '文章', '的', '作者', '是', '谁', '...']
+unknown_text = ['他', '终于', '在', '无物', '之', '阵', '中', '老衰', '，', ...]
 results = stylo.predict(unknown_text)  # Returns top 1 author
 for author, distance in results:
     print(f"{author}: {distance:.4f}")

@@ -99,7 +99,7 @@ def set_font(font='Noto Sans CJK TC') -> None:
     except Exception as e:
         raise ValueError(f"Error setting font '{resolved_font}' (from input: '{font}')") from e
 
-def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> list[dict]:
+def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> list[dict] | None:
     """
     Load CJK fonts into matplotlib and optionally set a default font.
     
@@ -108,13 +108,15 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
                      - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
                      - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
                      - None: Load fonts but don't set a default
-        verbose: If True, print detailed loading information
+        verbose: If True, print detailed loading information and return font info
     
     Returns:
-        list[dict]: List of dictionaries, each containing:
-                    - 'font_name': Full font name (e.g., 'Noto Sans CJK TC')
-                    - 'aliases': List of aliases for the font (e.g., ['sans', 'sans-tc'])
-                    - 'path': Absolute path to the font file
+        list[dict] | None: Only when verbose=True, returns a list of dictionaries,
+                           each containing:
+                           - 'font_name': Full font name (e.g., 'Noto Sans CJK TC')
+                           - 'aliases': List of aliases for the font (e.g., ['sans', 'sans-tc'])
+                           - 'path': Absolute path to the font file
+                           When verbose=False, returns None.
     
     Raises:
         OSError: If fonts cannot be copied to matplotlib directory.
@@ -168,15 +170,15 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
             font_to_aliases[font_name] = []
         font_to_aliases[font_name].append(alias)
     
-    font_info_list = []
-    for font_name, font_file in FONT_FILES.items():
-        font_info_list.append({
-            'font_name': font_name,
-            'aliases': font_to_aliases.get(font_name, []),
-            'path': str(MPL_FONT_PATH / font_file)
-        })
-    
-    return font_info_list
+    if verbose:
+        font_info_list = []
+        for font_name, font_file in FONT_FILES.items():
+            font_info_list.append({
+                'font_name': font_name,
+                'aliases': font_to_aliases.get(font_name, []),
+                'path': str(MPL_FONT_PATH / font_file)
+            })
+        return font_info_list
 
 def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
     """
