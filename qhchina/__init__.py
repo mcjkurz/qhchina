@@ -17,7 +17,11 @@ __version__ = _get_version("qhchina")
 # Users can customize this by getting the logger and adding handlers/formatters
 logger = logging.getLogger("qhchina")
 
-# Set up a default handler if none exists (NullHandler prevents "No handler found" warnings)
+# Prevent propagation to root logger to avoid duplicate output in notebook 
+# environments (Colab, Jupyter) where the root logger has its own handlers
+logger.propagate = False
+
+# Set up a default handler if none exists
 if not logger.handlers:
     # Add a StreamHandler that outputs to console by default
     _handler = logging.StreamHandler()

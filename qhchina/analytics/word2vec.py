@@ -1390,9 +1390,9 @@ class Word2Vec:
                                 elapsed = time.time() - epoch_start_time
                                 ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
                                 if decay_alpha:
-                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
+                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
                                 else:
-                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
                         else:
                             if decay_alpha:
                                 postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
@@ -1458,9 +1458,9 @@ class Word2Vec:
                                 elapsed = time.time() - epoch_start_time
                                 ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
                                 if decay_alpha:
-                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
+                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
                                 else:
-                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
                         else:
                             if decay_alpha:
                                 postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}"
@@ -1482,7 +1482,7 @@ class Word2Vec:
             recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
             elapsed = time.time() - epoch_start_time
             ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
-            logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch} | avg_loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch} | avg_loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
         
         return epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha
 
