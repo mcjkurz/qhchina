@@ -99,7 +99,7 @@ Stylometry(n_features=100, ngram_range=(1, 1), ngram_type='word', transform='zsc
 fit_transform(corpus, labels=None)
 ```
 
-Fit the model on a corpus and transform documents to z-score vectors.
+Fit the model on a corpus and transform documents to feature vectors (z-score or TF-IDF, depending on `transform` parameter).
 
 **Parameters:**
 - `corpus`: Either:
@@ -123,12 +123,12 @@ Document IDs are generated based on grouping: when a label has only one document
 transform(tokens)
 ```
 
-Transform a tokenized text to a z-score vector using fitted features. This allows you to transform new documents without modifying the model's internal state.
+Transform a tokenized text to a feature vector using fitted features. This allows you to transform new documents without modifying the model's internal state.
 
 **Parameters:**
 - `tokens` (list): List of tokens (a tokenized document)
 
-**Returns:** (numpy.ndarray) Z-score vector of shape (n_features,)
+**Returns:** (numpy.ndarray) Feature vector of shape (n_features,)
 
 <br>
 
@@ -221,12 +221,12 @@ Compute the distance between two documents. Lower = more similar.
 get_author_profile(author)
 ```
 
-Get the z-score normalized feature values for a specific author.
+Get the feature values for a specific author.
 
 **Parameters:**
 - `author` (str): Author name
 
-**Returns:** (DataFrame) DataFrame with 'feature' and 'zscore' columns, sorted by z-score descending
+**Returns:** (DataFrame) DataFrame with 'feature' and 'value' columns, sorted by value descending
 
 <br>
 
@@ -234,7 +234,7 @@ Get the z-score normalized feature values for a specific author.
 get_feature_comparison()
 ```
 
-Get a comparison table of feature z-scores across all fitted authors.
+Get a comparison table of feature values across all fitted authors.
 
 **Returns:** (DataFrame) DataFrame with one column per author plus a 'variance' column
 
@@ -343,11 +343,11 @@ Extract the n Most Frequent n-grams from a Counter.
 burrows_delta(vec_a, vec_b)
 ```
 
-Burrows' Delta distance: the mean absolute difference between z-score vectors. A classic stylometric measure.
+Burrows' Delta distance: the mean absolute difference between z-score vectors. A classic stylometric measure. Note: This function is designed for z-score normalized vectors; for best results, use `transform='zscore'` when creating the Stylometry instance.
 
 **Parameters:**
-- `vec_a` (numpy.ndarray): First z-score vector
-- `vec_b` (numpy.ndarray): Second z-score vector
+- `vec_a` (numpy.ndarray): First feature vector (ideally z-score normalized)
+- `vec_b` (numpy.ndarray): Second feature vector (ideally z-score normalized)
 
 **Returns:** (float) Distance value (lower = more similar)
 
