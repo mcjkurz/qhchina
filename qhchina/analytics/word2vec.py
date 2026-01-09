@@ -1161,9 +1161,11 @@ class Word2Vec:
               epochs: int = 1, 
               alpha: Optional[float] = None,
               min_alpha: Optional[float] = None,
+              total_examples: Optional[int] = None,
               batch_size: int = 2000, 
               callbacks: List[Callable] = None,
-              calculate_loss: bool = True) -> Optional[float]:
+              calculate_loss: bool = True,
+              verbose: Optional[int] = None) -> Optional[float]:
         """
         Train word2vec model on given sentences.
         
@@ -1172,11 +1174,21 @@ class Word2Vec:
         sentences: List or iterator of tokenized sentences (lists of words)
         epochs: Number of training iterations over the corpus
         alpha: Initial learning rate
-        min_alpha: Minimum allowed learning rate
-        batch_size: Batch size for training; if 0, no batching is used; default is 2000;
+        min_alpha: Minimum allowed learning rate. When provided, enables learning rate decay
+            from `alpha` down to `min_alpha` over the course of training. By default, this
+            requires counting the total number of training examples upfront to calculate
+            the decay schedule (which can be slow). Use `total_examples` to skip counting.
+        total_examples: Total number of training examples per epoch. When provided along
+            with `min_alpha`, skips the automatic counting step and uses this value for
+            learning rate decay scheduling. This is useful when you already know the
+            corpus size or want to control the decay rate independently of corpus size.
+        batch_size: Batch size for training; if 0, no batching is used; default is 2000
         callbacks: List of callback functions to call after each epoch
         calculate_loss: Whether to calculate and return the final loss
-        
+        verbose: Controls logging frequency. If None, no batch-level logging in simple mode.
+            If an integer, logs progress every `verbose` batches (when batched) or every
+            `verbose * 1000` examples (when not batched).
+            
         Returns:
         --------
         Final loss value if calculate_loss is True, None otherwise
@@ -1196,8 +1208,9 @@ class Word2Vec:
         decay_alpha = self.min_alpha is not None
 
         # Convert iterator to list if we need multiple epochs (for shuffling)
-        # or if we need to count examples for learning rate decay
-        if epochs > 1 or decay_alpha:
+        # or if we need to count examples for learning rate decay (and total_examples not provided)
+        needs_counting = decay_alpha and total_examples is None
+        if epochs > 1 or needs_counting:
             if not isinstance(sentences, list):
                 logger.info("Converting iterator to list for multi-epoch training...")
                 sentences = list(sentences)
@@ -1223,11 +1236,18 @@ class Word2Vec:
         # Count total examples if needed for learning rate decay
         examples_per_epoch = None
         if decay_alpha:
-            logger.info(f"Counting total examples for learning rate decay (starting alpha = {self.alpha}, min_alpha = {self.min_alpha})...")
-            for _ in self._generate_examples(sentences):
-                total_example_count += 1
-            examples_per_epoch = total_example_count
-            total_example_count *= epochs
+            if total_examples is not None:
+                # User provided the count, skip counting
+                examples_per_epoch = total_examples
+                total_example_count = total_examples * epochs
+                logger.info(f"Using provided total_examples={total_examples} for learning rate decay (alpha={self.alpha} -> min_alpha={self.min_alpha})")
+            else:
+                # Count examples automatically
+                logger.info(f"Counting total examples for learning rate decay (alpha={self.alpha} -> min_alpha={self.min_alpha})...")
+                for _ in self._generate_examples(sentences):
+                    total_example_count += 1
+                examples_per_epoch = total_example_count
+                total_example_count *= epochs
 
         total_examples_processed = 0
         current_alpha = start_alpha = self.alpha
@@ -1262,6 +1282,7 @@ class Word2Vec:
                     start_alpha=start_alpha,
                     calculate_loss=calculate_loss,
                     recent_losses=recent_losses,
+                    verbose=verbose,
                 )
                 
             # Add epoch loss to total
@@ -1296,6 +1317,7 @@ class Word2Vec:
         start_alpha: float,
         calculate_loss: bool,
         recent_losses: List[float],
+        verbose: Optional[int] = None,
     ) -> Tuple[float, int, int, int, float]:
         """
         Train for one epoch. Unified implementation for both Skip-gram and CBOW.
@@ -1307,6 +1329,11 @@ class Word2Vec:
         epoch_loss = 0.0
         examples_processed_in_epoch = 0
         batch_count = 0
+        epoch_start_time = time.time()
+        
+        def current_time_str() -> str:
+            """Get current time as HH:MM:SS"""
+            return time.strftime("%H:%M:%S")
         
         # Constants for progress reporting
         LOSS_HISTORY_SIZE = 100 if batch_size > 0 else 1000
@@ -1358,12 +1385,14 @@ class Word2Vec:
                         recent_avg = sum(recent_losses) / len(recent_losses)
                         
                         if use_simple_logging:
-                            # Log every 10 batches for unknown total
-                            if batch_count % 10 == 0:
+                            # Log every `verbose` batches for unknown total (if verbose is set)
+                            if verbose is not None and batch_count % verbose == 0:
+                                elapsed = time.time() - epoch_start_time
+                                ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
                                 if decay_alpha:
-                                    logger.info(f"Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | lr={current_alpha:.6f}")
+                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
                                 else:
-                                    logger.info(f"Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f}")
+                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
                         else:
                             if decay_alpha:
                                 postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
@@ -1424,11 +1453,14 @@ class Word2Vec:
                         recent_avg = sum(recent_losses) / len(recent_losses)
                         
                         if use_simple_logging:
-                            if examples_processed_in_epoch % 10000 == 0:
+                            # Log every `verbose * 1000` examples (if verbose is set)
+                            if verbose is not None and examples_processed_in_epoch % (verbose * 1000) == 0:
+                                elapsed = time.time() - epoch_start_time
+                                ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
                                 if decay_alpha:
-                                    logger.info(f"Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | lr={current_alpha:.6f}")
+                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
                                 else:
-                                    logger.info(f"Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f}")
+                                    logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
                         else:
                             if decay_alpha:
                                 postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}"
@@ -1448,7 +1480,9 @@ class Word2Vec:
         # Log epoch summary for simple logging mode
         if use_simple_logging and calculate_loss:
             recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
-            logger.info(f"Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch} | avg_loss={recent_avg:.6f}")
+            elapsed = time.time() - epoch_start_time
+            ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
+            logger.info(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch} | avg_loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
         
         return epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha
 

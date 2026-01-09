@@ -52,6 +52,7 @@ Word2Vec(vector_size=100, window=5, min_word_count=5, sg=1, negative=5,
 - `min_word_count` (int): Ignores words with frequency below threshold (default: 5)
 - `sg` (int): Training algorithm: 1 for Skip-gram, 0 for CBOW (default: 1)
 - `alpha` (float): Initial learning rate (default: 0.025)
+- `min_alpha` (float): Minimum learning rate for decay. When provided, enables learning rate decay from `alpha` down to `min_alpha` over training. This requires counting the total number of training examples upfront to calculate the decay schedule, so expect a brief delay before training begins.
 - `negative` (int): Number of negative samples (default: 5)
 - `sample` (float): Threshold for downsampling frequent words (default: 1e-3)
 - `seed` (int): Random seed for reproducibility (default: 1)
@@ -73,7 +74,7 @@ Build vocabulary from tokenized sentences.
 <br>
 
 ```python
-train(sentences, epochs=5, batch_size=2000)
+train(sentences, epochs=5, batch_size=2000, total_examples=None, verbose=None)
 ```
 
 Train the Word2Vec model.
@@ -82,6 +83,8 @@ Train the Word2Vec model.
 - `sentences` (list): List of tokenized sentences
 - `epochs` (int): Number of training epochs
 - `batch_size` (int): Batch size for training (default: 2000)
+- `total_examples` (int, optional): Total training examples per epoch. When provided with `min_alpha`, skips the automatic counting step and uses this value for learning rate decay scheduling
+- `verbose` (int, optional): Controls logging frequency. If `None`, no batch-level logging in simple mode. If an integer, logs progress every `verbose` batches (e.g., `verbose=100` logs every 100 batches)
 
 <br>
 
