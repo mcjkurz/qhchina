@@ -1,13 +1,16 @@
 # qhChina
 
-A Python package for NLP tasks related to Chinese text analysis.
+A Python toolkit for computational analysis of Chinese texts in humanities research.
 
 ## Features
 
-- **Collocation Analysis**: Find significant word co-occurrences with optimized Cython implementation
-- **Topic Modeling**: Fast LDA implementation with Cython acceleration
-- **Corpus Comparison**: Statistical comparison of different text corpora
-- **Word Embeddings**: Work with Word2Vec and other embedding models
+- **Preprocessing**: Chinese text segmentation with multiple backends (spaCy, Jieba, BERT, LLM)
+- **Word Embeddings**: Word2Vec training and temporal semantic change analysis (TempRefWord2Vec)
+- **Topic Modeling**: LDA with Gibbs sampling and Cython acceleration
+- **Stylometry**: Authorship attribution and document clustering
+- **Collocations**: Statistical collocation analysis and co-occurrence matrices
+- **Corpus Comparison**: Identify significant vocabulary differences between corpora
+- **Helpers**: CJK font management, text loading, stopwords
 
 ## Installation
 
@@ -19,9 +22,12 @@ pip install qhchina
 
 Full documentation and examples: [www.qhchina.org](https://www.qhchina.org)
 
-## Repository Structure
+## Tests
 
-The package source code is in the `qhchina` folder.
+```bash
+pip install pytest
+pytest tests/
+```
 
 ## License
 
