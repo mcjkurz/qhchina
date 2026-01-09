@@ -50,16 +50,31 @@ The main class for stylometric analysis supports both supervised (with labeled t
 ### Initialization
 
 ```python
-Stylometry(n_features=100, distance='cosine', mode='centroid')
+Stylometry(n_features=100, ngram_range=(1, 1), ngram_type='word', transform='zscore',
+           distance='cosine', classifier='delta', cull=None, chunk_size=None, mode='centroid')
 ```
 
 **Parameters:**
-- `n_features` (int): Number of most frequent words to use as features (default: 100)
+- `n_features` (int): Number of most frequent n-grams to use as features (default: 100)
+- `ngram_range` (tuple): Range of n-gram sizes as (min_n, max_n). Default (1, 1) = unigrams only. Use (1, 2) for unigrams + bigrams, (2, 3) for bigrams + trigrams, etc.
+- `ngram_type` (str): Type of n-grams to extract
+  - `'word'`: Word n-grams (default) - e.g., "the cat" for bigrams
+  - `'char'`: Character n-grams - e.g., "th", "he" for bigrams of "the". Useful for short texts, cross-language analysis, or capturing morphological patterns.
+- `transform` (str): Feature transformation method
+  - `'zscore'`: Z-score normalization (default)
+  - `'tfidf'`: TF-IDF weighting
 - `distance` (str): Distance metric for comparison
   - `'cosine'`: Cosine distance (default)
   - `'burrows_delta'`: Burrows' Delta (classic stylometric measure)
   - `'manhattan'`: Manhattan (L1) distance
-- `mode` (str): Attribution mode for supervised analysis
+  - `'euclidean'`: Euclidean (L2) distance
+  - `'eder_delta'`: Eder's Delta (weighted variant of Burrows' Delta)
+- `classifier` (str): Classification method
+  - `'delta'`: Delta-based attribution (default)
+  - `'svm'`: Support Vector Machine classification
+- `cull` (float): Minimum document frequency ratio (0.0-1.0). N-grams appearing in fewer than cull×100% of documents are removed before feature selection. Default: None (no culling)
+- `chunk_size` (int): If set, split documents into chunks of this many tokens before analysis. Useful for analyzing long documents. Default: None
+- `mode` (str): Attribution mode for delta classifier
   - `'centroid'`: Aggregate all author texts into one profile per author (default)
   - `'instance'`: Keep individual texts separate (k-NN style)
 
@@ -298,41 +313,96 @@ Visualize hierarchical clustering as a dendrogram.
 ## Utility Functions
 
 ```python
-extract_mfw(texts, n=100)
+extract_mfw(ngram_counts, n=100)
 ```
 
-Extract the n Most Frequent Words from a collection of tokenized texts.
+Extract the n Most Frequent n-grams from a Counter.
 
 **Parameters:**
-- `texts` (list): List of tokenized documents
-- `n` (int): Number of most frequent words to extract
+- `ngram_counts` (Counter): A Counter object containing n-gram counts
+- `n` (int): Number of most frequent n-grams to extract
 
-**Returns:** (list) List of the n most common words
+**Returns:** (list) List of the n most common n-grams
 
-<br>
+---
 
 ```python
 burrows_delta(vec_a, vec_b)
 ```
 
-Burrows' Delta distance: the mean absolute difference between z-score vectors.
+Burrows' Delta distance: the mean absolute difference between z-score vectors. A classic stylometric measure.
+
+**Parameters:**
+- `vec_a` (numpy.ndarray): First z-score vector
+- `vec_b` (numpy.ndarray): Second z-score vector
 
 **Returns:** (float) Distance value (lower = more similar)
 
-<br>
+---
+
+```python
+cosine_distance(vec_a, vec_b)
+```
+
+Cosine distance: 1 - cosine_similarity.
+
+**Returns:** (float) Distance value (0 = identical, 2 = opposite)
+
+---
+
+```python
+manhattan_distance(vec_a, vec_b)
+```
+
+Manhattan (L1) distance: sum of absolute differences.
+
+**Returns:** (float) Distance value (lower = more similar)
+
+---
+
+```python
+euclidean_distance(vec_a, vec_b)
+```
+
+Euclidean (L2) distance: square root of sum of squared differences.
+
+**Returns:** (float) Distance value (lower = more similar)
+
+---
+
+```python
+eder_delta(vec_a, vec_b)
+```
+
+Eder's Delta distance: a variation of Burrows' Delta with different weighting. Squares the differences and takes the square root of the mean, giving more weight to larger differences.
+
+**Returns:** (float) Distance value (lower = more similar)
+
+---
 
 ```python
 get_relative_frequencies(tokens)
 ```
 
-Compute relative word frequencies for a tokenized text.
+Compute relative frequencies for a list of tokens.
 
 **Parameters:**
 - `tokens` (list): List of tokens
 
-**Returns:** (dict) Mapping of words to relative frequencies
+**Returns:** (dict) Mapping of tokens to relative frequencies (count / total)
 
-<br>
+---
+
+```python
+compute_yule_k(tokens)
+```
+
+Compute Yule's K characteristic for vocabulary richness. Higher values indicate less diverse vocabulary. Relatively independent of text length.
+
+**Parameters:**
+- `tokens` (list): List of tokens
+
+**Returns:** (float) Yule's K value (typically between 50-200 for normal texts)
 
 ---
 

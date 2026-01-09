@@ -99,3 +99,110 @@ div[class^="language-"] {
 .highlight .kn { 
   font-weight: bold;
 }
+
+// =====================================================
+// Documentation function separators and styling
+// =====================================================
+
+// Horizontal rules as section separators - subtle gradient
+.docs-content hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border-color) 20%, var(--border-color) 80%, transparent);
+  margin: 2.5rem 0;
+}
+
+// Function signature code blocks - add left border accent for visual distinction
+.docs-content > div[class^="language-python"],
+.docs-content > .language-python,
+.docs-content > .highlighter-rouge.language-python {
+  border-left: 3px solid var(--primary-color);
+  border-radius: 0 4px 4px 0;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+// Make sure the inner highlight also has the proper styling
+.docs-content > div[class^="language-python"] .highlight,
+.docs-content > .highlighter-rouge.language-python .highlight {
+  padding-left: 1rem;
+  border-left: none;
+}
+
+// Better spacing between function blocks
+// When a code block follows a paragraph (new function after previous description)
+.docs-content > p + div[class^="language-python"],
+.docs-content > p + .highlighter-rouge.language-python {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px dashed var(--border-color);
+}
+
+// When a code block follows a list (parameters list)
+.docs-content > ul + div[class^="language-python"],
+.docs-content > ul + .highlighter-rouge.language-python {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px dashed var(--border-color);
+}
+
+// Add subtle visual separator after code blocks in documentation
+.docs-content > div[class^="language-"] + p,
+.docs-content > .highlight + p,
+.docs-content > .highlighter-rouge + p {
+  margin-top: 1rem;
+}
+
+// Lists in documentation - better spacing
+.docs-content ul {
+  margin-bottom: 1rem;
+}
+
+.docs-content ul li {
+  margin-bottom: 0.4rem;
+  line-height: 1.7;
+}
+
+// Nested list items (for parameter options)
+.docs-content ul ul {
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+  margin-left: 1.5rem;
+}
+
+// Code within text - ensure proper display
+.docs-content code {
+  background-color: #f5f5f5;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+  color: #c7254e;
+}
+
+// Code in headers should be more subtle
+.docs-content h2 code,
+.docs-content h3 code {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+// Better paragraph spacing after lists
+.docs-content ul + p,
+.docs-content ol + p {
+  margin-top: 1.5rem;
+}
+
+// Section headers - more prominent
+.docs-content h3 {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+// First h3 after h2 doesn't need the extra top border
+.docs-content h2 + h3 {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 1.5rem;
+}

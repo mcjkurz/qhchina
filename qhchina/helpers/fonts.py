@@ -99,7 +99,7 @@ def set_font(font='Noto Sans CJK TC') -> None:
     except Exception as e:
         raise ValueError(f"Error setting font '{resolved_font}' (from input: '{font}')") from e
 
-def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> str:
+def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> list[dict]:
     """
     Load CJK fonts into matplotlib and optionally set a default font.
     
@@ -111,7 +111,10 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
         verbose: If True, print detailed loading information
     
     Returns:
-        str: Path to the font file (for use with WordCloud, etc.)
+        list[dict]: List of dictionaries, each containing:
+                    - 'font_name': Full font name (e.g., 'Noto Sans CJK TC')
+                    - 'aliases': List of aliases for the font (e.g., ['sans', 'sans-tc'])
+                    - 'path': Absolute path to the font file
     
     Raises:
         OSError: If fonts cannot be copied to matplotlib directory.
@@ -156,10 +159,24 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
                 logger.info(f"Resolving alias '{target_font}' to '{resolved_font}'")
             logger.info(f"Setting font to: {resolved_font}")
         set_font(target_font)
-        return get_font_path(target_font)
     
-    # Return default font path if no target_font specified
-    return get_font_path('Noto Sans CJK TC')
+    # Build list of font info dictionaries
+    # Create reverse mapping: font_name -> list of aliases
+    font_to_aliases = {}
+    for alias, font_name in FONT_ALIASES.items():
+        if font_name not in font_to_aliases:
+            font_to_aliases[font_name] = []
+        font_to_aliases[font_name].append(alias)
+    
+    font_info_list = []
+    for font_name, font_file in FONT_FILES.items():
+        font_info_list.append({
+            'font_name': font_name,
+            'aliases': font_to_aliases.get(font_name, []),
+            'path': str(MPL_FONT_PATH / font_file)
+        })
+    
+    return font_info_list
 
 def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
     """

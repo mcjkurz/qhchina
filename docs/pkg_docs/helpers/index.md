@@ -25,6 +25,24 @@ Load CJK fonts into matplotlib and set a default font.
   - `None`: Load bundled fonts only without setting a default
 - `verbose` (bool): Print detailed loading information
 
+**Returns:** (list[dict]) List of dictionaries, each containing:
+- `'font_name'`: Full font name (e.g., `'Noto Sans CJK TC'`)
+- `'aliases'`: List of aliases for the font (e.g., `['sans', 'sans-tc', 'sans-sc']`)
+- `'path'`: Absolute path to the font file
+
+**Example:**
+
+```python
+from qhchina.helpers import load_fonts
+
+fonts = load_fonts()
+for font in fonts:
+    print(f"{font['font_name']}: {font['aliases']}")
+    # Noto Sans CJK TC: ['sans', 'sans-tc', 'sans-sc']
+    # Noto Serif TC: ['serif-tc']
+    # Noto Serif SC: ['serif-sc']
+```
+
 <br>
 
 ```python
@@ -68,7 +86,41 @@ Get dictionary of font aliases and their corresponding names.
 
 **Returns:** (dict) Mapping of aliases to full font names
 
-<br>
+---
+
+```python
+get_font_path(font='Noto Sans CJK TC')
+```
+
+Get the file path for a CJK font. Useful when you need to pass a font path to external libraries like WordCloud.
+
+**Parameters:**
+- `font` (str): Font name or alias. Options:
+  - Bundled fonts: `'sans'`, `'sans-tc'`, `'sans-sc'`, `'serif-tc'`, `'serif-sc'`, or full names: `'Noto Sans CJK TC'`, `'Noto Serif TC'`, `'Noto Serif SC'`
+
+**Returns:** (str) Absolute path to the font file
+
+**Example:**
+
+```python
+from qhchina.helpers import load_fonts, get_font_path
+from wordcloud import WordCloud
+
+# Load fonts first - returns info about all loaded fonts
+fonts = load_fonts()
+
+# Get font path for WordCloud using get_font_path
+font_path = get_font_path('sans')
+wc = WordCloud(font_path=font_path, width=800, height=400)
+
+# Or use the path directly from load_fonts return value
+sans_font = next(f for f in fonts if f['font_name'] == 'Noto Sans CJK TC')
+wc = WordCloud(font_path=sans_font['path'], width=800, height=400)
+```
+
+Note: `get_font_path` can also be imported directly from `qhchina`.
+
+---
 
 ### Available Fonts
 

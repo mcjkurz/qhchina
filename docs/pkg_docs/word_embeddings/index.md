@@ -226,7 +226,61 @@ Align source vectors with target vectors using Procrustes analysis.
 - `aligned_vectors`: The aligned source vectors
 - `transformation_matrix`: The orthogonal transformation matrix that can be used to align other vectors
 
-<br>
+---
+
+```python
+cosine_similarity(v1, v2)
+```
+
+Compute the cosine similarity between vectors. Returns 0.0 if either vector has zero norm.
+
+**Parameters:**
+- `v1` (numpy.ndarray or list): First vector or matrix of vectors
+- `v2` (numpy.ndarray or list): Second vector or matrix of vectors
+
+**Returns:** (float or numpy.ndarray) Cosine similarity score(s)
+
+---
+
+```python
+most_similar(target_vector, vectors, labels=None, metric='cosine', top_n=None)
+```
+
+Find the most similar vectors to a target vector.
+
+**Parameters:**
+- `target_vector` (numpy.ndarray): The reference vector to compare against
+- `vectors` (list or numpy.ndarray): List of vectors to compare with the target
+- `labels` (list): Optional labels corresponding to the vectors
+- `metric` (str or callable): Similarity metric - `'cosine'` or a custom callable
+- `top_n` (int): Number of top results to return (None for all)
+
+**Returns:** (list) List of (label/index, score) tuples sorted by similarity in descending order
+
+---
+
+```python
+project_bias(x, y, targets, word_vectors, title=None, color=None, 
+             figsize=(8,8), fontsize=12, filename=None, 
+             adjust_text_labels=False, disperse_y=False)
+```
+
+Plot words on a 1D or 2D chart by projecting them onto bias axes.
+
+**Parameters:**
+- `x` (tuple or list): Bias axis for x-dimension, e.g., `("man", "woman")` or list of tuples
+- `y` (tuple, list, or None): Bias axis for y-dimension. If None, creates 1D plot
+- `targets` (list): List of words to plot
+- `word_vectors`: Keyed vectors (e.g., `model.wv` from Word2Vec)
+- `title` (str): Plot title
+- `color` (str or list): Color(s) for points
+- `figsize` (tuple): Figure size
+- `fontsize` (int): Font size for labels
+- `filename` (str): Path to save the figure
+- `adjust_text_labels` (bool): Adjust text labels to avoid overlap (requires `adjustText`)
+- `disperse_y` (bool): Add random y-dispersion in 1D plot for readability
+
+---
 
 ## Examples
 

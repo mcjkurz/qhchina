@@ -24,6 +24,60 @@ pip install qhchina
 - **Corpora**: Corpus comparison and linguistic pattern identification
 - **Helpers**: Font management, text loading, and utility functions
 
+---
+
+## Global Configuration
+
+The package provides centralized configuration for logging and random number generation.
+
+### Logging
+
+Control the verbosity of package output with `set_log_level()`:
+
+```python
+import qhchina
+
+qhchina.set_log_level('WARNING')  # Only show warnings and errors
+qhchina.set_log_level('DEBUG')    # Show all messages including debug info
+qhchina.set_log_level('SILENT')   # Suppress all messages
+qhchina.set_log_level('INFO')     # Default level - informational messages
+```
+
+### Random Seed
+
+Set a global random seed for reproducibility across all qhchina modules:
+
+```python
+import qhchina
+
+# Set seed for reproducible results
+qhchina.set_random_seed(42)
+
+# Check current seed
+print(qhchina.get_random_seed())  # 42
+
+# Reset to random behavior
+qhchina.set_random_seed(None)
+```
+
+The global seed affects all modules that use `get_rng()` internally. Individual functions may also accept a `random_state` or `seed` parameter which overrides the global seed for that specific operation.
+
+For advanced use cases requiring isolated random number generators:
+
+```python
+from qhchina.config import get_rng, get_python_rng
+
+# Get numpy RandomState (doesn't affect global numpy.random)
+rng = get_rng(42)
+rng.random()
+
+# Get Python random.Random instance
+py_rng = get_python_rng(42)
+py_rng.random()
+```
+
+---
+
 ## Quick Start
 
 ```python

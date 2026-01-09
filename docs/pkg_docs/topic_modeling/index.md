@@ -44,6 +44,7 @@ LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=100, burnin=0,
 - `stopwords` (set): Set of words to exclude (default: None)
 - `use_cython` (bool): Use Cython acceleration if available (default: True)
 - `estimate_alpha` (int): Estimate alpha every N iterations (0 = disable) (default: 1)
+- `min_doc_length` (int): Minimum document length (tokens) to trigger a warning during preprocessing (default: 24). Documents shorter than this may produce unreliable topic distributions.
 
 ### Main Methods
 
