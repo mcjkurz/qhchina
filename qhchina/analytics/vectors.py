@@ -1,21 +1,25 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from typing import List, Dict, Tuple, Optional, Union, Callable, Any
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
-def project_2d(vectors, 
-               labels=None, 
-               method='pca', 
-               title=None, 
-               color=None, 
-               figsize=(8,8), 
-               fontsize=12, 
-               perplexity=None,
-               filename=None,
-               adjust_text_labels=False,
-               n_neighbors=15,
-               min_dist=0.1):
+
+def project_2d(
+    vectors: Union[List[np.ndarray], Dict[str, np.ndarray], np.ndarray], 
+    labels: Optional[List[str]] = None, 
+    method: str = 'pca', 
+    title: Optional[str] = None, 
+    color: Optional[Union[str, List[str]]] = None, 
+    figsize: Tuple[int, int] = (8, 8), 
+    fontsize: int = 12, 
+    perplexity: Optional[float] = None,
+    filename: Optional[str] = None,
+    adjust_text_labels: bool = False,
+    n_neighbors: int = 15,
+    min_dist: float = 0.1
+) -> None:
     """
     Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
@@ -100,7 +104,9 @@ def project_2d(vectors,
         plt.savefig(filename, bbox_inches='tight', dpi=300)
     plt.show()
 
-def get_bias_direction(anchors):
+def get_bias_direction(
+    anchors: Union[Tuple[np.ndarray, np.ndarray], List[Tuple[np.ndarray, np.ndarray]]]
+) -> np.ndarray:
     """
     Given either a single tuple (pos_anchor, neg_anchor) or a list of tuples,
     compute the direction vector for measuring bias by taking the mean of 
@@ -128,7 +134,11 @@ def get_bias_direction(anchors):
 
     return bias_direction / bias_norm
 
-def calculate_bias(anchors, targets, word_vectors):
+def calculate_bias(
+    anchors: Union[Tuple[str, str], List[Tuple[str, str]]], 
+    targets: List[str], 
+    word_vectors: Any
+) -> np.ndarray:
     """
     Calculate bias scores for target words along an axis defined by anchor pairs.
     
@@ -255,11 +265,16 @@ def project_bias(x, y, targets, word_vectors,
         plt.savefig(filename, bbox_inches='tight', dpi=300)
     plt.show()
 
-def cosine_similarity(v1, v2):
+def cosine_similarity(
+    v1: Union[np.ndarray, List[float]], 
+    v2: Union[np.ndarray, List[float]]
+) -> Union[float, np.ndarray]:
     """
     Compute the cosine similarity between vectors.
     If v1 and v2 are single vectors, computes similarity between them.
     If either is a matrix of vectors, uses sklearn's implementation for efficiency.
+    
+    Returns 0.0 if either vector has zero norm (to avoid division by zero).
     """
     # Convert inputs to numpy arrays if they aren't already
     v1 = np.asarray(v1)
@@ -267,12 +282,23 @@ def cosine_similarity(v1, v2):
     
     # Handle single vector case
     if v1.ndim == 1 and v2.ndim == 1:
-        return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        norm1 = np.linalg.norm(v1)
+        norm2 = np.linalg.norm(v2)
+        # Handle zero vectors - return 0 similarity
+        if norm1 < 1e-10 or norm2 < 1e-10:
+            return 0.0
+        return np.dot(v1, v2) / (norm1 * norm2)
     
     # For matrix case, use sklearn's implementation
     return sklearn_cosine_similarity(v1, v2)
 
-def most_similar(target_vector, vectors, labels=None, metric='cosine', top_n=None):
+def most_similar(
+    target_vector: np.ndarray, 
+    vectors: Union[List[np.ndarray], np.ndarray], 
+    labels: Optional[List[str]] = None, 
+    metric: Union[str, Callable[[np.ndarray, np.ndarray], float]] = 'cosine', 
+    top_n: Optional[int] = None
+) -> List[Tuple[Union[str, int], float]]:
     """
     Find the most similar vectors to a target vector using the specified similarity metric.
     
@@ -316,7 +342,10 @@ def most_similar(target_vector, vectors, labels=None, metric='cosine', top_n=Non
         return sorted_pairs[:top_n]
     return sorted_pairs
 
-def align_vectors(source_vectors, target_vectors):
+def align_vectors(
+    source_vectors: np.ndarray, 
+    target_vectors: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Align source vectors with target vectors using Procrustes analysis.
     

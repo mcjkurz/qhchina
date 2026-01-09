@@ -1,3 +1,4 @@
+import logging
 from typing import List, Dict, Any, Union, Optional, Set
 from tqdm.auto import tqdm
 import importlib
@@ -5,6 +6,8 @@ import re
 import json
 from datetime import datetime
 import time
+
+logger = logging.getLogger("qhchina.preprocessing.segmentation")
 
 class SegmentationWrapper:
     """Base segmentation wrapper class that can be extended for different segmentation tools."""
@@ -217,10 +220,10 @@ class SpacySegmenter(SegmentationWrapper):
         except ImportError:
             raise ImportError("spacy is not installed. Please install it with 'pip install spacy'")
         
-        print(f"Loading spaCy model '{model_name}'... This may take a moment.")
+        logger.info(f"Loading spaCy model '{model_name}'... This may take a moment.")
         try:
             self.nlp = spacy.load(model_name, disable=self.disable)
-            print(f"Model '{model_name}' loaded successfully.")
+            logger.info(f"Model '{model_name}' loaded successfully.")
         except OSError:
             # Model not found, try to download it
             try:
@@ -232,7 +235,7 @@ class SpacySegmenter(SegmentationWrapper):
                     download(model_name)
                 # Load the model after downloading
                 self.nlp = spacy.load(model_name, disable=self.disable)
-                print(f"Model '{model_name}' successfully downloaded and loaded.")
+                logger.info(f"Model '{model_name}' successfully downloaded and loaded.")
             except Exception as e:
                 raise ImportError(
                     f"Could not download model {model_name}. Error: {str(e)}. "
@@ -253,19 +256,19 @@ class SpacySegmenter(SegmentationWrapper):
                         with open(self.user_dict, 'r', encoding='utf-8') as f:
                             words = [line.strip() for line in f if line.strip()]
                         self.nlp.tokenizer.pkuseg_update_user_dict(words)
-                        print(f"Loaded user dictionary from file: {self.user_dict}")
+                        logger.info(f"Loaded user dictionary from file: {self.user_dict}")
                     except Exception as e:
-                        print(f"Failed to load user dictionary from file: {str(e)}")
+                        logger.error(f"Failed to load user dictionary from file: {str(e)}")
                 # If user_dict is a list of words
                 elif isinstance(self.user_dict, list):
                     self.nlp.tokenizer.pkuseg_update_user_dict(self.user_dict)
-                    print(f"Updated user dictionary with {len(self.user_dict)} words")
+                    logger.info(f"Updated user dictionary with {len(self.user_dict)} words")
                 else:
-                    print(f"Unsupported user_dict type: {type(self.user_dict)}. Expected str or list.")
+                    logger.warning(f"Unsupported user_dict type: {type(self.user_dict)}. Expected str or list.")
             except Exception as e:
-                print(f"Failed to update user dictionary: {str(e)}")
+                logger.error(f"Failed to update user dictionary: {str(e)}")
         else:
-            print("Warning: This spaCy model's tokenizer does not support pkuseg_update_user_dict")
+            logger.warning("This spaCy model's tokenizer does not support pkuseg_update_user_dict")
     
     def _filter_tokens(self, tokens):
         """Filter tokens based on excluded POS tags and minimum length."""
@@ -341,9 +344,9 @@ class JiebaSegmenter(SegmentationWrapper):
         if user_dict_path:
             try:
                 self.jieba.load_userdict(user_dict_path)
-                print(f"Loaded user dictionary from {user_dict_path}")
+                logger.info(f"Loaded user dictionary from {user_dict_path}")
             except Exception as e:
-                print(f"Failed to load user dictionary: {str(e)}")
+                logger.error(f"Failed to load user dictionary: {str(e)}")
     
     def _filter_tokens(self, tokens) -> List[str]:
         """Filter tokens based on filters."""
@@ -487,25 +490,25 @@ class BertSegmenter(SegmentationWrapper):
         # Initialize model and tokenizer
         if model is not None and tokenizer is not None:
             # Use provided model and tokenizer
-            print(f"Loading provided model to {self.device}... This may take a moment.")
+            logger.info(f"Loading provided model to {self.device}... This may take a moment.")
             self.model = model.to(self.device)
             self.tokenizer = tokenizer
-            print(f"Model loaded successfully on {self.device}.")
+            logger.info(f"Model loaded successfully on {self.device}.")
         else:
             # Load model and tokenizer from pretrained
-            print(f"Loading BERT model '{model_name}'... This may take a moment.")
+            logger.info(f"Loading BERT model '{model_name}'... This may take a moment.")
             try:
                 self.tokenizer = self.AutoTokenizer.from_pretrained(model_name)
                 self.model = self.AutoModelForTokenClassification.from_pretrained(
                     model_name, 
                     num_labels=len(self.labels)
                 ).to(self.device)
-                print(f"Model '{model_name}' loaded successfully on {self.device}.")
+                logger.info(f"Model '{model_name}' loaded successfully on {self.device}.")
             except Exception as e:
                 raise ImportError(f"Failed to load model {model_name}. Error: {str(e)}")
         
         self.model.eval()
-        print(f"Using tagging scheme: {self.labels}")
+        logger.info(f"Using tagging scheme: {self.labels}")
     
     def _filter_words(self, words: List[str]) -> List[str]:
         """Filter words based on specified filters.
@@ -681,7 +684,7 @@ class BertSegmenter(SegmentationWrapper):
             for tokens, tags in zip(batch_tokens, batch_tags):
                 # Make sure tags and tokens match in length
                 if len(tags) != len(tokens):
-                    print(f"Warning: Tags and tokens length mismatch. Tags: {len(tags)}, Tokens: {len(tokens)}")
+                    logger.warning(f"Tags and tokens length mismatch. Tags: {len(tags)}, Tokens: {len(tokens)}")
                     results.append([])  # Add empty list for this entry
                     continue
                     
@@ -810,8 +813,8 @@ class LLMSegmenter(SegmentationWrapper):
                             if isinstance(tokens, list):
                                 return tokens
                         except json.JSONDecodeError as je:
-                            print(f"Warning: Response looks like a list but isn't valid JSON: {str(je)}")
-                            print(f"Response text (first 100 chars): {response_text[:100]}...")
+                            logger.warning(f"Response looks like a list but isn't valid JSON: {str(je)}")
+                            logger.debug(f"Response text (first 100 chars): {response_text[:100]}...")
                     
                     # Try to extract JSON structure from the response
                     try:
@@ -837,31 +840,31 @@ class LLMSegmenter(SegmentationWrapper):
                                     return value
                             
                             # If we didn't find any list, log this unusual response
-                            print(f"Warning: No list found in JSON response: {parsed_json}")
+                            logger.warning(f"No list found in JSON response: {parsed_json}")
                             # Fallback to raw tokens if no list found
                             return []
                     except json.JSONDecodeError as je:
                         # Show detailed error for debugging
-                        print(f"JSON Decode Error: {str(je)}")
-                        print(f"Response text (first 100 chars): {response_text[:100]}...")
+                        logger.error(f"JSON Decode Error: {str(je)}")
+                        logger.debug(f"Response text (first 100 chars): {response_text[:100]}...")
                         return []
                         
                 except Exception as e:
-                    print(f"Error parsing API response: {str(e)}")
-                    print(f"Response text (first 100 chars): {response_text[:100]}...")
+                    logger.error(f"Error parsing API response: {str(e)}")
+                    logger.debug(f"Response text (first 100 chars): {response_text[:100]}...")
                     return []
                     
             except Exception as e:
                 is_last_attempt = (attempt == self.retry_patience - 1)
                 
                 if is_last_attempt:
-                    print(f"Error calling LLM API (final attempt {attempt + 1}/{self.retry_patience}): {str(e)}")
+                    logger.error(f"Error calling LLM API (final attempt {attempt + 1}/{self.retry_patience}): {str(e)}")
                     return []
                 else:
                     # Calculate exponential backoff delay: 2^attempt seconds
                     wait_time = 2 ** attempt
-                    print(f"Error calling LLM API (attempt {attempt + 1}/{self.retry_patience}): {str(e)}")
-                    print(f"Retrying in {wait_time} seconds...")
+                    logger.warning(f"Error calling LLM API (attempt {attempt + 1}/{self.retry_patience}): {str(e)}")
+                    logger.info(f"Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
     
     def _filter_tokens(self, tokens: List[str]) -> List[str]:

@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{{title}}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        #container {
+            width: fit-content;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+            margin-top: 0;
+            width: 100%;
+        }
+        #canvas {
+            border: 1px solid #ddd;
+            display: block;
+            margin: 0 auto;
+            cursor: pointer;
+            background-color: white;
+        }
+        #tooltip {
+            position: absolute;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            font-size: 12px;
+            z-index: 1000;
+            min-width: 250px;
+            white-space: nowrap;
+        }
+        #controls {
+            text-align: center;
+            margin-top: 15px;
+            margin-bottom: 10px;
+        }
+        #toggleAllBtn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        #toggleAllBtn:hover {
+            background-color: #45a049;
+        }
+        #legend {
+            margin-top: 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 8px;
+            max-width: {{canvas_width}}px;
+            margin-left: auto;
+            margin-right: auto;
+            padding: 0 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 0;
+            cursor: pointer;
+            padding: 8px 10px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+            border: 1px solid #e0e0e0;
+            background-color: #fafafa;
+        }
+        .legend-item:hover {
+            background-color: #e8f5e9;
+            border-color: #4CAF50;
+        }
+        .legend-item.grayed {
+            opacity: 0.5;
+            background-color: #f5f5f5;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            vertical-align: middle;
+            margin-right: 8px;
+            flex-shrink: 0;
+            border: 2px solid rgba(0,0,0,0.1);
+        }
+        .legend-item span:last-child {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>{{title}}</h1>
+        <canvas id="canvas" width="{{canvas_width}}" height="{{canvas_height}}"></canvas>
+        <div id="tooltip"></div>
+        <div id="controls">
+            <button id="toggleAllBtn" onclick="toggleAllTopics()">Deselect All</button>
+        </div>
+        <div id="legend"></div>
+    </div>
+    
+    <script>
+        const data = {{points_data_json}};
+        const colorPalette = {{color_palette_json}};
+        const colorLabel = "{{color_label}}";
+        const topicWords = {{topic_words_json}};
+        
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const tooltip = document.getElementById('tooltip');
+        const legend = document.getElementById('legend');
+        
+        // Track which topics are highlighted (use Set for efficient operations)
+        const highlightedTopics = new Set();
+        
+        // Initialize with topics that were originally highlighted
+        data.forEach(point => {
+            if (point.highlighted) {
+                highlightedTopics.add(point.color);
+            }
+        });
+        
+        // Dynamically adjust point radius based on number of documents and size parameter
+        const numDocs = data.length;
+        const baseSize = {{size}};
+        let pointRadius = baseSize / 10;
+        if (numDocs > 1000) {
+            pointRadius = Math.max(2, pointRadius * (500 / numDocs));
+        } else if (numDocs > 500) {
+            pointRadius = Math.max(3, pointRadius * 0.8);
+        }
+        const hoverThreshold = Math.max(pointRadius + 5, 10);
+        
+        // Calculate bounds
+        const xValues = data.map(d => d.x);
+        const yValues = data.map(d => d.y);
+        const xMin = Math.min(...xValues);
+        const xMax = Math.max(...xValues);
+        const yMin = Math.min(...yValues);
+        const yMax = Math.max(...yValues);
+        
+        const padding = 50;
+        const width = canvas.width - 2 * padding;
+        const height = canvas.height - 2 * padding;
+        
+        function scaleX(x) {
+            return padding + (x - xMin) / (xMax - xMin) * width;
+        }
+        
+        function scaleY(y) {
+            return canvas.height - padding - (y - yMin) / (yMax - yMin) * height;
+        }
+        
+        function drawPlot() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw grid lines
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 1;
+            const numGridLines = 10;
+            
+            // Vertical grid lines
+            for (let i = 0; i <= numGridLines; i++) {
+                const x = padding + (i / numGridLines) * width;
+                ctx.beginPath();
+                ctx.moveTo(x, padding);
+                ctx.lineTo(x, canvas.height - padding);
+                ctx.stroke();
+            }
+            
+            // Horizontal grid lines
+            for (let i = 0; i <= numGridLines; i++) {
+                const y = padding + (i / numGridLines) * height;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(canvas.width - padding, y);
+                ctx.stroke();
+            }
+            
+            // Draw axes
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(padding, padding);
+            ctx.lineTo(padding, canvas.height - padding);
+            ctx.lineTo(canvas.width - padding, canvas.height - padding);
+            ctx.stroke();
+            
+            // Draw black border around entire drawable area
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(padding, padding, width, height);
+            
+            // Draw points based on current highlighted topics
+            data.forEach(point => {
+                const sx = scaleX(point.x);
+                const sy = scaleY(point.y);
+                
+                // Check if this point's topic is currently highlighted
+                const isHighlighted = highlightedTopics.has(point.color);
+                
+                if (isHighlighted) {
+                    ctx.fillStyle = colorPalette[point.color % colorPalette.length];
+                    ctx.globalAlpha = 1.0;
+                } else {
+                    ctx.fillStyle = 'lightgray';
+                    ctx.globalAlpha = 0.5;
+                }
+                
+                ctx.beginPath();
+                ctx.arc(sx, sy, pointRadius, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.globalAlpha = 1.0;
+            });
+        }
+        
+        function findNearestPoint(mx, my) {
+            const threshold = hoverThreshold;
+            let nearest = null;
+            let minDist = threshold;
+            
+            data.forEach(point => {
+                const sx = scaleX(point.x);
+                const sy = scaleY(point.y);
+                const dist = Math.sqrt((sx - mx) ** 2 + (sy - my) ** 2);
+                
+                if (dist < minDist) {
+                    minDist = dist;
+                    nearest = point;
+                }
+            });
+            
+            return nearest;
+        }
+        
+        function toggleTopic(topicId) {
+            if (highlightedTopics.has(topicId)) {
+                highlightedTopics.delete(topicId);
+            } else {
+                highlightedTopics.add(topicId);
+            }
+            updateLegend();
+            drawPlot();
+        }
+        
+        function toggleAllTopics() {
+            const uniqueColors = [...new Set(data.map(d => d.color))];
+            
+            // If all are highlighted, deselect all. Otherwise, select all.
+            if (highlightedTopics.size === uniqueColors.length) {
+                highlightedTopics.clear();
+            } else {
+                uniqueColors.forEach(color => highlightedTopics.add(color));
+            }
+            
+            updateLegend();
+            drawPlot();
+        }
+        
+        function updateToggleButton() {
+            const uniqueColors = [...new Set(data.map(d => d.color))];
+            const toggleBtn = document.getElementById('toggleAllBtn');
+            
+            if (highlightedTopics.size === uniqueColors.length) {
+                toggleBtn.textContent = 'Deselect All';
+            } else if (highlightedTopics.size === 0) {
+                toggleBtn.textContent = 'Select All';
+            } else {
+                toggleBtn.textContent = 'Select All';
+            }
+        }
+        
+        function updateLegend() {
+            // Get all unique topics (colors) from the data
+            const uniqueColors = [...new Set(data.map(d => d.color))].sort((a, b) => a - b);
+            
+            // Clear and rebuild legend
+            legend.innerHTML = '';
+            
+            uniqueColors.forEach(color => {
+                const item = document.createElement('div');
+                item.className = 'legend-item';
+                
+                // Add grayed class if not highlighted
+                if (!highlightedTopics.has(color)) {
+                    item.classList.add('grayed');
+                }
+                
+                // Store topic ID for click handler
+                item.dataset.topicId = color;
+                
+                // For topics, show just "Topic X: words", for clusters show "K-means Cluster X"
+                const labelText = topicWords[color] ? `Topic ${color}: ${topicWords[color]}` : `${colorLabel} ${color}`;
+                item.innerHTML = `
+                    <span class="legend-color" style="background-color: ${colorPalette[color % colorPalette.length]}"></span>
+                    <span>${labelText}</span>
+                `;
+                
+                // Add click handler
+                item.addEventListener('click', () => {
+                    toggleTopic(color);
+                });
+                
+                legend.appendChild(item);
+            });
+            
+            // Update the toggle button text
+            updateToggleButton();
+        }
+        
+        // Mouse move for tooltip
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            
+            const point = findNearestPoint(mx, my);
+            
+            if (point) {
+                tooltip.style.display = 'block';
+                // Use pageX/pageY for positioning relative to page, not viewport
+                tooltip.style.left = (e.pageX + 10) + 'px';
+                tooltip.style.top = (e.pageY + 10) + 'px';
+                tooltip.innerHTML = `
+                    <strong>${point.label}</strong> (Doc #${point.doc_id})<br>
+                    <strong>Top Topics:</strong><br>
+                    ${point.topic_info}
+                `;
+            } else {
+                tooltip.style.display = 'none';
+            }
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+        });
+        
+        // Click on canvas to toggle topic of clicked point
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            
+            const point = findNearestPoint(mx, my);
+            
+            if (point) {
+                toggleTopic(point.color);
+            }
+        });
+        
+        // Initialize legend and draw
+        updateLegend();
+        drawPlot();
+    </script>
+</body>
+</html>

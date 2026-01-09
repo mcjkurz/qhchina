@@ -1,12 +1,21 @@
+import logging
 import numpy as np
 from typing import List, Tuple, Dict, Optional, Union, Callable, Any
 import random
 import time
 import warnings
 from collections import defaultdict, Counter
+from pathlib import Path
 import matplotlib.pyplot as plt
-from tqdm.auto import trange
+from tqdm.auto import trange, tqdm
 from scipy.special import psi, polygamma
+
+from ..config import get_rng, get_python_rng, resolve_seed
+
+logger = logging.getLogger("qhchina.analytics.topicmodels")
+
+# Template directory path
+_TEMPLATE_DIR = Path(__file__).parent.parent / "data" / "templates"
 
 class LDAGibbsSampler:
     """
@@ -115,9 +124,10 @@ class LDAGibbsSampler:
         if use_cython:
             self._attempt_cython_import()
         
-        if random_state is not None:
-            random.seed(random_state)
-            np.random.seed(random_state)
+        # Use isolated RNG instances to avoid affecting global state
+        effective_seed = resolve_seed(random_state)
+        self._rng = get_rng(effective_seed)
+        self._python_rng = get_python_rng(effective_seed)
         
         self.vocabulary = None
         self.vocabulary_size = None
@@ -243,7 +253,7 @@ class LDAGibbsSampler:
         self.z_shape = (n_docs, max_doc_length)
         
         total_tokens = sum(self.doc_lengths)
-        all_topics = np.random.randint(0, self.n_topics, size=total_tokens)
+        all_topics = self._rng.randint(0, self.n_topics, size=total_tokens)
         
         token_idx = 0
         for d, doc in enumerate(docs_as_ids):
@@ -322,11 +332,18 @@ class LDAGibbsSampler:
         
         impl_type = "Cython" if self.use_cython else "Python"
         n_iter = total_iterations if self.burnin > 0 else self.iterations
-        print(f"Running Gibbs sampling for {n_iter} iterations ({impl_type} implementation).")
+        logger.info(f"Running Gibbs sampling for {n_iter} iterations ({impl_type} implementation).")
         if self.burnin > 0:
-            print(f"First {self.burnin} iterations are burn-in (discarded), then {self.iterations} iterations for inference.")
+            logger.info(f"First {self.burnin} iterations are burn-in (discarded), then {self.iterations} iterations for inference.")
         
-        for it in range(total_iterations):
+        # Use tqdm progress bar for iterations
+        progress_bar = tqdm(
+            range(total_iterations), 
+            desc="Gibbs sampling",
+            unit="iter"
+        )
+        
+        for it in progress_bar:
             start_time = time.time()
             
             if self.use_cython:
@@ -361,7 +378,7 @@ class LDAGibbsSampler:
                     elapsed = time.time() - start_time
                     perplexity = self.perplexity()
                     tokens_per_sec = self.total_tokens / elapsed
-                    print(f"Iteration {actual_it}: Perplexity = {perplexity:.2f}, Tokens/sec = {tokens_per_sec:.1f}")
+                    progress_bar.set_postfix_str(f"perp={perplexity:.2f}, tok/s={tokens_per_sec:.0f}")
             
     def _compute_topic_probabilities(self, w: int, doc_topic_counts: np.ndarray, 
                                     topic_normalizers: Optional[np.ndarray] = None) -> np.ndarray:
@@ -405,7 +422,7 @@ class LDAGibbsSampler:
         self.n_t[old_topic] -= 1
         
         p = self._compute_topic_probabilities(w, self.n_dt[d, :])
-        new_topic = np.random.choice(self.n_topics, p=p)
+        new_topic = self._rng.choice(self.n_topics, p=p)
         
         self.n_wt[w, new_topic] += 1
         self.n_dt[d, new_topic] += 1
@@ -463,8 +480,8 @@ class LDAGibbsSampler:
             raise ValueError("All documents were filtered out during preprocessing. "
                            "Check your vocabulary filtering settings.")
         
-        print(f"Vocabulary size: {self.vocabulary_size}")
-        print(f"Number of documents: {len(self.docs_tokens)}")
+        logger.info(f"Vocabulary size: {self.vocabulary_size}")
+        logger.info(f"Number of documents: {len(self.docs_tokens)}")
         
         self.initialize(self.docs_tokens)
         self.run_gibbs_sampling()
@@ -485,8 +502,11 @@ class LDAGibbsSampler:
                 phi_contig, theta_contig, self.docs_tokens, self.doc_lengths
             )
         
-        log_likelihood = 0
+        log_likelihood = 0.0
         token_count = 0
+        
+        # Small epsilon to prevent log(0)
+        epsilon = 1e-10
         
         for d in range(len(self.doc_lengths)):
             doc_len = self.doc_lengths[d]
@@ -500,10 +520,9 @@ class LDAGibbsSampler:
                 word_topic_probs = self.phi[:, word_id] 
                 word_prob = np.sum(word_topic_probs * doc_topics)
                 
-                if word_prob > 0:
-                    log_likelihood += np.log(word_prob)
-                else:
-                    log_likelihood += np.log(1e-10)
+                # Clamp word_prob to prevent log(0) or log(negative)
+                word_prob = max(word_prob, epsilon)
+                log_likelihood += np.log(word_prob)
                 
             token_count += doc_len
         
@@ -596,7 +615,7 @@ class LDAGibbsSampler:
                 inference_iterations
             )
         
-        z_doc = np.random.randint(0, self.n_topics, size=len(filtered_doc))
+        z_doc = self._rng.randint(0, self.n_topics, size=len(filtered_doc))
         n_dt_doc = np.zeros(self.n_topics, dtype=np.int32)
         np.add.at(n_dt_doc, z_doc, 1)
         
@@ -609,7 +628,7 @@ class LDAGibbsSampler:
                 n_dt_doc[old_topic] -= 1
                 
                 p = self._compute_topic_probabilities(w, n_dt_doc, topic_normalizers)
-                new_topic = np.random.choice(self.n_topics, p=p)
+                new_topic = self._rng.choice(self.n_topics, p=p)
                 
                 z_doc[i] = new_topic
                 n_dt_doc[new_topic] += 1
@@ -1039,7 +1058,7 @@ class LDAGibbsSampler:
         
         n_docs = len(self.doc_lengths)
         
-        for d in range(n_docs):
+        for d in tqdm(range(n_docs), desc="Computing co-occurrence", leave=False):
             doc_len = self.doc_lengths[d]
             if doc_len == 0:
                 continue
@@ -1278,15 +1297,15 @@ class LDAGibbsSampler:
         results['topic_entropy'] = -np.sum(topic_dist * np.log(topic_dist + 1e-10))
         
         if verbose:
-            print("=" * 50)
-            print("Topic Model Evaluation")
-            print("=" * 50)
-            print(f"Perplexity:         {results['perplexity']:.2f}")
-            print(f"UMass Coherence:    {results['coherence_umass']:.4f}")
-            print(f"NPMI Coherence:     {results['coherence_npmi']:.4f}")
-            print(f"Topic Diversity:    {results['topic_diversity']:.4f}")
-            print(f"Topic Entropy:      {results['topic_entropy']:.4f}")
-            print("=" * 50)
+            logger.info("=" * 50)
+            logger.info("Topic Model Evaluation")
+            logger.info("=" * 50)
+            logger.info(f"Perplexity:         {results['perplexity']:.2f}")
+            logger.info(f"UMass Coherence:    {results['coherence_umass']:.4f}")
+            logger.info(f"NPMI Coherence:     {results['coherence_npmi']:.4f}")
+            logger.info(f"Topic Diversity:    {results['topic_diversity']:.4f}")
+            logger.info(f"Topic Entropy:      {results['topic_entropy']:.4f}")
+            logger.info("=" * 50)
         
         return results
     
@@ -1342,13 +1361,13 @@ class LDAGibbsSampler:
         perplexity_scores = []
         
         if verbose:
-            print(f"Training {n_runs} models with {n_topics} topics...")
+            logger.info(f"Training {n_runs} models with {n_topics} topics...")
         
-        for i, seed in enumerate(random_seeds):
+        for i, seed in tqdm(enumerate(random_seeds), total=n_runs, desc="Training models"):
             if verbose:
-                print(f"\n{'='*50}")
-                print(f"Run {i+1}/{n_runs} (seed={seed})")
-                print('='*50)
+                logger.info(f"\n{'='*50}")
+                logger.info(f"Run {i+1}/{n_runs} (seed={seed})")
+                logger.info('='*50)
             
             model = cls(
                 n_topics=n_topics,
@@ -1366,7 +1385,7 @@ class LDAGibbsSampler:
             perplexity_scores.append(perplexity)
             
             if verbose:
-                print(f"Perplexity: {perplexity:.2f}, UMass Coherence: {coherence:.4f}")
+                logger.info(f"Perplexity: {perplexity:.2f}, UMass Coherence: {coherence:.4f}")
         
         # Find best model (highest coherence)
         best_idx = np.argmax(coherence_scores)
@@ -1407,19 +1426,19 @@ class LDAGibbsSampler:
             results['all_models'] = models
         
         if verbose:
-            print("\n" + "=" * 50)
-            print("ROBUSTNESS ANALYSIS RESULTS")
-            print("=" * 50)
-            print(f"Number of runs:          {n_runs}")
-            print(f"Best run:                {best_idx + 1} (seed={random_seeds[best_idx]})")
-            print(f"Coherence (mean±std):    {results['coherence_mean']:.4f} ± {results['coherence_std']:.4f}")
-            print(f"Perplexity (mean±std):   {results['perplexity_mean']:.2f} ± {results['perplexity_std']:.2f}")
-            print(f"Topic Stability:         {avg_stability:.4f}")
-            print("=" * 50)
-            print("\nInterpretation:")
-            print("  - Stability close to 1.0 indicates highly robust topics")
-            print("  - Stability below 0.5 suggests topics are unstable")
-            print("  - Low std in coherence indicates consistent quality")
+            logger.info("\n" + "=" * 50)
+            logger.info("ROBUSTNESS ANALYSIS RESULTS")
+            logger.info("=" * 50)
+            logger.info(f"Number of runs:          {n_runs}")
+            logger.info(f"Best run:                {best_idx + 1} (seed={random_seeds[best_idx]})")
+            logger.info(f"Coherence (mean±std):    {results['coherence_mean']:.4f} ± {results['coherence_std']:.4f}")
+            logger.info(f"Perplexity (mean±std):   {results['perplexity_mean']:.2f} ± {results['perplexity_std']:.2f}")
+            logger.info(f"Topic Stability:         {avg_stability:.4f}")
+            logger.info("=" * 50)
+            logger.info("\nInterpretation:")
+            logger.info("  - Stability close to 1.0 indicates highly robust topics")
+            logger.info("  - Stability below 0.5 suggests topics are unstable")
+            logger.info("  - Low std in coherence indicates consistent quality")
         
         return results
     
@@ -1552,11 +1571,11 @@ class LDAGibbsSampler:
             else:
                 highlight = list(highlight)
         
-        # Set random state
+        # Resolve random state (uses global seed if not specified)
         if random_state is None:
             random_state = self.random_state
-        if random_state is not None:
-            np.random.seed(random_state)
+        effective_seed = resolve_seed(random_state)
+        viz_rng = get_rng(effective_seed)
         
         n_docs = self.theta.shape[0]
         
@@ -1680,7 +1699,7 @@ class LDAGibbsSampler:
                 labels_to_show = []
                 for color, doc_ids in labels_by_color.items():
                     n_to_sample = min(max_labels, len(doc_ids))
-                    sampled = np.random.choice(doc_ids, size=n_to_sample, replace=False).tolist()
+                    sampled = viz_rng.choice(doc_ids, size=n_to_sample, replace=False).tolist()
                     labels_to_show.extend(sampled)
                     
             elif label_strategy == 'auto':
@@ -1699,7 +1718,7 @@ class LDAGibbsSampler:
                     labels_to_show = []
                     for color, doc_ids in labels_by_color.items():
                         n_to_sample = min(max_labels, len(doc_ids))
-                        sampled = np.random.choice(doc_ids, size=n_to_sample, replace=False).tolist()
+                        sampled = viz_rng.choice(doc_ids, size=n_to_sample, replace=False).tolist()
                         labels_to_show.extend(sampled)
                 else:
                     # For large datasets, sample fewer per topic
@@ -1714,7 +1733,7 @@ class LDAGibbsSampler:
                     labels_to_show = []
                     for color, doc_ids in labels_by_color.items():
                         n_to_sample = min(max_labels, len(doc_ids))
-                        sampled = np.random.choice(doc_ids, size=n_to_sample, replace=False).tolist()
+                        sampled = viz_rng.choice(doc_ids, size=n_to_sample, replace=False).tolist()
                         labels_to_show.extend(sampled)
             else:
                 raise ValueError(
@@ -1864,7 +1883,7 @@ class LDAGibbsSampler:
         
         if filename:
             plt.savefig(filename, dpi=dpi, bbox_inches='tight')
-            print(f"Plot saved to: {filename}")
+            logger.info(f"Plot saved to: {filename}")
         
         plt.show()
         
@@ -1957,391 +1976,20 @@ class LDAGibbsSampler:
         else:  # >= 5000 documents
             canvas_width, canvas_height = 2000, 1600
         
-        # Create HTML content
-        html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>{title}</title>
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }}
-        #container {{
-            width: fit-content;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        h1 {{
-            text-align: center;
-            color: #333;
-            margin-bottom: 20px;
-            margin-top: 0;
-            width: 100%;
-        }}
-        #canvas {{
-            border: 1px solid #ddd;
-            display: block;
-            margin: 0 auto;
-            cursor: pointer;
-            background-color: white;
-        }}
-        #tooltip {{
-            position: absolute;
-            padding: 10px;
-            background-color: rgba(0, 0, 0, 0.8);
-            color: white;
-            border-radius: 4px;
-            pointer-events: none;
-            display: none;
-            font-size: 12px;
-            z-index: 1000;
-            min-width: 250px;
-            white-space: nowrap;
-        }}
-        #controls {{
-            text-align: center;
-            margin-top: 15px;
-            margin-bottom: 10px;
-        }}
-        #toggleAllBtn {{
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-            font-size: 14px;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: background-color 0.3s;
-        }}
-        #toggleAllBtn:hover {{
-            background-color: #45a049;
-        }}
-        #legend {{
-            margin-top: 15px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 8px;
-            max-width: {canvas_width}px;
-            margin-left: auto;
-            margin-right: auto;
-            padding: 0 10px;
-        }}
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            margin: 0;
-            cursor: pointer;
-            padding: 8px 10px;
-            border-radius: 4px;
-            transition: background-color 0.2s;
-            border: 1px solid #e0e0e0;
-            background-color: #fafafa;
-        }}
-        .legend-item:hover {{
-            background-color: #e8f5e9;
-            border-color: #4CAF50;
-        }}
-        .legend-item.grayed {{
-            opacity: 0.5;
-            background-color: #f5f5f5;
-        }}
-        .legend-color {{
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            vertical-align: middle;
-            margin-right: 8px;
-            flex-shrink: 0;
-            border: 2px solid rgba(0,0,0,0.1);
-        }}
-        .legend-item span:last-child {{
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            font-size: 13px;
-        }}
-    </style>
-</head>
-<body>
-    <div id="container">
-        <h1>{title}</h1>
-        <canvas id="canvas" width="{canvas_width}" height="{canvas_height}"></canvas>
-        <div id="tooltip"></div>
-        <div id="controls">
-            <button id="toggleAllBtn" onclick="toggleAllTopics()">Deselect All</button>
-        </div>
-        <div id="legend"></div>
-    </div>
-    
-    <script>
-        const data = {json.dumps(points_data)};
-        const colorPalette = {json.dumps(color_palette)};
-        const colorLabel = "{color_label.replace('Dominant Topic', 'Topic')}";
-        const topicWords = {json.dumps(topic_top_words)};  // Array of topic word strings
+        # Load HTML template
+        template_path = _TEMPLATE_DIR / "document_visualization.html"
+        with open(template_path, 'r', encoding='utf-8') as f:
+            html_template = f.read()
         
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const tooltip = document.getElementById('tooltip');
-        const legend = document.getElementById('legend');
-        
-        // Track which topics are highlighted (use Set for efficient operations)
-        const highlightedTopics = new Set();
-        
-        // Initialize with topics that were originally highlighted
-        data.forEach(point => {{
-            if (point.highlighted) {{
-                highlightedTopics.add(point.color);
-            }}
-        }});
-        
-        // Dynamically adjust point radius based on number of documents and size parameter
-        const numDocs = data.length;
-        const baseSize = {size};  // Size parameter from Python
-        let pointRadius = baseSize / 10;  // Convert size to radius (50 -> 5)
-        if (numDocs > 1000) {{
-            pointRadius = Math.max(2, pointRadius * (500 / numDocs));
-        }} else if (numDocs > 500) {{
-            pointRadius = Math.max(3, pointRadius * 0.8);
-        }}
-        const hoverThreshold = Math.max(pointRadius + 5, 10);
-        
-        // Calculate bounds
-        const xValues = data.map(d => d.x);
-        const yValues = data.map(d => d.y);
-        const xMin = Math.min(...xValues);
-        const xMax = Math.max(...xValues);
-        const yMin = Math.min(...yValues);
-        const yMax = Math.max(...yValues);
-        
-        const padding = 50;
-        const width = canvas.width - 2 * padding;
-        const height = canvas.height - 2 * padding;
-        
-        function scaleX(x) {{
-            return padding + (x - xMin) / (xMax - xMin) * width;
-        }}
-        
-        function scaleY(y) {{
-            return canvas.height - padding - (y - yMin) / (yMax - yMin) * height;
-        }}
-        
-        function drawPlot() {{
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Draw grid lines
-            ctx.strokeStyle = '#e0e0e0';
-            ctx.lineWidth = 1;
-            const numGridLines = 10;
-            
-            // Vertical grid lines
-            for (let i = 0; i <= numGridLines; i++) {{
-                const x = padding + (i / numGridLines) * width;
-                ctx.beginPath();
-                ctx.moveTo(x, padding);
-                ctx.lineTo(x, canvas.height - padding);
-                ctx.stroke();
-            }}
-            
-            // Horizontal grid lines
-            for (let i = 0; i <= numGridLines; i++) {{
-                const y = padding + (i / numGridLines) * height;
-                ctx.beginPath();
-                ctx.moveTo(padding, y);
-                ctx.lineTo(canvas.width - padding, y);
-                ctx.stroke();
-            }}
-            
-            // Draw axes
-            ctx.strokeStyle = '#333';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(padding, padding);
-            ctx.lineTo(padding, canvas.height - padding);
-            ctx.lineTo(canvas.width - padding, canvas.height - padding);
-            ctx.stroke();
-            
-            // Draw black border around entire drawable area
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(padding, padding, width, height);
-            
-            // Draw points based on current highlighted topics
-            data.forEach(point => {{
-                const sx = scaleX(point.x);
-                const sy = scaleY(point.y);
-                
-                // Check if this point's topic is currently highlighted
-                const isHighlighted = highlightedTopics.has(point.color);
-                
-                if (isHighlighted) {{
-                    ctx.fillStyle = colorPalette[point.color % colorPalette.length];
-                    ctx.globalAlpha = 1.0;
-                }} else {{
-                    ctx.fillStyle = 'lightgray';
-                    ctx.globalAlpha = 0.5;
-                }}
-                
-                ctx.beginPath();
-                ctx.arc(sx, sy, pointRadius, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-                ctx.globalAlpha = 1.0;  // Reset alpha
-            }});
-        }}
-        
-        function findNearestPoint(mx, my) {{
-            const threshold = hoverThreshold;
-            let nearest = null;
-            let minDist = threshold;
-            
-            data.forEach(point => {{
-                const sx = scaleX(point.x);
-                const sy = scaleY(point.y);
-                const dist = Math.sqrt((sx - mx) ** 2 + (sy - my) ** 2);
-                
-                if (dist < minDist) {{
-                    minDist = dist;
-                    nearest = point;
-                }}
-            }});
-            
-            return nearest;
-        }}
-        
-        function toggleTopic(topicId) {{
-            if (highlightedTopics.has(topicId)) {{
-                highlightedTopics.delete(topicId);
-            }} else {{
-                highlightedTopics.add(topicId);
-            }}
-            updateLegend();
-            drawPlot();
-        }}
-        
-        function toggleAllTopics() {{
-            const uniqueColors = [...new Set(data.map(d => d.color))];
-            
-            // If all are highlighted, deselect all. Otherwise, select all.
-            if (highlightedTopics.size === uniqueColors.length) {{
-                highlightedTopics.clear();
-            }} else {{
-                uniqueColors.forEach(color => highlightedTopics.add(color));
-            }}
-            
-            updateLegend();
-            drawPlot();
-        }}
-        
-        function updateToggleButton() {{
-            const uniqueColors = [...new Set(data.map(d => d.color))];
-            const toggleBtn = document.getElementById('toggleAllBtn');
-            
-            if (highlightedTopics.size === uniqueColors.length) {{
-                toggleBtn.textContent = 'Deselect All';
-            }} else if (highlightedTopics.size === 0) {{
-                toggleBtn.textContent = 'Select All';
-            }} else {{
-                toggleBtn.textContent = 'Select All';
-            }}
-        }}
-        
-        function updateLegend() {{
-            // Get all unique topics (colors) from the data
-            const uniqueColors = [...new Set(data.map(d => d.color))].sort((a, b) => a - b);
-            
-            // Clear and rebuild legend
-            legend.innerHTML = '';
-            
-            uniqueColors.forEach(color => {{
-                const item = document.createElement('div');
-                item.className = 'legend-item';
-                
-                // Add grayed class if not highlighted
-                if (!highlightedTopics.has(color)) {{
-                    item.classList.add('grayed');
-                }}
-                
-                // Store topic ID for click handler
-                item.dataset.topicId = color;
-                
-                // For topics, show just "Topic X: words", for clusters show "K-means Cluster X"
-                const labelText = topicWords[color] ? `Topic ${{color}}: ${{topicWords[color]}}` : `${{colorLabel}} ${{color}}`;
-                item.innerHTML = `
-                    <span class="legend-color" style="background-color: ${{colorPalette[color % colorPalette.length]}}"></span>
-                    <span>${{labelText}}</span>
-                `;
-                
-                // Add click handler
-                item.addEventListener('click', () => {{
-                    toggleTopic(color);
-                }});
-                
-                legend.appendChild(item);
-            }});
-            
-            // Update the toggle button text
-            updateToggleButton();
-        }}
-        
-        // Mouse move for tooltip
-        canvas.addEventListener('mousemove', (e) => {{
-            const rect = canvas.getBoundingClientRect();
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
-            
-            const point = findNearestPoint(mx, my);
-            
-            if (point) {{
-                tooltip.style.display = 'block';
-                // Use pageX/pageY for positioning relative to page, not viewport
-                tooltip.style.left = (e.pageX + 10) + 'px';
-                tooltip.style.top = (e.pageY + 10) + 'px';
-                tooltip.innerHTML = `
-                    <strong>${{point.label}}</strong> (Doc #${{point.doc_id}})<br>
-                    <strong>Top Topics:</strong><br>
-                    ${{point.topic_info}}
-                `;
-            }} else {{
-                tooltip.style.display = 'none';
-            }}
-        }});
-        
-        canvas.addEventListener('mouseleave', () => {{
-            tooltip.style.display = 'none';
-        }});
-        
-        // Click on canvas to toggle topic of clicked point
-        canvas.addEventListener('click', (e) => {{
-            const rect = canvas.getBoundingClientRect();
-            const mx = e.clientX - rect.left;
-            const my = e.clientY - rect.top;
-            
-            const point = findNearestPoint(mx, my);
-            
-            if (point) {{
-                toggleTopic(point.color);
-            }}
-        }});
-        
-        // Initialize legend and draw
-        updateLegend();
-        drawPlot();
-    </script>
-</body>
-</html>"""
+        # Substitute template variables
+        html_content = html_template.replace('{{title}}', title)
+        html_content = html_content.replace('{{canvas_width}}', str(canvas_width))
+        html_content = html_content.replace('{{canvas_height}}', str(canvas_height))
+        html_content = html_content.replace('{{points_data_json}}', json.dumps(points_data))
+        html_content = html_content.replace('{{color_palette_json}}', json.dumps(color_palette))
+        html_content = html_content.replace('{{color_label}}', color_label.replace('Dominant Topic', 'Topic'))
+        html_content = html_content.replace('{{topic_words_json}}', json.dumps(topic_top_words))
+        html_content = html_content.replace('{{size}}', str(size))
         
         # Save or display HTML
         if filename is None:
@@ -2350,5 +1998,5 @@ class LDAGibbsSampler:
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        print(f"Interactive visualization saved to: {filename}")
-        print(f"Open this file in a web browser to view the interactive plot.")
+        logger.info(f"Interactive visualization saved to: {filename}")
+        logger.info(f"Open this file in a web browser to view the interactive plot.")

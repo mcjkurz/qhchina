@@ -1,8 +1,12 @@
+import logging
 from collections import Counter
 import numpy as np
 from scipy.stats import fisher_exact, chi2_contingency
 from typing import List, Dict, Tuple, Union, Any
 from tqdm.auto import tqdm
+from ..utils import validate_filters
+
+logger = logging.getLogger("qhchina.analytics.corpora")
 
 def compare_corpora(corpusA: Union[List[str], List[List[str]]], 
                     corpusB: Union[List[str], List[List[str]]], 
@@ -37,12 +41,12 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
     Notes:
       Two-sided tests are used because we want to detect whether words are overrepresented in either corpus.
     """
+    # Validate filter keys
+    valid_filter_keys = {'min_count', 'max_p', 'stopwords', 'min_word_length'}
+    validate_filters(filters, valid_filter_keys, context='compare_corpora')
+    
     # Validate and print filters
     if filters:
-        valid_keys = {'min_count', 'max_p', 'stopwords', 'min_word_length'}
-        invalid_keys = set(filters.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_keys}")
         
         # Validate filter values
         if 'min_count' in filters:
@@ -78,7 +82,7 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             filter_strs.append(f"stopwords=<{len(filters['stopwords'])} words>")
         if 'min_word_length' in filters:
             filter_strs.append(f"min_word_length={filters['min_word_length']}")
-        print(f"Filters: {', '.join(filter_strs)}")
+        logger.info(f"Filters: {', '.join(filter_strs)}")
     
     # Helper function to flatten list of sentences if needed
     def flatten(corpus):

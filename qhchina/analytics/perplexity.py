@@ -1,8 +1,19 @@
-import torch
+import logging
+from typing import List, Tuple, Union, Optional, Any
 import numpy as np
 import matplotlib.pyplot as plt
 
-def calculate_perplexity_of_tokens(model, tokenizer, sequence, context_size=64, verbose=False, device=None):
+logger = logging.getLogger("qhchina.analytics.perplexity")
+
+
+def calculate_perplexity_of_tokens(
+    model: Any, 
+    tokenizer: Any, 
+    sequence: Union[str, List[str]], 
+    context_size: int = 64, 
+    verbose: bool = False, 
+    device: Optional[Any] = None
+) -> List[Tuple[str, int, float, bool]]:
     """
     Calculate the perplexity of each token in a sequence with consistent context size.
     
@@ -12,12 +23,24 @@ def calculate_perplexity_of_tokens(model, tokenizer, sequence, context_size=64, 
         sequence: Input text sequence
         context_size: Number of tokens to use as context (default: 64)
         verbose: Whether to print debug information (default: False)
-        device: Device to run computations on (default: cuda-else-cpu auto-detect)
+        device: Device to run computations on (default: cuda-else-cpu auto-detect).
+                Can be a string ('cpu', 'cuda') or torch.device object.
         
     Returns:
         List of tuples (token, token_id, perplexity, has_full_context)
         where has_full_context is a boolean indicating if the token had the requested context_size
+    
+    Raises:
+        ImportError: If PyTorch is not installed.
     """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "PyTorch is required for calculate_perplexity_of_tokens(). "
+            "Install it with: pip install torch"
+        )
+    
     model.eval()
 
     # Set device
@@ -38,7 +61,7 @@ def calculate_perplexity_of_tokens(model, tokenizer, sequence, context_size=64, 
     # We can only calculate perplexity for tokens that have at least some context
     if len(ids) <= 1:
         if verbose:
-            print("Sequence too short to calculate perplexity.")
+            logger.info("Sequence too short to calculate perplexity.")
         return []
 
     # Process each token
@@ -85,11 +108,17 @@ def calculate_perplexity_of_tokens(model, tokenizer, sequence, context_size=64, 
 
         if verbose:
             context_info = f"[Full context: {context_size}]" if has_full_context else f"[Partial context: {available_context}]"
-            print(f"Token: {token}, ID: {target_id}, Perplexity: {perplexity} {context_info}")
+            logger.info(f"Token: {token}, ID: {target_id}, Perplexity: {perplexity} {context_info}")
             
     return token_perplexities
 
-def calculate_word_perplexity(model, tokenizer, context, target_word, device=None):
+def calculate_word_perplexity(
+    model: Any, 
+    tokenizer: Any, 
+    context: str, 
+    target_word: str, 
+    device: Optional[Any] = None
+) -> Tuple[float, List[Tuple[str, int, float]]]:
     """
     Calculate the perplexity of a target word given a context.
     
@@ -98,13 +127,25 @@ def calculate_word_perplexity(model, tokenizer, context, target_word, device=Non
         tokenizer: The tokenizer corresponding to the model
         context: Context text (string) preceding the target word
         target_word: The word to calculate perplexity for
-        device: Device to run computations on (default: cuda-else-cpu auto-detect)
+        device: Device to run computations on (default: cuda-else-cpu auto-detect).
+                Can be a string ('cpu', 'cuda') or torch.device object.
         
     Returns:
         tuple: (perplexity, token_perplexities)
             - perplexity: The average perplexity of the target word
             - token_perplexities: List of tuples (token, token_id, perplexity) for each token in the target word
+    
+    Raises:
+        ImportError: If PyTorch is not installed.
     """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "PyTorch is required for calculate_word_perplexity(). "
+            "Install it with: pip install torch"
+        )
+    
     model.eval()
 
     # Set device
@@ -168,7 +209,14 @@ def calculate_word_perplexity(model, tokenizer, context, target_word, device=Non
     
     return (avg_perplexity, token_perplexities)
 
-def visualize_perplexities(perplexities, labels, width=14, height=3.5, color='red', filename=None):
+def visualize_perplexities(
+    perplexities: List[float], 
+    labels: List[str], 
+    width: float = 14, 
+    height: float = 3.5, 
+    color: str = 'red', 
+    filename: Optional[str] = None
+) -> None:
     """
     Visualize perplexities with given labels.
     

@@ -1,11 +1,14 @@
+import logging
 from collections import Counter, defaultdict
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
-from typing import Dict, List, Optional, Union, TypedDict
+from typing import Dict, List, Optional, Union, TypedDict, Tuple, Any
 import matplotlib.pyplot as plt
 
 from scipy.stats import fisher_exact as scipy_fisher_exact
+
+logger = logging.getLogger("qhchina.analytics.collocations")
 
 try:
     from .cython_ext.collocations import (
@@ -32,6 +35,173 @@ class FilterOptions(TypedDict, total=False):
     min_obs_global: int
     max_obs_global: int
 
+
+def _compute_collocation_result(target, candidate, a, b, c, d, total, obs_global, table, alternative='greater'):
+    """
+    Compute collocation statistics for a single target-collocate pair.
+    
+    This is the shared statistical computation used by both window and sentence methods,
+    and by both Python and Cython implementations.
+    
+    Args:
+        target: Target word string
+        candidate: Collocate word string
+        a: Co-occurrence count (target with collocate)
+        b: Target without collocate count  
+        c: Collocate without target count
+        d: Neither target nor collocate count
+        total: Total count (tokens or sentences depending on method)
+        obs_global: Global observation count for the collocate
+        table: Pre-allocated 2x2 numpy array for Fisher's exact test (reused for efficiency)
+        alternative: Alternative hypothesis for Fisher's exact test
+    
+    Returns:
+        Dictionary with collocation statistics: target, collocate, exp_local,
+        obs_local, ratio_local, obs_global, p_value
+    """
+    expected = (a + b) * (a + c) / total if total > 0 else 0
+    ratio = a / expected if expected > 0 else 0
+    
+    table[:] = [[a, b], [c, d]]
+    _, p_value = scipy_fisher_exact(table, alternative=alternative)
+    
+    return {
+        "target": target,
+        "collocate": candidate,
+        "exp_local": expected,
+        "obs_local": int(a),
+        "ratio_local": ratio,
+        "obs_global": int(obs_global),
+        "p_value": p_value,
+    }
+
+
+def _build_results_from_cython_window(cython_result, target_words, alternative='greater'):
+    """
+    Build result list from Cython window-based collocation data.
+    
+    Args:
+        cython_result: Tuple from calculate_collocations_window containing:
+            (T_count_total, candidate_counts_total, token_counter_total, 
+             total_tokens, word2idx, idx2word, target_indices)
+        target_words: List of target words (unused, but kept for consistency)
+        alternative: Alternative hypothesis for Fisher's exact test
+    
+    Returns:
+        List of dictionaries with collocation statistics
+    """
+    T_count_total, candidate_counts_total, token_counter_total, total_tokens, word2idx, idx2word, target_indices = cython_result
+    
+    if T_count_total is None:
+        return []
+    
+    target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
+    vocab_size = len(word2idx)
+    table = np.zeros((2, 2), dtype=np.int64)
+
+    results = []
+    for t_idx, target in enumerate(target_words_filtered):
+        target_word_idx = target_indices[t_idx]
+        for candidate_idx in range(vocab_size):
+            a = candidate_counts_total[t_idx, candidate_idx]
+            if a == 0 or candidate_idx == target_word_idx:
+                continue
+            
+            candidate = idx2word[candidate_idx]
+            b = T_count_total[t_idx] - a
+            c = token_counter_total[candidate_idx] - a
+            d = (total_tokens - token_counter_total[target_word_idx]) - (a + b + c)
+            
+            results.append(_compute_collocation_result(
+                target, candidate, a, b, c, d, total_tokens,
+                token_counter_total[candidate_idx], table, alternative
+            ))
+    
+    return results
+
+
+def _build_results_from_cython_sentence(cython_result, target_words, alternative='greater'):
+    """
+    Build result list from Cython sentence-based collocation data.
+    
+    Args:
+        cython_result: Tuple from calculate_collocations_sentence containing:
+            (candidate_sentences_total, sentences_with_token_total, 
+             total_sentences, word2idx, idx2word, target_indices)
+        target_words: List of target words (unused, but kept for consistency)
+        alternative: Alternative hypothesis for Fisher's exact test
+    
+    Returns:
+        List of dictionaries with collocation statistics
+    """
+    candidate_sentences_total, sentences_with_token_total, total_sentences, word2idx, idx2word, target_indices = cython_result
+    
+    if candidate_sentences_total is None:
+        return []
+    
+    target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
+    vocab_size = len(word2idx)
+    table = np.zeros((2, 2), dtype=np.int64)
+
+    results = []
+    for t_idx, target in enumerate(target_words_filtered):
+        target_word_idx = target_indices[t_idx]
+        for candidate_idx in range(vocab_size):
+            a = candidate_sentences_total[t_idx, candidate_idx]
+            if a == 0 or candidate_idx == target_word_idx:
+                continue
+            
+            candidate = idx2word[candidate_idx]
+            b = sentences_with_token_total[target_word_idx] - a
+            c = sentences_with_token_total[candidate_idx] - a
+            d = total_sentences - a - b - c
+            
+            results.append(_compute_collocation_result(
+                target, candidate, a, b, c, d, total_sentences,
+                sentences_with_token_total[candidate_idx], table, alternative
+            ))
+    
+    return results
+
+
+def _build_results_from_counts(target_words, target_counts, candidate_counts, global_counts, total, alternative='greater'):
+    """
+    Build result list from Python-collected collocation counts.
+    
+    This is the shared result-building logic used by both window and sentence
+    Python implementations.
+    
+    Args:
+        target_words: List of target words to process
+        target_counts: Dict mapping target -> count of contexts containing target
+        candidate_counts: Dict mapping target -> Counter of candidate co-occurrences
+        global_counts: Dict/Counter mapping token -> global count
+        total: Total count (tokens for window, sentences for sentence method)
+        alternative: Alternative hypothesis for Fisher's exact test
+    
+    Returns:
+        List of dictionaries with collocation statistics
+    """
+    table = np.zeros((2, 2), dtype=np.int64)
+    results = []
+    
+    for target in target_words:
+        for candidate, a in candidate_counts[target].items():
+            if candidate == target:
+                continue
+            
+            b = target_counts[target] - a
+            c = global_counts[candidate] - a
+            d = (total - global_counts[target]) - (a + b + c)
+            
+            results.append(_compute_collocation_result(
+                target, candidate, a, b, c, d, total,
+                global_counts[candidate], table, alternative
+            ))
+    
+    return results
+
+
 def _calculate_collocations_window_cython(tokenized_sentences, target_words, horizon=5, 
                                          max_sentence_length=256, alternative='greater'):
     """
@@ -53,52 +223,26 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
     else:
         left_horizon, right_horizon = horizon
     
-    result = calculate_collocations_window(tokenized_sentences, target_words, left_horizon, right_horizon,
-                                           max_sentence_length)
+    cython_result = calculate_collocations_window(
+        tokenized_sentences, target_words, left_horizon, right_horizon, max_sentence_length
+    )
     
-    T_count_total, candidate_counts_total, token_counter_total, total_tokens, word2idx, idx2word, target_indices = result
-    
-    if T_count_total is None:
-        return []
-    
-    target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
-    vocab_size = len(word2idx)
-    table = np.zeros((2, 2), dtype=np.int64)
+    return _build_results_from_cython_window(cython_result, target_words, alternative)
 
-    results = []
-    for t_idx, target in enumerate(target_words_filtered):
-        target_word_idx = target_indices[t_idx]
-        for candidate_idx in range(vocab_size):
-            a = candidate_counts_total[t_idx, candidate_idx]
-            if a == 0 or candidate_idx == target_word_idx:
-                continue
-            
-            candidate = idx2word[candidate_idx]
-            
-            b = T_count_total[t_idx] - a
-            c = token_counter_total[candidate_idx] - a
-            d = (total_tokens - token_counter_total[target_word_idx]) - (a + b + c)
-            
-            expected = (a + b) * (a + c) / total_tokens if total_tokens > 0 else 0
-            ratio = a / expected if expected > 0 else 0
-            
-            table[:] = [[a, b], [c, d]]
-            _, p_value = scipy_fisher_exact(table, alternative=alternative)
-
-            results.append({
-                "target": target,
-                "collocate": candidate,
-                "exp_local": expected,
-                "obs_local": int(a),
-                "ratio_local": ratio,
-                "obs_global": int(token_counter_total[candidate_idx]),
-                "p_value": p_value,
-            })
-    
-    return results
 
 def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5, alternative='greater'):
-    """Window-based collocation calculation."""
+    """
+    Pure Python window-based collocation calculation.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences
+        target_words: List or set of target words
+        horizon: Window size - int for symmetric (left, right) or tuple (left, right)
+        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
+    
+    Returns:
+        List of dictionaries with collocation statistics
+    """
     # Normalize horizon to (left, right) tuple
     if isinstance(horizon, int):
         left_horizon, right_horizon = horizon, horizon
@@ -124,37 +268,10 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5,
                     T_count[target] += 1
                     candidate_in_context[target][token] += 1
 
-    results = []
-    
-    table = np.zeros((2, 2), dtype=np.int64)
+    return _build_results_from_counts(
+        target_words, T_count, candidate_in_context, token_counter, total_tokens, alternative
+    )
 
-    for target in target_words:
-        for candidate, a in candidate_in_context[target].items():
-            if candidate == target:
-                continue
-                
-            b = T_count[target] - a
-            c = token_counter[candidate] - a
-            d = (total_tokens - token_counter[target]) - (a + b + c)
-
-            expected = (a + b) * (a + c) / total_tokens if total_tokens > 0 else 0
-            ratio = a / expected if expected > 0 else 0
-
-            # Reuse array - update in-place
-            table[:] = [[a, b], [c, d]]
-            _, p_value = scipy_fisher_exact(table, alternative=alternative)
-
-            results.append({
-                "target": target,
-                "collocate": candidate,
-                "exp_local": expected,
-                "obs_local": a,
-                "ratio_local": ratio,
-                "obs_global": token_counter[candidate],
-                "p_value": p_value,
-            })
-
-    return results
 
 def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, max_sentence_length=256, alternative='greater'):
     """
@@ -172,54 +289,25 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, m
     Returns:
         List of dictionaries with collocation statistics
     """
-    result = calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length)
+    cython_result = calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length)
     
-    candidate_sentences_total, sentences_with_token_total, total_sentences, word2idx, idx2word, target_indices = result
-    
-    if candidate_sentences_total is None:
-        return []
-    
-    target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
-    vocab_size = len(word2idx)
-    
-    table = np.zeros((2, 2), dtype=np.int64)
+    return _build_results_from_cython_sentence(cython_result, target_words, alternative)
 
-    results = []
-    for t_idx, target in enumerate(target_words_filtered):
-        target_word_idx = target_indices[t_idx]
-        for candidate_idx in range(vocab_size):
-            a = candidate_sentences_total[t_idx, candidate_idx]
-            if a == 0 or candidate_idx == target_word_idx:
-                continue
-            
-            candidate = idx2word[candidate_idx]
-            
-            b = sentences_with_token_total[target_word_idx] - a
-            c = sentences_with_token_total[candidate_idx] - a
-            d = total_sentences - a - b - c
-            
-            expected = (a + b) * (a + c) / total_sentences if total_sentences > 0 else 0
-            ratio = a / expected if expected > 0 else 0
-            
-            table[:] = [[a, b], [c, d]]
-            _, p_value = scipy_fisher_exact(table, alternative=alternative)
-
-            results.append({
-                "target": target,
-                "collocate": candidate,
-                "exp_local": expected,
-                "obs_local": int(a),
-                "ratio_local": ratio,
-                "obs_global": int(sentences_with_token_total[candidate_idx]),
-                "p_value": p_value,
-            })
-    
-    return results
 
 def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sentence_length=256, alternative='greater'):
-    """Sentence-based collocation calculation."""
+    """
+    Pure Python sentence-based collocation calculation.
+    
+    Args:
+        tokenized_sentences: List of tokenized sentences
+        target_words: List or set of target words
+        max_sentence_length: Maximum sentence length to consider (default 256)
+        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
+    
+    Returns:
+        List of dictionaries with collocation statistics
+    """
     total_sentences = len(tokenized_sentences)
-    results = []
     candidate_in_sentences = {target: Counter() for target in target_words}
     sentences_with_token = defaultdict(int)
 
@@ -234,35 +322,9 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sent
             if target in unique_tokens:
                 candidate_in_sentences[target].update(unique_tokens)
 
-    # Create reusable table array (avoid creating new array in each iteration)
-    table = np.zeros((2, 2), dtype=np.int64)
-
-    for target in target_words:
-        for candidate, a in candidate_in_sentences[target].items():
-            if candidate == target:
-                continue
-            b = sentences_with_token[target] - a
-            c = sentences_with_token[candidate] - a
-            d = total_sentences - a - b - c
-
-            expected = (a + b) * (a + c) / total_sentences if total_sentences > 0 else 0
-            ratio = a / expected if expected > 0 else 0
-
-            # Reuse array - update in-place
-            table[:] = [[a, b], [c, d]]
-            _, p_value = scipy_fisher_exact(table, alternative=alternative)
-
-            results.append({
-                "target": target,
-                "collocate": candidate,
-                "exp_local": expected,
-                "obs_local": a,
-                "ratio_local": ratio,
-                "obs_global": sentences_with_token[candidate],
-                "p_value": p_value,
-            })
-
-    return results
+    return _build_results_from_counts(
+        target_words, sentences_with_token, candidate_in_sentences, sentences_with_token, total_sentences, alternative
+    )
 
 def find_collocates(
     sentences: List[List[str]], 
@@ -377,7 +439,7 @@ def find_collocates(
             filter_strs.append(f"min_obs_global={filters['min_obs_global']}")
         if 'max_obs_global' in filters:
             filter_strs.append(f"max_obs_global={filters['max_obs_global']}")
-        print(f"Filters: {', '.join(filter_strs)}")
+        logger.info(f"Filters: {', '.join(filter_strs)}")
 
     if CYTHON_AVAILABLE:
         if method == 'window':
@@ -485,8 +547,18 @@ def find_collocates(
         results = pd.DataFrame(results)
     return results
 
-def cooc_matrix(documents, method='window', horizon=None, min_abs_count=1, min_doc_count=1, 
-                vocab_size=None, binary=False, as_dataframe=True, vocab=None, use_sparse=False):
+def cooc_matrix(
+    documents: List[List[str]], 
+    method: str = 'window', 
+    horizon: Optional[Union[int, Tuple[int, int]]] = None, 
+    min_abs_count: int = 1, 
+    min_doc_count: int = 1, 
+    vocab_size: Optional[int] = None, 
+    binary: bool = False, 
+    as_dataframe: bool = True, 
+    vocab: Optional[Union[List[str], set]] = None, 
+    use_sparse: bool = False
+) -> Union[pd.DataFrame, Tuple[np.ndarray, Dict[str, int]]]:
     """
     Calculate a co-occurrence matrix from a list of documents.
     
@@ -625,7 +697,15 @@ def cooc_matrix(documents, method='window', horizon=None, min_abs_count=1, min_d
     
     if as_dataframe:
         if use_sparse:
-            # Note: Converting sparse to dense could be memory-intensive for large matrices
+            # Warn user about converting sparse to dense
+            import warnings
+            warnings.warn(
+                "Converting sparse matrix to dense DataFrame. This defeats the purpose of "
+                "use_sparse=True and may cause memory issues for large vocabularies. "
+                "Consider using as_dataframe=False to keep the sparse matrix, or "
+                "use_sparse=False if you need a DataFrame.",
+                UserWarning
+            )
             cooc_matrix_df = pd.DataFrame(
                 cooc_matrix_array.toarray(), 
                 index=vocab_list, 
@@ -768,13 +848,13 @@ def plot_collocates(
     if x_scale == 'log':
         zero_or_neg_x = (x <= 0).sum()
         if zero_or_neg_x > 0:
-            print(f"Warning: {zero_or_neg_x} values in {x_col} are ≤ 0. Replacing with 1e-300 for log scale.")
+            logger.warning(f"{zero_or_neg_x} values in {x_col} are ≤ 0. Replacing with 1e-300 for log scale.")
             x = np.where(x <= 0, 1e-300, x)
     
     if y_scale == 'log':
         zero_or_neg_y = (y <= 0).sum()
         if zero_or_neg_y > 0:
-            print(f"Warning: {zero_or_neg_y} values in {y_col} are ≤ 0. Replacing with 1e-300 for log scale.")
+            logger.warning(f"{zero_or_neg_y} values in {y_col} are ≤ 0. Replacing with 1e-300 for log scale.")
             y = np.where(y <= 0, 1e-300, y)
     
     fig, ax = plt.subplots(figsize=figsize)

@@ -1,8 +1,10 @@
-import torch
+import logging
 import matplotlib.pyplot as plt
 from typing import Optional, List, Tuple, Union
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger("qhchina.educational.llms")
 
 def predict_next_token(
     input_text: str, 
@@ -34,7 +36,18 @@ def predict_next_token(
         If result="list" or None: List of tuples containing (token_str, probability)
         If result="df": pandas DataFrame with columns 'token' and 'probability'
         Otherwise: None
+    
+    Raises:
+        ImportError: If PyTorch is not installed.
     """
+    try:
+        import torch
+    except ImportError:
+        raise ImportError(
+            "PyTorch is required for predict_next_token(). "
+            "Install it with: pip install torch"
+        )
+    
     # Set device and move model to it
     device = torch.device(device)
     model = model.to(device)
@@ -69,13 +82,13 @@ def predict_next_token(
     # Handle the result parameter
     if result == "text":
         # Print tokens row by row
-        print(f"\nTop {k} predictions for next token after: '{input_text}'")
-        print('-' * 50)
+        logger.info(f"\nTop {k} predictions for next token after: '{input_text}'")
+        logger.info('-' * 50)
         max_token_len = max(len(token) for token, _ in top_tokens)
         for i, (token, prob) in enumerate(top_tokens):
             # Format with token, probability and percentage
-            print(f"{i+1:2d}. '{token}'{' ' * (max_token_len - len(token) + 2)}{prob:.6f} ({prob*100:.2f}%)")
-        print('-' * 50)
+            logger.info(f"{i+1:2d}. '{token}'{' ' * (max_token_len - len(token) + 2)}{prob:.6f} ({prob*100:.2f}%)")
+        logger.info('-' * 50)
         return None
     
     elif result in ["horizontal", "vertical"]:

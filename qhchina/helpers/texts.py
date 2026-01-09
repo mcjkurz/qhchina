@@ -1,3 +1,8 @@
+import logging
+
+logger = logging.getLogger("qhchina.helpers.texts")
+
+
 def detect_encoding(filename, num_bytes=10000):
     """
     Detects the encoding of a file.
@@ -148,7 +153,7 @@ def get_stopword_languages() -> list:
         stopword_lists = [f[:-4] for f in files if f.endswith('.txt')]
         return sorted(stopword_lists)
     except FileNotFoundError:
-        print(f"Warning: Stopwords directory not found at path {stopwords_dir}")
+        logger.warning(f"Stopwords directory not found at path {stopwords_dir}")
         return []
     
 def split_into_chunks(sequence, chunk_size, overlap=0.0):
@@ -164,6 +169,8 @@ def split_into_chunks(sequence, chunk_size, overlap=0.0):
     Returns:
     list: A list of chunks. If input is a string, each chunk is a string.
          If input is a list, each chunk is a list of tokens.
+         Note: The last chunk may be smaller than chunk_size if the sequence
+         doesn't divide evenly.
     
     Raises:
     ValueError: If overlap is not between 0 and 1.
@@ -174,21 +181,23 @@ def split_into_chunks(sequence, chunk_size, overlap=0.0):
     if not sequence:
         return []
     
-    # Handle case where sequence is shorter than chunk_size
+    # Handle case where sequence is shorter than or equal to chunk_size
     if len(sequence) <= chunk_size:
         return [sequence]
-        
+    
     overlap_size = int(chunk_size * overlap)
-    stride = chunk_size - overlap_size
+    stride = max(1, chunk_size - overlap_size)  # Ensure stride is at least 1
     
     chunks = []
-    last_start = 0
-    for i in range(0, len(sequence) - chunk_size + 1, stride):
-        chunks.append(sequence[i:i + chunk_size])
-        last_start = i
-    
-    # Handle the last chunk if there are remaining tokens/characters
-    if last_start + chunk_size < len(sequence):
-        chunks.append(sequence[-chunk_size:])
+    i = 0
+    while i < len(sequence):
+        end = i + chunk_size
+        if end >= len(sequence):
+            # Last chunk - include all remaining elements
+            chunks.append(sequence[i:])
+            break
+        else:
+            chunks.append(sequence[i:end])
+            i += stride
         
     return chunks

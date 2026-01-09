@@ -575,6 +575,7 @@ def train_skipgram_batch(
     Returns:
         Total loss for the batch
     """
+    # Declare all variables at the top of the function
     cdef int batch_size = input_indices.shape[0]
     cdef int vector_size = W.shape[1]
     cdef int vocab_size = W.shape[0]
@@ -586,6 +587,8 @@ def train_skipgram_batch(
     
     # Pre-allocate arrays for each example's processing
     cdef np.ndarray[real_t, ndim=1] input_grad = np.zeros(vector_size, dtype=W.base.dtype)
+    cdef np.ndarray[real_t, ndim=1] pos_output_grad = np.zeros(vector_size, dtype=W.base.dtype)
+    cdef np.ndarray[real_t, ndim=1] neg_output_grad = np.zeros(vector_size, dtype=W.base.dtype)
     
     # Generate all negative samples at once for efficiency
     cdef np.ndarray[ITYPE_t, ndim=2] neg_indices = np.zeros((batch_size, NEGATIVE), dtype=np.int32)
@@ -597,8 +600,9 @@ def train_skipgram_batch(
         in_idx = input_indices[i]
         out_idx = output_indices[i]
         
-        # Reset the input gradient buffer using BLAS
+        # Reset gradient buffers using BLAS
         our_zero(&input_grad[0], vector_size)
+        our_zero(&pos_output_grad[0], vector_size)
         
         # === POSITIVE EXAMPLE ===
         # Compute dot product
@@ -613,9 +617,8 @@ def train_skipgram_batch(
         # Accumulate gradients for input vector
         our_axpy(&W_prime[out_idx, 0], &input_grad[0], gradient, vector_size)
         
-        # Update output vector directly
-        for j in range(vector_size):
-            W_prime[out_idx, j] += neg_lr * gradient * W[in_idx, j]
+        # Accumulate gradient for positive output vector (clip before applying)
+        our_axpy(&W[in_idx, 0], &pos_output_grad[0], gradient, vector_size)
         
         # Compute loss for positive example
         total_loss -= fast_log_sigmoid(score)
@@ -640,15 +643,20 @@ def train_skipgram_batch(
             # Accumulate gradients for input vector
             our_axpy(&W_prime[neg_idx, 0], &input_grad[0], gradient, vector_size)
             
-            # Update negative output vector directly
-            for j in range(vector_size):
-                W_prime[neg_idx, j] += neg_lr * gradient * W[in_idx, j]
+            # Compute gradient for this negative sample, clip it, then apply
+            our_zero(&neg_output_grad[0], vector_size)
+            our_axpy(&W[in_idx, 0], &neg_output_grad[0], gradient, vector_size)
+            clip_gradient_norm(&neg_output_grad[0], vector_size, GRADIENT_CLIP)
+            our_axpy(&neg_output_grad[0], &W_prime[neg_idx, 0], neg_lr, vector_size)
             
             # Compute loss for negative example
             total_loss -= fast_log_sigmoid(-score)
         
-        # Update input word vector after processing all negatives
-        # Clip accumulated input gradients by norm before applying
+        # Clip and apply accumulated positive output gradient
+        clip_gradient_norm(&pos_output_grad[0], vector_size, GRADIENT_CLIP)
+        our_axpy(&pos_output_grad[0], &W_prime[out_idx, 0], neg_lr, vector_size)
+        
+        # Clip and apply accumulated input gradient
         clip_gradient_norm(&input_grad[0], vector_size, GRADIENT_CLIP)
         our_axpy(&input_grad[0], &W[in_idx, 0], neg_lr, vector_size)
     

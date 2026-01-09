@@ -1,3 +1,4 @@
+import logging
 import shutil
 from typing import Optional
 try:
@@ -7,6 +8,8 @@ except Exception as e:
     raise ImportError(f"Failed to import matplotlib: {e}") from e
 from pathlib import Path
 import os
+
+logger = logging.getLogger("qhchina.helpers.fonts")
 
 PACKAGE_PATH = Path(__file__).parents[1].resolve() # qhchina
 CJK_FONT_PATH = Path(f'{PACKAGE_PATH}/data/fonts').resolve()
@@ -116,9 +119,9 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
     global _fonts_loaded
     
     if verbose:
-        print(f"{PACKAGE_PATH=}")
-        print(f"{CJK_FONT_PATH=}")
-        print(f"{MPL_FONT_PATH=}")
+        logger.info(f"{PACKAGE_PATH=}")
+        logger.info(f"{CJK_FONT_PATH=}")
+        logger.info(f"{MPL_FONT_PATH=}")
     cjk_fonts = [file.name for file in Path(f'{CJK_FONT_PATH}').glob('**/*') if not file.name.startswith(".")]
     
     errors = []
@@ -126,10 +129,14 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
         try:
             source = Path(f'{CJK_FONT_PATH}/{font}').resolve()
             target = Path(f'{MPL_FONT_PATH}/{font}').resolve()
-            shutil.copy(source, target)
+            # Only copy if target doesn't exist or is older than source
+            if not target.exists() or source.stat().st_mtime > target.stat().st_mtime:
+                shutil.copy(source, target)
+                if verbose:
+                    logger.info(f"Copied font: {font}")
             matplotlib.font_manager.fontManager.addfont(f'{target}')
             if verbose:
-                print(f"Loaded font: {font}")
+                logger.info(f"Loaded font: {font}")
         except Exception as e:
             errors.append(f"{font}: {e}")
     
@@ -146,8 +153,8 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
         resolved_font = FONT_ALIASES.get(target_font, target_font)
         if verbose:
             if target_font != resolved_font:
-                print(f"Resolving alias '{target_font}' to '{resolved_font}'")
-            print(f"Setting font to: {resolved_font}")
+                logger.info(f"Resolving alias '{target_font}' to '{resolved_font}'")
+            logger.info(f"Setting font to: {resolved_font}")
         set_font(target_font)
         return get_font_path(target_font)
     
@@ -216,8 +223,8 @@ def list_available_fonts() -> dict:
             font_name = font_props.get_name()
             font_info[font_file.name] = font_name
         except Exception as e:
-            print(f"Error reading font: {font_file.name}")
-            print(f"Error: {e}")
+            logger.error(f"Error reading font: {font_file.name}")
+            logger.error(f"Error: {e}")
     
     return font_info
 
