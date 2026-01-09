@@ -20,7 +20,7 @@ pip install qhchina
 
 ## Documentation
 
-Full documentation and examples: [www.qhchina.org](https://www.qhchina.org)
+Full documentation and examples: [www.qhchina.org/pkg_docs/](https://www.qhchina.org/pkg_docs/)
 
 ## Tests
 
