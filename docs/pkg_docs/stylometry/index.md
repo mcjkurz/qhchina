@@ -3,18 +3,38 @@ layout: docs_with_sidebar
 title: Stylometry
 permalink: /pkg_docs/stylometry/
 functions:
-  - name: Stylometry
-    anchor: stylometry-class
+  - name: Stylometry()
+    anchor: stylometry
   - name: fit_transform()
-    anchor: core-method
+    anchor: fit_transform
+  - name: transform()
+    anchor: transform
   - name: predict()
-    anchor: prediction-methods
+    anchor: predict
+  - name: predict_author()
+    anchor: predict_author
   - name: most_similar()
-    anchor: similarity--distance-methods
+    anchor: most_similar
+  - name: similarity()
+    anchor: similarity
+  - name: distance()
+    anchor: distance
+  - name: get_author_profile()
+    anchor: get_author_profile
+  - name: distance_matrix()
+    anchor: distance_matrix
+  - name: hierarchical_clustering()
+    anchor: hierarchical_clustering
   - name: plot()
-    anchor: visualization-methods
+    anchor: plot
+  - name: dendrogram()
+    anchor: dendrogram
   - name: extract_mfw()
-    anchor: utility-functions
+    anchor: extract_mfw
+  - name: burrows_delta()
+    anchor: burrows_delta
+  - name: compute_yule_k()
+    anchor: compute_yule_k
 ---
 
 # Stylometry
@@ -50,17 +70,14 @@ dist = stylo.distance('鲁迅_1', '沈从文_1')     # Compare two documents (lo
 
 ---
 
-## Stylometry Class
+<h3 id="stylometry">Stylometry()</h3>
 
 The main class for stylometric analysis supports both supervised (with labeled training data) and unsupervised (clustering) approaches.
 
-### Workflow
-
+**Workflow:**
 1. Create a `Stylometry` instance with desired parameters
 2. Call `fit_transform()` with your corpus (dict or list of tokenized documents)
 3. Analyze with: `plot()`, `dendrogram()`, `most_similar()`, `similarity()`, `distance()`, `predict()`
-
-### Initialization
 
 ```python
 Stylometry(n_features=100, ngram_range=(1, 1), ngram_type='word', transform='zscore',
@@ -91,9 +108,9 @@ Stylometry(n_features=100, ngram_range=(1, 1), ngram_type='word', transform='zsc
   - `'centroid'`: Aggregate all author texts into one profile per author (default)
   - `'instance'`: Keep individual texts separate (k-NN style)
 
----
+<br>
 
-### Core Method
+<h3 id="fit_transform">fit_transform()</h3>
 
 ```python
 fit_transform(corpus, labels=None)
@@ -119,6 +136,8 @@ Document IDs are generated based on grouping: when a label has only one document
 
 <br>
 
+<h3 id="transform">transform()</h3>
+
 ```python
 transform(tokens)
 ```
@@ -132,9 +151,7 @@ Transform a tokenized text to a feature vector using fitted features. This allow
 
 <br>
 
----
-
-### Prediction Methods
+<h3 id="predict">predict()</h3>
 
 ```python
 predict(text, k=1)
@@ -152,6 +169,8 @@ Predict the most likely author for a tokenized text.
 
 <br>
 
+<h3 id="predict_author">predict_author()</h3>
+
 ```python
 predict_author(text, k=1)
 ```
@@ -168,9 +187,7 @@ In `'instance'` mode with `k > 1`, returns the majority vote among the k nearest
 
 <br>
 
----
-
-### Similarity & Distance Methods
+<h3 id="most_similar">most_similar()</h3>
 
 ```python
 most_similar(query, k=None, return_distance=False)
@@ -187,6 +204,8 @@ Find the most similar documents to a query.
 
 <br>
 
+<h3 id="similarity">similarity()</h3>
+
 ```python
 similarity(a, b)
 ```
@@ -199,6 +218,8 @@ Compute the similarity between two documents. Higher = more similar.
 **Returns:** (float) Similarity value. For cosine: -1 to 1. For others: 0 to 1.
 
 <br>
+
+<h3 id="distance">distance()</h3>
 
 ```python
 distance(a, b)
@@ -213,9 +234,7 @@ Compute the distance between two documents. Lower = more similar.
 
 <br>
 
----
-
-### Analysis Methods
+<h3 id="get_author_profile">get_author_profile()</h3>
 
 ```python
 get_author_profile(author)
@@ -240,6 +259,8 @@ Get a comparison table of feature values across all fitted authors.
 
 <br>
 
+<h3 id="distance_matrix">distance_matrix()</h3>
+
 ```python
 distance_matrix(level='document')
 ```
@@ -252,6 +273,8 @@ Compute pairwise distance matrix from fitted data.
 **Returns:** (tuple) (distance_matrix, labels)
 
 <br>
+
+<h3 id="hierarchical_clustering">hierarchical_clustering()</h3>
 
 ```python
 hierarchical_clustering(method='average', level='document')
@@ -267,9 +290,7 @@ Perform hierarchical clustering on fitted data.
 
 <br>
 
----
-
-### Visualization Methods
+<h3 id="plot">plot()</h3>
 
 ```python
 plot(method='pca', level='document', figsize=(10, 8), show_labels=True,
@@ -297,6 +318,8 @@ Create a 2D scatter plot of documents or authors.
 
 <br>
 
+<h3 id="dendrogram">dendrogram()</h3>
+
 ```python
 dendrogram(method='average', level='document', orientation='top', 
            figsize=(12, 8), labels=None, title=None, fontsize=10, 
@@ -321,9 +344,7 @@ Visualize hierarchical clustering as a dendrogram.
 
 <br>
 
----
-
-## Utility Functions
+<h3 id="extract_mfw">extract_mfw()</h3>
 
 ```python
 extract_mfw(ngram_counts, n=100)
@@ -337,7 +358,9 @@ Extract the n Most Frequent n-grams from a Counter.
 
 **Returns:** (list) List of the n most common n-grams
 
----
+<br>
+
+<h3 id="burrows_delta">burrows_delta()</h3>
 
 ```python
 burrows_delta(vec_a, vec_b)
@@ -351,7 +374,7 @@ Burrows' Delta distance: the mean absolute difference between z-score vectors. A
 
 **Returns:** (float) Distance value (lower = more similar)
 
----
+<br>
 
 ```python
 cosine_distance(vec_a, vec_b)
@@ -361,7 +384,7 @@ Cosine distance: 1 - cosine_similarity.
 
 **Returns:** (float) Distance value (0 = identical, 2 = opposite)
 
----
+<br>
 
 ```python
 manhattan_distance(vec_a, vec_b)
@@ -371,7 +394,7 @@ Manhattan (L1) distance: sum of absolute differences.
 
 **Returns:** (float) Distance value (lower = more similar)
 
----
+<br>
 
 ```python
 euclidean_distance(vec_a, vec_b)
@@ -381,7 +404,7 @@ Euclidean (L2) distance: square root of sum of squared differences.
 
 **Returns:** (float) Distance value (lower = more similar)
 
----
+<br>
 
 ```python
 eder_delta(vec_a, vec_b)
@@ -391,7 +414,7 @@ Eder's Delta distance: a variation of Burrows' Delta with different weighting. S
 
 **Returns:** (float) Distance value (lower = more similar)
 
----
+<br>
 
 ```python
 get_relative_frequencies(tokens)
@@ -404,7 +427,9 @@ Compute relative frequencies for a list of tokens.
 
 **Returns:** (dict) Mapping of tokens to relative frequencies (count / total)
 
----
+<br>
+
+<h3 id="compute_yule_k">compute_yule_k()</h3>
 
 ```python
 compute_yule_k(tokens)
@@ -421,7 +446,7 @@ Compute Yule's K characteristic for vocabulary richness. Higher values indicate 
 
 ## Examples
 
-### Authorship Attribution
+**Authorship Attribution**
 
 ```python
 from qhchina.analytics.stylometry import Stylometry
@@ -459,7 +484,7 @@ predicted = stylo.predict_author(unknown_text)
 print(f"Predicted author: {predicted}")
 ```
 
-### Finding Similar Documents
+**Finding Similar Documents**
 
 ```python
 # Find documents most similar to a specific document (returns similarity by default)
@@ -478,7 +503,7 @@ dist = stylo.distance('author_a_1', 'author_b_1')   # lower = more similar
 print(f"Similarity: {sim:.4f}, Distance: {dist:.4f}")
 ```
 
-### Analyzing Author Profiles
+**Analyzing Author Profiles**
 
 ```python
 # Get feature profile for an author
@@ -492,7 +517,7 @@ print("Most variable features across authors:")
 print(comparison.head(10))
 ```
 
-### Document Clustering (Unsupervised)
+**Document Clustering (Unsupervised)**
 
 ```python
 from qhchina.analytics.stylometry import Stylometry
@@ -525,7 +550,7 @@ stylo.dendrogram(
 similar = stylo.most_similar('unk_1')
 ```
 
-### Supervised Visualization
+**Supervised Visualization**
 
 ```python
 # After fitting on labeled corpus
@@ -555,7 +580,7 @@ stylo.dendrogram(
 )
 ```
 
-### Instance Mode with k-NN
+**Instance Mode with k-NN**
 
 ```python
 # Use instance mode for k-nearest neighbor attribution
@@ -572,7 +597,7 @@ predicted = stylo.predict_author(unknown_text, k=5)
 print(f"Predicted author (majority vote): {predicted}")
 ```
 
-### Corpus Balance Warning
+**Corpus Balance Warning**
 
 The module automatically warns when author corpus sizes are highly imbalanced (3x difference or more), as this can skew the Most Frequent Words calculation toward the larger corpus:
 

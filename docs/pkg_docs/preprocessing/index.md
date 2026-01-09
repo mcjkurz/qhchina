@@ -4,17 +4,17 @@ title: Text Preprocessing
 permalink: /pkg_docs/preprocessing/
 functions:
   - name: create_segmenter()
-    anchor: creating-a-segmenter
+    anchor: create_segmenter
   - name: segment()
-    anchor: segmenter-methods
+    anchor: segment
   - name: SpaCy Backend
-    anchor: spacy
+    anchor: spacy-backend
   - name: Jieba Backend
-    anchor: jieba
+    anchor: jieba-backend
   - name: BERT Backend
-    anchor: bert
+    anchor: bert-backend
   - name: LLM Backend
-    anchor: llm
+    anchor: llm-backend
 ---
 
 # Text Preprocessing
@@ -31,7 +31,7 @@ sentences = segmenter.segment("深度学习正在改变世界。自然语言处�
 
 ---
 
-## Creating a Segmenter
+<h3 id="create_segmenter">create_segmenter()</h3>
 
 ```python
 create_segmenter(backend='spacy', strategy='whole', chunk_size=512, 
@@ -57,9 +57,9 @@ Factory function to create a segmenter based on the specified backend.
 
 **Returns:** An instance of a segmenter (SpacySegmenter, JiebaSegmenter, BertSegmenter, or LLMSegmenter)
 
-## Available Backends
+<br>
 
-### SpaCy
+<h3 id="spacy-backend">SpaCy Backend</h3>
 
 Uses spaCy NLP library with Chinese models.
 
@@ -71,7 +71,9 @@ Uses spaCy NLP library with Chinese models.
 
 **Installation:** `pip install spacy && python -m spacy download zh_core_web_sm`
 
-### Jieba
+<br>
+
+<h3 id="jieba-backend">Jieba Backend</h3>
 
 Uses the Jieba library for fast segmentation.
 
@@ -81,7 +83,9 @@ Uses the Jieba library for fast segmentation.
 
 **Installation:** `pip install jieba`
 
-### BERT
+<br>
+
+<h3 id="bert-backend">BERT Backend</h3>
 
 Uses BERT-based neural segmentation models.
 
@@ -94,7 +98,9 @@ Uses BERT-based neural segmentation models.
 
 **Installation:** `pip install transformers torch`
 
-### LLM
+<br>
+
+<h3 id="llm-backend">LLM Backend</h3>
 
 Uses Large Language Models via API services (e.g., OpenAI).
 
@@ -108,7 +114,9 @@ Uses Large Language Models via API services (e.g., OpenAI).
 
 **Installation:** `pip install openai`
 
-## Segmenter Methods
+<br>
+
+<h3 id="segment">segment()</h3>
 
 All segmenters have the following method:
 
@@ -125,9 +133,11 @@ Segment text into tokens.
 - If `strategy='whole'`: List of tokens
 - If `strategy='line'`, `'sentence'`, or `'chunk'`: List of lists of tokens
 
+---
+
 ## Examples
 
-### Basic Segmentation
+**Basic Segmentation**
 
 ```python
 from qhchina.preprocessing.segmentation import create_segmenter
@@ -150,7 +160,7 @@ sentences = segmenter.segment(long_text)
 # Output: [['古代', '文明', '的', '天文', '观测', '记录', '。'], ...]
 ```
 
-### With Filters and Custom Dictionary
+**With Filters and Custom Dictionary**
 
 ```python
 from qhchina.helpers import load_stopwords
@@ -176,7 +186,7 @@ text = "深度学习模型理解复杂语境。量子计算改变加密技术。
 sentences = segmenter.segment(text)
 ```
 
-### Integration with Analytics
+**Integration with Analytics**
 
 ```python
 from qhchina.preprocessing.segmentation import create_segmenter

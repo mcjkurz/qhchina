@@ -2,6 +2,11 @@
 layout: docs_with_sidebar
 title: Documentation
 permalink: /pkg_docs/
+functions:
+  - name: Quick Start
+    anchor: quick-start
+  - name: Global Config
+    anchor: global-configuration
 ---
 
 # qhChina Package Documentation

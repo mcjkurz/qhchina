@@ -3,16 +3,30 @@ layout: docs_with_sidebar
 title: Topic Modeling
 permalink: /pkg_docs/topic_modeling/
 functions:
-  - name: LDAGibbsSampler
+  - name: LDAGibbsSampler()
     anchor: ldagibbssampler
   - name: fit()
-    anchor: main-methods
+    anchor: fit
   - name: get_topics()
-    anchor: main-methods
+    anchor: get_topics
+  - name: get_topic_words()
+    anchor: get_topic_words
+  - name: get_document_topics()
+    anchor: get_document_topics
+  - name: get_top_documents()
+    anchor: get_top_documents
   - name: inference()
-    anchor: main-methods
+    anchor: inference
+  - name: topic_similarity()
+    anchor: topic_similarity
+  - name: document_similarity()
+    anchor: document_similarity
+  - name: plot_topic_words()
+    anchor: plot_topic_words
   - name: visualize_documents()
-    anchor: main-methods
+    anchor: visualize_documents
+  - name: save() / load()
+    anchor: save-load
 ---
 
 # Topic Modeling
@@ -29,9 +43,7 @@ topics = lda.get_topics(n_words=10)  # Get top words per topic
 
 ---
 
-## LDAGibbsSampler
-
-### Initialization
+<h3 id="ldagibbssampler">LDAGibbsSampler()</h3>
 
 ```python
 LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=100, burnin=0, 
@@ -40,8 +52,7 @@ LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=100, burnin=0,
                 use_cython=True, estimate_alpha=1)
 ```
 
-### Parameters
-
+**Parameters:**
 - `n_topics` (int): Number of topics (default: 10)
 - `alpha` (float or array): Document-topic prior. Can be a float (symmetric prior) or array of floats (asymmetric prior, one value per topic). If None, uses `50/n_topics` (Griffiths & Steyvers, 2004) (default: None)
 - `beta` (float): Topic-word prior. If None, uses `1/n_topics` (Griffiths & Steyvers, 2004) (default: None)
@@ -57,7 +68,9 @@ LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=100, burnin=0,
 - `estimate_alpha` (int): Estimate alpha every N iterations (0 = disable) (default: 1)
 - `min_doc_length` (int): Minimum document length (tokens) to trigger a warning during preprocessing (default: 24). Documents shorter than this may produce unreliable topic distributions.
 
-### Main Methods
+<br>
+
+<h3 id="fit">fit()</h3>
 
 ```python
 fit(documents)
@@ -69,6 +82,8 @@ Fit the LDA model to documents.
 - `documents` (list): List of tokenized documents (each document is a list of tokens)
 
 <br>
+
+<h3 id="get_topics">get_topics()</h3>
 
 ```python
 get_topics(n_words=10)
@@ -82,6 +97,8 @@ Get top words for all topics.
 **Returns:** (list) List of lists containing (word, probability) tuples
 
 <br>
+
+<h3 id="get_topic_words">get_topic_words()</h3>
 
 ```python
 get_topic_words(topic_id, n_words=10)
@@ -97,6 +114,8 @@ Get top words for a specific topic.
 
 <br>
 
+<h3 id="get_document_topics">get_document_topics()</h3>
+
 ```python
 get_document_topics(doc_id, sort_by_prob=False)
 ```
@@ -110,6 +129,8 @@ Get topic distribution for a document.
 **Returns:** (list) List of (topic_id, probability) tuples
 
 <br>
+
+<h3 id="get_top_documents">get_top_documents()</h3>
 
 ```python
 get_top_documents(topic_id, n_docs=10)
@@ -135,6 +156,8 @@ Get overall topic distribution across the corpus.
 
 <br>
 
+<h3 id="inference">inference()</h3>
+
 ```python
 inference(new_doc, inference_iterations=100)
 ```
@@ -148,6 +171,8 @@ Infer topic distribution for a new document.
 **Returns:** (numpy.ndarray) Topic distribution
 
 <br>
+
+<h3 id="topic_similarity">topic_similarity()</h3>
 
 ```python
 topic_similarity(topic_i, topic_j, metric='jsd')
@@ -181,6 +206,8 @@ Calculate pairwise similarity between all topics.
 
 <br>
 
+<h3 id="document_similarity">document_similarity()</h3>
+
 ```python
 document_similarity(doc_i, doc_j, metric='jsd')
 ```
@@ -210,6 +237,8 @@ Calculate pairwise similarity between documents.
 
 <br>
 
+<h3 id="plot_topic_words">plot_topic_words()</h3>
+
 ```python
 plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, 
                  separate_files=False, dpi=72, orientation='horizontal')
@@ -227,6 +256,8 @@ Plot top words for topics as bar charts.
 - `orientation` (str): Bar orientation ('horizontal' or 'vertical')
 
 <br>
+
+<h3 id="visualize_documents">visualize_documents()</h3>
 
 ```python
 visualize_documents(method='pca', n_clusters=None, doc_labels=None,
@@ -271,6 +302,8 @@ Documents are automatically colored by dominant topic, or by k-means clusters if
 
 <br>
 
+<h3 id="save-load">save() / load()</h3>
+
 ```python
 save(filepath)
 ```
@@ -294,11 +327,11 @@ Load model from file. This is a class method.
 **Returns:**
 - Loaded LDAGibbsSampler instance
 
-<br>
+---
 
 ## Examples
 
-### Basic Topic Modeling
+**Basic Topic Modeling**
 
 ```python
 from qhchina.analytics.topicmodels import LDAGibbsSampler
@@ -344,7 +377,7 @@ lda.save("lda_model.npy")
 loaded_lda = LDAGibbsSampler.load("lda_model.npy")
 ```
 
-### Analyzing Documents and Topics
+**Analyzing Documents and Topics**
 
 ```python
 # Get topic distribution for a specific document
@@ -363,7 +396,7 @@ similarity = lda.topic_similarity(topic_i=0, topic_j=1, metric='jsd')
 print(f"Topic similarity: {similarity:.4f}")
 ```
 
-### Visualizing Documents in 2D Space
+**Visualizing Documents in 2D Space**
 
 ```python
 # PCA visualization colored by dominant topic (default)

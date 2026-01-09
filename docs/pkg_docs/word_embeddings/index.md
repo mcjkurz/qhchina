@@ -3,18 +3,36 @@ layout: docs_with_sidebar
 title: Word Embeddings
 permalink: /pkg_docs/word_embeddings/
 functions:
-  - name: Word2Vec
+  - name: Word2Vec()
     anchor: word2vec
+  - name: build_vocab()
+    anchor: build_vocab
   - name: train()
-    anchor: main-methods
+    anchor: train
+  - name: get_vector()
+    anchor: get_vector
   - name: most_similar()
-    anchor: main-methods
-  - name: TempRefWord2Vec
+    anchor: most_similar
+  - name: similarity()
+    anchor: similarity
+  - name: save() / load()
+    anchor: save-load
+  - name: TempRefWord2Vec()
     anchor: temprefword2vec
+  - name: calculate_semantic_change()
+    anchor: calculate_semantic_change
   - name: project_2d()
-    anchor: vector-analysis-functions
+    anchor: project_2d
   - name: calculate_bias()
-    anchor: vector-analysis-functions
+    anchor: calculate_bias
+  - name: align_vectors()
+    anchor: align_vectors
+  - name: cosine_similarity()
+    anchor: cosine_similarity
+  - name: most_similar() (vectors)
+    anchor: most_similar-vectors
+  - name: project_bias()
+    anchor: project_bias
 ---
 
 # Word Embeddings
@@ -31,11 +49,9 @@ similar = model.most_similar("经济", topn=10)  # Find words similar to "经济
 
 ---
 
-## Word2Vec
+<h3 id="word2vec">Word2Vec()</h3>
 
 Implementation of Word2Vec with both CBOW and Skip-gram architectures.
-
-### Initialization
 
 ```python
 Word2Vec(vector_size=100, window=5, min_word_count=5, sg=1, negative=5, 
@@ -45,8 +61,7 @@ Word2Vec(vector_size=100, window=5, min_word_count=5, sg=1, negative=5,
          exp_table_size=1000, max_exp=6.0)
 ```
 
-### Key Parameters
-
+**Parameters:**
 - `vector_size` (int): Dimensionality of word vectors (default: 100)
 - `window` (int): Maximum distance between target and context words (default: 5)
 - `min_word_count` (int): Ignores words with frequency below threshold (default: 5)
@@ -59,7 +74,9 @@ Word2Vec(vector_size=100, window=5, min_word_count=5, sg=1, negative=5,
 - `cbow_mean` (bool): Use mean (True) or sum (False) for context vectors in CBOW (default: True)
 - `use_cython` (bool): Use Cython for performance-critical operations (default: False)
 
-### Main Methods
+<br>
+
+<h3 id="build_vocab">build_vocab()</h3>
 
 ```python
 build_vocab(sentences, update=False)
@@ -72,6 +89,8 @@ Build vocabulary from tokenized sentences.
 - `update` (bool): Update existing vocabulary instead of replacing
 
 <br>
+
+<h3 id="train">train()</h3>
 
 ```python
 train(sentences, epochs=5, batch_size=2000, total_examples=None, verbose=None)
@@ -88,6 +107,8 @@ Train the Word2Vec model.
 
 <br>
 
+<h3 id="get_vector">get_vector()</h3>
+
 ```python
 get_vector(word)
 ```
@@ -100,6 +121,8 @@ Get the vector representation of a word.
 **Returns:** (numpy.ndarray) Word vector
 
 <br>
+
+<h3 id="most_similar">most_similar()</h3>
 
 ```python
 most_similar(word, topn=10)
@@ -115,6 +138,8 @@ Find the most similar words.
 
 <br>
 
+<h3 id="similarity">similarity()</h3>
+
 ```python
 similarity(word1, word2)
 ```
@@ -128,6 +153,8 @@ Calculate cosine similarity between two words.
 **Returns:** (float) Cosine similarity score
 
 <br>
+
+<h3 id="save-load">save() / load()</h3>
 
 ```python
 save(filepath)
@@ -144,25 +171,22 @@ Save or load model to/from file.
 
 <br>
 
-## TempRefWord2Vec
+<h3 id="temprefword2vec">TempRefWord2Vec()</h3>
 
 Specialized implementation for tracking semantic change over time. Creates temporal variants of target words in a single vector space.
-
-### Initialization
 
 ```python
 TempRefWord2Vec(corpora, labels, targets, vector_size=100, window=5, 
                 min_word_count=5, sg=1, negative=5, alpha=0.025, seed=1, ...)
 ```
 
-### Key Parameters
-
+**Parameters:**
 - `corpora` (list): List of corpora for different time periods (list of lists of sentences)
 - `labels` (list): Labels for each time period (list of strings)
 - `targets` (list): Words to track for semantic change (list of strings)
 - Additional parameters: Same as Word2Vec
 
-### Main Methods
+<br>
 
 ```python
 train(calculate_loss=True, batch_size=2000)
@@ -180,6 +204,8 @@ Get vector for a word (including temporal variants like "word_1980").
 
 <br>
 
+<h3 id="calculate_semantic_change">calculate_semantic_change()</h3>
+
 ```python
 calculate_semantic_change(target_word)
 ```
@@ -193,7 +219,7 @@ Calculate semantic change for a target word across time periods.
 
 <br>
 
-## Vector Analysis Functions
+<h3 id="project_2d">project_2d()</h3>
 
 From `qhchina.analytics.vectors`:
 
@@ -213,6 +239,8 @@ Project word vectors to 2D space for visualization.
 
 <br>
 
+<h3 id="calculate_bias">calculate_bias()</h3>
+
 ```python
 calculate_bias(anchors, targets, word_vectors)
 ```
@@ -228,6 +256,8 @@ Calculate bias scores for target words along an axis defined by anchor pairs.
 
 <br>
 
+<h3 id="align_vectors">align_vectors()</h3>
+
 ```python
 align_vectors(source_vectors, target_vectors)
 ```
@@ -242,7 +272,9 @@ Align source vectors with target vectors using Procrustes analysis.
 - `aligned_vectors`: The aligned source vectors
 - `transformation_matrix`: The orthogonal transformation matrix that can be used to align other vectors
 
----
+<br>
+
+<h3 id="cosine_similarity">cosine_similarity()</h3>
 
 ```python
 cosine_similarity(v1, v2)
@@ -256,7 +288,9 @@ Compute the cosine similarity between vectors. Returns 0.0 if either vector has 
 
 **Returns:** (float or numpy.ndarray) Cosine similarity score(s)
 
----
+<br>
+
+<h3 id="most_similar-vectors">most_similar() (vectors module)</h3>
 
 ```python
 most_similar(target_vector, vectors, labels=None, metric='cosine', top_n=None)
@@ -273,7 +307,9 @@ Find the most similar vectors to a target vector.
 
 **Returns:** (list) List of (label/index, score) tuples sorted by similarity in descending order
 
----
+<br>
+
+<h3 id="project_bias">project_bias()</h3>
 
 ```python
 project_bias(x, y, targets, word_vectors, title=None, color=None, 
@@ -300,7 +336,7 @@ Plot words on a 1D or 2D chart by projecting them onto bias axes.
 
 ## Examples
 
-### Basic Word2Vec Training
+**Basic Word2Vec Training**
 
 ```python
 from qhchina.analytics.word2vec import Word2Vec
@@ -328,7 +364,7 @@ sim = model.similarity("电影", "电视")
 print(f"Similarity: {sim:.4f}")
 ```
 
-### Tracking Semantic Change Over Time
+**Tracking Semantic Change Over Time**
 
 ```python
 from qhchina.analytics.word2vec import TempRefWord2Vec

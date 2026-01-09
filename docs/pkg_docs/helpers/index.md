@@ -4,26 +4,32 @@ title: Helper Utilities
 permalink: /pkg_docs/helpers/
 functions:
   - name: load_fonts()
-    anchor: font-management
+    anchor: load_fonts
   - name: set_font()
-    anchor: font-management
+    anchor: set_font
+  - name: current_font()
+    anchor: current_font
   - name: get_font_path()
-    anchor: font-management
+    anchor: get_font_path
   - name: load_text()
-    anchor: text-loading
+    anchor: load_text
+  - name: load_texts()
+    anchor: load_texts
+  - name: detect_encoding()
+    anchor: detect_encoding
   - name: load_stopwords()
-    anchor: text-loading
+    anchor: load_stopwords
   - name: split_into_chunks()
-    anchor: text-loading
+    anchor: split_into_chunks
 ---
 
 # Helper Utilities
 
 The `qhchina.helpers` module provides utilities for font management and text loading when working with Chinese texts.
 
-## Font Management
+---
 
-### Functions
+<h3 id="load_fonts">load_fonts()</h3>
 
 ```python
 load_fonts(target_font='Noto Sans CJK TC', verbose=False)
@@ -58,6 +64,8 @@ for font in fonts:
 
 <br>
 
+<h3 id="set_font">set_font()</h3>
+
 ```python
 set_font(font='Noto Sans CJK TC')
 ```
@@ -70,6 +78,8 @@ Set the matplotlib font for Chinese text rendering.
   - Custom font: Path to your own font file (`.otf` or `.ttf`)
 
 <br>
+
+<h3 id="current_font">current_font()</h3>
 
 ```python
 current_font()
@@ -99,7 +109,9 @@ Get dictionary of font aliases and their corresponding names.
 
 **Returns:** (dict) Mapping of aliases to full font names
 
----
+<br>
+
+<h3 id="get_font_path">get_font_path()</h3>
 
 ```python
 get_font_path(font='Noto Sans CJK TC')
@@ -133,9 +145,9 @@ wc = WordCloud(font_path=sans_font['path'], width=800, height=400)
 
 Note: `get_font_path` can also be imported directly from `qhchina`.
 
----
+<br>
 
-### Available Fonts
+**Available Fonts**
 
 <style>
 .bordered-table {
@@ -186,9 +198,9 @@ Note: `get_font_path` can also be imported directly from `qhchina`.
 </table>
 </div>
 
-## Text Loading
+<br>
 
-### Functions
+<h3 id="load_text">load_text()</h3>
 
 ```python
 load_text(filepath, encoding='utf-8')
@@ -204,6 +216,8 @@ Load text from a single file.
 
 <br>
 
+<h3 id="load_texts">load_texts()</h3>
+
 ```python
 load_texts(filepaths, encoding='utf-8')
 ```
@@ -217,6 +231,8 @@ Load text from multiple files.
 **Returns:** (list) List of text contents
 
 <br>
+
+<h3 id="detect_encoding">detect_encoding()</h3>
 
 ```python
 detect_encoding(filename, num_bytes=10000)
@@ -233,6 +249,8 @@ Detect the encoding of a file.
 **Note:** Requires the `chardet` package (`pip install chardet`)
 
 <br>
+
+<h3 id="load_stopwords">load_stopwords()</h3>
 
 ```python
 load_stopwords(language='zh_sim')
@@ -261,6 +279,8 @@ Get all available stopword language codes.
 
 <br>
 
+<h3 id="split_into_chunks">split_into_chunks()</h3>
+
 ```python
 split_into_chunks(sequence, chunk_size, overlap=0.0)
 ```
@@ -274,11 +294,11 @@ Split text or a list of tokens into chunks with optional overlap.
 
 **Returns:** (list) List of chunks
 
-<br>
+---
 
 ## Examples
 
-### Basic Font Setup
+**Basic Font Setup**
 
 ```python
 from qhchina.helpers import load_fonts, set_font
@@ -295,7 +315,7 @@ plt.ylabel('頻率')
 plt.show()
 ```
 
-### Using Custom Fonts
+**Using Custom Fonts**
 
 ```python
 from qhchina.helpers import set_font
@@ -314,7 +334,7 @@ plt.title('使用自定義字體')
 plt.show()
 ```
 
-### Loading Texts and Stopwords
+**Loading Texts and Stopwords**
 
 ```python
 from qhchina.helpers import load_text, load_texts, load_stopwords, split_into_chunks

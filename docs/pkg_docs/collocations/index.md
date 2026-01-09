@@ -4,11 +4,11 @@ title: Collocation Analysis
 permalink: /pkg_docs/collocations/
 functions:
   - name: find_collocates()
-    anchor: functions
+    anchor: find_collocates
   - name: plot_collocates()
-    anchor: functions
+    anchor: plot_collocates
   - name: cooc_matrix()
-    anchor: functions
+    anchor: cooc_matrix
 ---
 
 # Collocation Analysis
@@ -24,7 +24,7 @@ top_collocates = collocates.sort_values("p_value").head(10)  # Most significant 
 
 ---
 
-## Functions
+<h3 id="find_collocates">find_collocates()</h3>
 
 ```python
 find_collocates(sentences, target_words, method='window', horizon=5, filters=None, 
@@ -69,6 +69,8 @@ Statistical significance is computed using Fisher's exact test with the "greater
 
 <br>
 
+<h3 id="plot_collocates">plot_collocates()</h3>
+
 ```python
 plot_collocates(collocates, x_col='ratio_local', y_col='p_value', 
                 x_scale='log', y_scale='log', color=None, colormap='viridis', 
@@ -103,6 +105,8 @@ Visualize collocation results as a flexible 2D scatter plot.
 
 <br>
 
+<h3 id="cooc_matrix">cooc_matrix()</h3>
+
 ```python
 cooc_matrix(documents, method='window', horizon=5, min_abs_count=1, min_doc_count=1, 
             vocab_size=None, binary=False, as_dataframe=True, vocab=None, 
@@ -132,11 +136,11 @@ Create a co-occurrence matrix from a collection of documents.
 - If `as_dataframe=False` and `use_sparse=False`: tuple of (numpy array, word_to_index dictionary)
 - If `as_dataframe=False` and `use_sparse=True`: tuple of (scipy sparse matrix, word_to_index dictionary)
 
-<br>
+---
 
 ## Examples
 
-### Finding Collocates
+**Finding Collocates**
 
 ```python
 from qhchina.analytics.collocations import find_collocates
@@ -187,7 +191,7 @@ for _, row in top_collocates.iterrows():
     print(f"{row['collocate']}: obs={row['obs_local']}, ratio={row['ratio_local']:.2f}, p={row['p_value']:.4f}")
 ```
 
-### Visualizing Collocates
+**Visualizing Collocates**
 
 ```python
 from qhchina.analytics.collocations import find_collocates, plot_collocates
@@ -227,7 +231,7 @@ plot_collocates(
 )
 ```
 
-### Creating Co-occurrence Matrix
+**Creating Co-occurrence Matrix**
 
 ```python
 from qhchina.analytics.collocations import cooc_matrix

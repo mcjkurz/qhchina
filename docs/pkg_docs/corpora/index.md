@@ -4,7 +4,7 @@ title: Corpus Analysis
 permalink: /pkg_docs/corpora/
 functions:
   - name: compare_corpora()
-    anchor: functions
+    anchor: compare_corpora
 ---
 
 # Corpus Analysis
@@ -20,7 +20,7 @@ words_in_a = results[results["rel_ratio"] > 1]  # Words more common in corpus A
 
 ---
 
-## Functions
+<h3 id="compare_corpora">compare_corpora()</h3>
 
 ```python
 compare_corpora(corpusA, corpusB, method='fisher', filters=None, 
@@ -56,9 +56,11 @@ Identify statistically significant differences in word usage between two corpora
 
 **Note:** A small p-value indicates that the difference in word frequency between corpora is statistically significant. A `rel_ratio` > 1 indicates the word is more common in corpus A; < 1 indicates more common in corpus B. Two-sided tests are used because we want to detect whether words are overrepresented in either corpus.
 
+---
+
 ## Examples
 
-### Basic Corpus Comparison
+**Basic Corpus Comparison**
 
 ```python
 from qhchina.analytics.corpora import compare_corpora
@@ -103,7 +105,7 @@ print("\nWords more common in Corpus B:")
 print(words_in_B[["word", "rel_ratio", "p_value"]].head(10))
 ```
 
-### Visualizing Corpus Differences
+**Visualizing Corpus Differences**
 
 ```python
 import matplotlib.pyplot as plt
