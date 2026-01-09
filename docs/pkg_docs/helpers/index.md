@@ -2,6 +2,19 @@
 layout: docs_with_sidebar
 title: Helper Utilities
 permalink: /pkg_docs/helpers/
+functions:
+  - name: load_fonts()
+    anchor: font-management
+  - name: set_font()
+    anchor: font-management
+  - name: get_font_path()
+    anchor: font-management
+  - name: load_text()
+    anchor: text-loading
+  - name: load_stopwords()
+    anchor: text-loading
+  - name: split_into_chunks()
+    anchor: text-loading
 ---
 
 # Helper Utilities

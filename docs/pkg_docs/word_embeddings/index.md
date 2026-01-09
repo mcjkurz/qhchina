@@ -2,6 +2,19 @@
 layout: docs_with_sidebar
 title: Word Embeddings
 permalink: /pkg_docs/word_embeddings/
+functions:
+  - name: Word2Vec
+    anchor: word2vec
+  - name: train()
+    anchor: main-methods
+  - name: most_similar()
+    anchor: main-methods
+  - name: TempRefWord2Vec
+    anchor: temprefword2vec
+  - name: project_2d()
+    anchor: vector-analysis-functions
+  - name: calculate_bias()
+    anchor: vector-analysis-functions
 ---
 
 # Word Embeddings

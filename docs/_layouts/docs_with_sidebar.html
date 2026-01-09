@@ -33,14 +33,36 @@
             <nav class="docs-nav">
               <h3>Package Documentation</h3>
               <ul>
-                <li><a href="{{ site.baseurl }}/pkg_docs/" {% if page.url == '/pkg_docs/' %}class="active"{% endif %}>Overview</a></li>
-                <li><a href="{{ site.baseurl }}/pkg_docs/preprocessing/" {% if page.url contains '/pkg_docs/preprocessing/' %}class="active"{% endif %}>Preprocessing</a></li>
-                <li><a href="{{ site.baseurl }}/pkg_docs/word_embeddings/" {% if page.url contains '/pkg_docs/word_embeddings/' %}class="active"{% endif %}>Word Embeddings</a></li>
-                <li><a href="{{ site.baseurl }}/pkg_docs/topic_modeling/" {% if page.url contains '/pkg_docs/topic_modeling/' %}class="active"{% endif %}>Topic Modeling</a></li>
-                <li><a href="{{ site.baseurl }}/pkg_docs/stylometry/" {% if page.url contains '/pkg_docs/stylometry/' %}class="active"{% endif %}>Stylometry</a></li>
-                <li><a href="{{ site.baseurl }}/pkg_docs/collocations/" {% if page.url contains '/pkg_docs/collocations/' %}class="active"{% endif %}>Collocations</a></li>
-                <li><a href="{{ site.baseurl }}/pkg_docs/corpora/" {% if page.url contains '/pkg_docs/corpora/' %}class="active"{% endif %}>Corpora</a></li>
-                <li><a href="{{ site.baseurl }}/pkg_docs/helpers/" {% if page.url contains '/pkg_docs/helpers/' %}class="active"{% endif %}>Helpers</a></li>
+                {% assign nav_items = "Overview:/pkg_docs/,Preprocessing:/pkg_docs/preprocessing/,Word Embeddings:/pkg_docs/word_embeddings/,Topic Modeling:/pkg_docs/topic_modeling/,Stylometry:/pkg_docs/stylometry/,Collocations:/pkg_docs/collocations/,Corpora:/pkg_docs/corpora/,Helpers:/pkg_docs/helpers/" | split: "," %}
+                {% for item in nav_items %}
+                  {% assign parts = item | split: ":" %}
+                  {% assign name = parts[0] %}
+                  {% assign url = parts[1] %}
+                  {% assign is_overview = false %}
+                  {% if url == '/pkg_docs/' %}
+                    {% assign is_overview = true %}
+                  {% endif %}
+                  {% assign is_active = false %}
+                  {% if is_overview %}
+                    {% if page.url == '/pkg_docs/' %}
+                      {% assign is_active = true %}
+                    {% endif %}
+                  {% else %}
+                    {% if page.url contains url %}
+                      {% assign is_active = true %}
+                    {% endif %}
+                  {% endif %}
+                  <li class="{% if is_active %}has-submenu{% endif %}">
+                    <a href="{{ site.baseurl }}{{ url }}" {% if is_active %}class="active"{% endif %}>{{ name }}</a>
+                    {% if is_active and page.functions %}
+                    <ul class="docs-submenu">
+                      {% for func in page.functions %}
+                        <li><a href="#{{ func.anchor }}">{{ func.name }}</a></li>
+                      {% endfor %}
+                    </ul>
+                    {% endif %}
+                  </li>
+                {% endfor %}
               </ul>
             </nav>
           </aside>

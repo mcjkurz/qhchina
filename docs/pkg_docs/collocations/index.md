@@ -2,6 +2,13 @@
 layout: docs_with_sidebar
 title: Collocation Analysis
 permalink: /pkg_docs/collocations/
+functions:
+  - name: find_collocates()
+    anchor: functions
+  - name: plot_collocates()
+    anchor: functions
+  - name: cooc_matrix()
+    anchor: functions
 ---
 
 # Collocation Analysis

@@ -2,6 +2,17 @@
 layout: docs_with_sidebar
 title: Topic Modeling
 permalink: /pkg_docs/topic_modeling/
+functions:
+  - name: LDAGibbsSampler
+    anchor: ldagibbssampler
+  - name: fit()
+    anchor: main-methods
+  - name: get_topics()
+    anchor: main-methods
+  - name: inference()
+    anchor: main-methods
+  - name: visualize_documents()
+    anchor: main-methods
 ---
 
 # Topic Modeling

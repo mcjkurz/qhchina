@@ -2,6 +2,19 @@
 layout: docs_with_sidebar
 title: Stylometry
 permalink: /pkg_docs/stylometry/
+functions:
+  - name: Stylometry
+    anchor: stylometry-class
+  - name: fit_transform()
+    anchor: core-method
+  - name: predict()
+    anchor: prediction-methods
+  - name: most_similar()
+    anchor: similarity--distance-methods
+  - name: plot()
+    anchor: visualization-methods
+  - name: extract_mfw()
+    anchor: utility-functions
 ---
 
 # Stylometry

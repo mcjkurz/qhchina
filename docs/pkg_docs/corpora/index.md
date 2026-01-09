@@ -2,6 +2,9 @@
 layout: docs_with_sidebar
 title: Corpus Analysis
 permalink: /pkg_docs/corpora/
+functions:
+  - name: compare_corpora()
+    anchor: functions
 ---
 
 # Corpus Analysis

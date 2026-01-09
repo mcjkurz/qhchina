@@ -465,6 +465,34 @@ aside.docs-sidebar {
   font-weight: 600;
 }
 
+// Submenu for function navigation
+.docs-submenu {
+  list-style: none;
+  padding: 0;
+  margin: calc(0.25 * var(--spacing-unit)) 0 0 0;
+  
+  li {
+    margin-bottom: calc(0.15 * var(--spacing-unit));
+  }
+  
+  a {
+    display: block;
+    padding: calc(0.25 * var(--spacing-unit)) calc(0.5 * var(--spacing-unit)) calc(0.25 * var(--spacing-unit)) calc(1.25 * var(--spacing-unit));
+    font-size: 0.85rem;
+    color: var(--light-text);
+    background-color: transparent;
+    border-left: 2px solid var(--border-color);
+    border-radius: 0;
+    transition: all 0.15s ease;
+    
+    &:hover {
+      color: var(--primary-color);
+      background-color: var(--secondary-color);
+      border-left-color: var(--primary-color);
+    }
+  }
+}
+
 .docs-content {
   flex: 1 1 auto !important;
   min-width: 0 !important;
@@ -506,7 +534,7 @@ aside.docs-sidebar {
     text-align: center !important;
   }
   
-  .docs-nav ul {
+  .docs-nav > ul {
     display: flex !important;
     flex-wrap: wrap !important;
     gap: calc(0.5 * var(--spacing-unit)) !important;
@@ -515,15 +543,20 @@ aside.docs-sidebar {
     justify-content: center !important;
   }
   
-  .docs-nav li {
+  .docs-nav > ul > li {
     margin-bottom: 0 !important;
     flex-shrink: 0 !important;
   }
   
-  .docs-nav a {
+  .docs-nav > ul > li > a {
     padding: calc(0.4 * var(--spacing-unit)) calc(0.6 * var(--spacing-unit)) !important;
     font-size: 0.9rem !important;
     white-space: nowrap !important;
+  }
+  
+  // Hide submenu on mobile - shows main nav only
+  .docs-submenu {
+    display: none !important;
   }
 }
 

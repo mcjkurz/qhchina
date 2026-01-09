@@ -2,6 +2,19 @@
 layout: docs_with_sidebar
 title: Text Preprocessing
 permalink: /pkg_docs/preprocessing/
+functions:
+  - name: create_segmenter()
+    anchor: creating-a-segmenter
+  - name: segment()
+    anchor: segmenter-methods
+  - name: SpaCy Backend
+    anchor: spacy
+  - name: Jieba Backend
+    anchor: jieba
+  - name: BERT Backend
+    anchor: bert
+  - name: LLM Backend
+    anchor: llm
 ---
 
 # Text Preprocessing
