@@ -10,6 +10,14 @@ from scipy.stats import fisher_exact as scipy_fisher_exact
 
 logger = logging.getLogger("qhchina.analytics.collocations")
 
+
+__all__ = [
+    'find_collocates',
+    'cooc_matrix',
+    'plot_collocates',
+    'FilterOptions',
+]
+
 try:
     from .cython_ext.collocations import (
         calculate_collocations_window,
@@ -36,7 +44,7 @@ class FilterOptions(TypedDict, total=False):
     max_obs_global: int
 
 
-def _compute_collocation_result(target, candidate, a, b, c, d, total, obs_global, table, alternative='greater'):
+def _compute_collocation_result(target, candidate, a, b, c, d, obs_global, table, alternative='greater'):
     """
     Compute collocation statistics for a single target-collocate pair.
     
@@ -50,7 +58,6 @@ def _compute_collocation_result(target, candidate, a, b, c, d, total, obs_global
         b: Target without collocate count  
         c: Collocate without target count
         d: Neither target nor collocate count
-        total: Total count (tokens or sentences depending on method)
         obs_global: Global observation count for the collocate
         table: Pre-allocated 2x2 numpy array for Fisher's exact test (reused for efficiency)
         alternative: Alternative hypothesis for Fisher's exact test
@@ -59,7 +66,11 @@ def _compute_collocation_result(target, candidate, a, b, c, d, total, obs_global
         Dictionary with collocation statistics: target, collocate, exp_local,
         obs_local, ratio_local, obs_global, p_value
     """
-    expected = (a + b) * (a + c) / total if total > 0 else 0
+    # N = sample size from contingency table (a + b + c + d)
+    # For window method: N excludes positions where target is at center (per Evert)
+    # For sentence method: N = total sentences
+    N = a + b + c + d
+    expected = (a + b) * (a + c) / N if N > 0 else 0
     ratio = a / expected if expected > 0 else 0
     
     table[:] = [[a, b], [c, d]]
@@ -113,7 +124,7 @@ def _build_results_from_cython_window(cython_result, target_words, alternative='
             d = (total_tokens - token_counter_total[target_word_idx]) - (a + b + c)
             
             results.append(_compute_collocation_result(
-                target, candidate, a, b, c, d, total_tokens,
+                target, candidate, a, b, c, d,
                 token_counter_total[candidate_idx], table, alternative
             ))
     
@@ -157,14 +168,14 @@ def _build_results_from_cython_sentence(cython_result, target_words, alternative
             d = total_sentences - a - b - c
             
             results.append(_compute_collocation_result(
-                target, candidate, a, b, c, d, total_sentences,
+                target, candidate, a, b, c, d,
                 sentences_with_token_total[candidate_idx], table, alternative
             ))
     
     return results
 
 
-def _build_results_from_counts(target_words, target_counts, candidate_counts, global_counts, total, alternative='greater'):
+def _build_results_from_counts(target_words, target_counts, candidate_counts, global_counts, total, alternative='greater', method='window'):
     """
     Build result list from Python-collected collocation counts.
     
@@ -178,6 +189,7 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
         global_counts: Dict/Counter mapping token -> global count
         total: Total count (tokens for window, sentences for sentence method)
         alternative: Alternative hypothesis for Fisher's exact test
+        method: 'window' or 'sentence' - determines how d is calculated
     
     Returns:
         List of dictionaries with collocation statistics
@@ -189,13 +201,23 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
         for candidate, a in candidate_counts[target].items():
             if candidate == target:
                 continue
-            
+            # a = the number of positions occupied by the candidate where target is near
+            # b = the number of positions occupied by the non-candidates where target is near
+            # c = the number of positions occupied by the candidate where target is not near
+            # d = the number of positions occupied by the non-candidates where target is not near)
             b = target_counts[target] - a
             c = global_counts[candidate] - a
-            d = (total - global_counts[target]) - (a + b + c)
+            
+            if method == 'window':
+                # here, as per (Evert, 2008), we exclude positions where target is at center; 
+                # we are only interested in positions AROUND the target and how non-target candidates
+                # are distributed there
+                d = (total - global_counts[target]) - (a + b + c)
+            else:  # sentence
+                d = total - a - b - c
             
             results.append(_compute_collocation_result(
-                target, candidate, a, b, c, d, total,
+                target, candidate, a, b, c, d,
                 global_counts[candidate], table, alternative
             ))
     
@@ -210,7 +232,9 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
     Args:
         tokenized_sentences: List of tokenized sentences
         target_words: List or set of target words
-        horizon: Window size - int for symmetric (left, right) or tuple (left, right)
+        horizon: Window size - int for symmetric, or tuple (left, right) where left/right
+                 indicate how many words to look on each side OF THE TARGET WORD.
+                 E.g., (0, 5) finds collocates up to 5 words to the RIGHT of target.
         max_sentence_length: Maximum sentence length to consider (default 256)
         alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
     
@@ -218,10 +242,13 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
         List of dictionaries with collocation statistics
     """
     # Normalize horizon to (left, right) tuple
+    # User specifies (left, right) relative to TARGET, but internally we need to
+    # swap because the algorithm iterates over candidates and looks for targets
     if isinstance(horizon, int):
         left_horizon, right_horizon = horizon, horizon
     else:
-        left_horizon, right_horizon = horizon
+        # Swap: user's "right of target" becomes algorithm's "left from candidate"
+        left_horizon, right_horizon = horizon[1], horizon[0]
     
     cython_result = calculate_collocations_window(
         tokenized_sentences, target_words, left_horizon, right_horizon, max_sentence_length
@@ -237,17 +264,22 @@ def _calculate_collocations_window(tokenized_sentences, target_words, horizon=5,
     Args:
         tokenized_sentences: List of tokenized sentences
         target_words: List or set of target words
-        horizon: Window size - int for symmetric (left, right) or tuple (left, right)
+        horizon: Window size - int for symmetric, or tuple (left, right) where left/right
+                 indicate how many words to look on each side OF THE TARGET WORD.
+                 E.g., (0, 5) finds collocates up to 5 words to the RIGHT of target.
         alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
     
     Returns:
         List of dictionaries with collocation statistics
     """
     # Normalize horizon to (left, right) tuple
+    # User specifies (left, right) relative to TARGET, but internally we need to
+    # swap because the algorithm iterates over candidates and looks for targets
     if isinstance(horizon, int):
         left_horizon, right_horizon = horizon, horizon
     else:
-        left_horizon, right_horizon = horizon
+        # Swap: user's "right of target" becomes algorithm's "left from candidate"
+        left_horizon, right_horizon = horizon[1], horizon[0]
     
     total_tokens = 0
     T_count = {target: 0 for target in target_words}
@@ -323,7 +355,7 @@ def _calculate_collocations_sentence(tokenized_sentences, target_words, max_sent
                 candidate_in_sentences[target].update(unique_tokens)
 
     return _build_results_from_counts(
-        target_words, sentences_with_token, candidate_in_sentences, sentences_with_token, total_sentences, alternative
+        target_words, sentences_with_token, candidate_in_sentences, sentences_with_token, total_sentences, alternative, method='sentence'
     )
 
 def find_collocates(
@@ -350,10 +382,14 @@ def find_collocates(
         - 'window': Uses a sliding window of specified horizon around each token
         - 'sentence': Considers whole sentences as context units (horizon not applicable)
     horizon : Optional[Union[int, tuple]], default=None
-        Context window size. Only applicable when method='window'. 
+        Context window size relative to the target word. Only applicable when method='window'. 
         Must be None when method='sentence'.
-        - int: Symmetric window (e.g., 5 means 5 words on each side)
-        - tuple: Asymmetric window (left, right) (e.g., (0, 5) means only 5 words on the right)
+        - int: Symmetric window (e.g., 5 means 5 words on each side of target)
+        - tuple: Asymmetric window (left, right) specifying how many words to look
+                 on each side of the target word:
+                 - (0, 5) finds collocates up to 5 words to the RIGHT of target
+                 - (5, 0) finds collocates up to 5 words to the LEFT of target
+                 - (2, 3) finds collocates 2 words left and 3 words right of target
         - None: Uses default of 5 for 'window' method
     filters : Optional[FilterOptions], optional
         Dictionary of filters to apply to results, AFTER computation is done:
@@ -569,10 +605,12 @@ def cooc_matrix(
     method : str, default='window'
         Method to use for calculating co-occurrences. Either 'window' or 'document'.
     horizon : Optional[Union[int, tuple]], default=None
-        Context window size. Only applicable when method='window'.
+        Context window size relative to each word. Only applicable when method='window'.
         Must be None when method='document'.
         - int: Symmetric window (e.g., 5 means 5 words on each side)
-        - tuple: Asymmetric window (left, right) (e.g., (0, 5) means only 5 words on the right)
+        - tuple: Asymmetric window (left, right) specifying words on each side:
+                 - (0, 5) counts co-occurrences with words up to 5 positions to the RIGHT
+                 - (5, 0) counts co-occurrences with words up to 5 positions to the LEFT
         - None: Uses default of 5 for 'window' method
     min_abs_count : int, default=1
         Minimum absolute count for a word to be included in the vocabulary.
@@ -656,10 +694,13 @@ def cooc_matrix(
 
     if method == 'window':
         # Normalize horizon to (left, right) tuple
+        # User specifies (left, right) relative to each word, but internally we need to
+        # swap because the algorithm iterates over center words and looks outward
         if isinstance(horizon, int):
             left_horizon, right_horizon = horizon, horizon
         else:
-            left_horizon, right_horizon = horizon
+            # Swap: user's "right" becomes algorithm's "left from center"
+            left_horizon, right_horizon = horizon[1], horizon[0]
         
         for document in filtered_documents:
             for i, word1 in enumerate(document):

@@ -6,6 +6,18 @@ from sklearn.manifold import TSNE
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
 
+__all__ = [
+    'project_2d',
+    'get_bias_direction',
+    'calculate_bias',
+    'project_bias',
+    'cosine_similarity',
+    'cosine_distance',
+    'most_similar',
+    'align_vectors',
+]
+
+
 def project_2d(
     vectors: Union[List[np.ndarray], Dict[str, np.ndarray], np.ndarray], 
     labels: Optional[List[str]] = None, 
@@ -275,6 +287,19 @@ def cosine_similarity(
     If either is a matrix of vectors, uses sklearn's implementation for efficiency.
     
     Returns 0.0 if either vector has zero norm (to avoid division by zero).
+    
+    Parameters:
+    -----------
+    v1 : numpy.ndarray or list
+        First vector or matrix of vectors
+    v2 : numpy.ndarray or list  
+        Second vector or matrix of vectors
+        
+    Returns:
+    --------
+    float or numpy.ndarray
+        Cosine similarity score(s). For single vectors, returns a float in range [-1, 1].
+        For matrices, returns a 2D similarity matrix.
     """
     # Convert inputs to numpy arrays if they aren't already
     v1 = np.asarray(v1)
@@ -291,6 +316,32 @@ def cosine_similarity(
     
     # For matrix case, use sklearn's implementation
     return sklearn_cosine_similarity(v1, v2)
+
+
+def cosine_distance(
+    v1: Union[np.ndarray, List[float]], 
+    v2: Union[np.ndarray, List[float]]
+) -> Union[float, np.ndarray]:
+    """
+    Compute the cosine distance between vectors (1 - cosine_similarity).
+    
+    Cosine distance is a dissimilarity measure where 0 means identical vectors
+    and 2 means opposite vectors.
+    
+    Parameters:
+    -----------
+    v1 : numpy.ndarray or list
+        First vector or matrix of vectors
+    v2 : numpy.ndarray or list  
+        Second vector or matrix of vectors
+        
+    Returns:
+    --------
+    float or numpy.ndarray
+        Cosine distance score(s). For single vectors, returns a float in range [0, 2].
+        For matrices, returns a 2D distance matrix.
+    """
+    return 1.0 - cosine_similarity(v1, v2)
 
 def most_similar(
     target_vector: np.ndarray, 

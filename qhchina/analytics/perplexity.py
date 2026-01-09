@@ -6,6 +6,13 @@ import matplotlib.pyplot as plt
 logger = logging.getLogger("qhchina.analytics.perplexity")
 
 
+__all__ = [
+    'calculate_perplexity_of_tokens',
+    'calculate_word_perplexity',
+    'visualize_perplexities',
+]
+
+
 def calculate_perplexity_of_tokens(
     model: Any, 
     tokenizer: Any, 

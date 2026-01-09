@@ -39,9 +39,11 @@ Statistical significance is computed using Fisher's exact test with the "greater
 - `method` (str): Collocation method
   - `'window'`: Use sliding window of specified horizon (default)
   - `'sentence'`: Use whole sentences as context
-- `horizon` (int or tuple): Context window size (only used if `method='window'`)
-  - `int`: Symmetric window (e.g., `5` means 5 words on each side)
-  - `tuple`: Asymmetric window `(left, right)` (e.g., `(0, 5)` means only 5 words to the right)
+- `horizon` (int or tuple): Context window size relative to the target word (only used if `method='window'`)
+  - `int`: Symmetric window (e.g., `5` means 5 words on each side of target)
+  - `tuple`: Asymmetric window `(left, right)` specifying words on each side of target:
+    - `(0, 5)` finds collocates up to 5 words to the RIGHT of target
+    - `(5, 0)` finds collocates up to 5 words to the LEFT of target
 - `max_sentence_length` (int): Maximum sentence length for preprocessing. Sentences longer than this value are truncated to avoid excessive memory usage from outliers. Default is 256 tokens. Set to `None` for no limit. Used by both `'window'` and `'sentence'` methods.
 - `alternative` (str): Alternative hypothesis for Fisher's exact test. Options are `'greater'` (default), `'less'`, or `'two-sided'`.
 - `filters` (dict): Optional filters to apply *after* the statistics are computed on the full corpus:
@@ -120,9 +122,11 @@ Create a co-occurrence matrix from a collection of documents.
 - `method` (str): Co-occurrence method
   - `'window'`: Use sliding window (default)
   - `'document'`: Use whole documents as context
-- `horizon` (int or tuple): Context window size (only used if `method='window'`)
+- `horizon` (int or tuple): Context window size relative to each word (only used if `method='window'`)
   - `int`: Symmetric window (e.g., `5` means 5 words on each side)
-  - `tuple`: Asymmetric window `(left, right)` (e.g., `(0, 5)` means only 5 words to the right)
+  - `tuple`: Asymmetric window `(left, right)` specifying words on each side:
+    - `(0, 5)` counts co-occurrences with words up to 5 positions to the RIGHT
+    - `(5, 0)` counts co-occurrences with words up to 5 positions to the LEFT
 - `min_abs_count` (int): Minimum word frequency to include
 - `min_doc_count` (int): Minimum number of documents a word must appear in
 - `vocab_size` (int): Maximum vocabulary size (optional)
@@ -168,20 +172,18 @@ collocates = find_collocates(
 )
 
 # Find words that appear to the RIGHT of "经济"
-# Use horizon=(3, 0) to look left from candidate positions
 right_collocates = find_collocates(
     sentences=sentences,
     target_words=["经济"],
-    horizon=(3, 0),  # Look 3 positions left from candidates → finds words to the right of target
+    horizon=(0, 3),  # 0 words left, 3 words right of target
     filters={'max_p': 0.05}
 )
 
 # Find words that appear to the LEFT of "经济"
-# Use horizon=(0, 3) to look right from candidate positions
 left_collocates = find_collocates(
     sentences=sentences,
     target_words=["经济"],
-    horizon=(0, 3),  # Look 3 positions right from candidates → finds words to the left of target
+    horizon=(3, 0),  # 3 words left, 0 words right of target
     filters={'max_p': 0.05}
 )
 

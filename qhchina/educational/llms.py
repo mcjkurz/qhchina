@@ -6,6 +6,12 @@ import pandas as pd
 
 logger = logging.getLogger("qhchina.educational.llms")
 
+
+__all__ = [
+    'predict_next_token',
+]
+
+
 def predict_next_token(
     input_text: str, 
     model, 

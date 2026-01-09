@@ -2,6 +2,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import colormaps as cm
 
+
+__all__ = [
+    'show_vectors',
+]
+
+
 def show_vectors(vectors, labels=None, draw_arrows=True, draw_axes=True, colors=None, fontsize=12,
                 colormap='viridis', figsize=(8, 8), title=None, normalize=False, filename=None, show_components=False):
     """

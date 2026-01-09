@@ -39,6 +39,14 @@ from ..config import get_rng, get_python_rng, resolve_seed
 logger = logging.getLogger("qhchina.analytics.word2vec")
 
 
+__all__ = [
+    'Word2Vec',
+    'TempRefWord2Vec',
+    'sample_sentences_to_token_count',
+    'add_corpus_tags',
+]
+
+
 class Word2Vec:
     """
     Implementation of Word2Vec algorithm with sample-based training approach.
@@ -1229,7 +1237,7 @@ class Word2Vec:
         
         # Setup for loss calculation
         total_loss = 0.0
-        total_examples = 0
+        examples_processed_total = 0
         total_example_count = 0
         recent_losses = []
         
@@ -1288,7 +1296,7 @@ class Word2Vec:
             # Add epoch loss to total
             if calculate_loss:
                 total_loss += epoch_loss
-                total_examples += examples_processed_in_epoch
+                examples_processed_total += examples_processed_in_epoch
             
             # Call any registered callbacks
             if callbacks:
@@ -1296,8 +1304,8 @@ class Word2Vec:
                     callback(self, epoch)
         
         # Calculate and return the final average loss if requested
-        if calculate_loss and total_examples > 0:
-            final_avg_loss = total_loss / total_examples
+        if calculate_loss and examples_processed_total > 0:
+            final_avg_loss = total_loss / examples_processed_total
             logger.info(f"Training completed. Final average loss: {final_avg_loss:.6f}")
             return final_avg_loss
         

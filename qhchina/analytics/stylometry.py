@@ -14,14 +14,34 @@ Two modes for supervised learning:
 - 'instance': Keep individual texts separate, find nearest neighbor among all texts
 """
 
+import logging
 import warnings
 from collections import Counter
-from typing import Dict, List, Tuple, Optional, Union, Callable
+from typing import Dict, List, Tuple, Optional, Union, Callable, Any
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from .vectors import cosine_similarity as _cosine_similarity
+from scipy.stats import fisher_exact, chi2_contingency
+from tqdm.auto import tqdm
+from .vectors import cosine_similarity as _cosine_similarity, cosine_distance
 from ..config import resolve_seed
+from ..utils import validate_filters
+
+logger = logging.getLogger("qhchina.analytics.stylometry")
+
+
+__all__ = [
+    'Stylometry',
+    'compare_corpora',
+    'extract_mfw',
+    'burrows_delta',
+    'cosine_distance',
+    'manhattan_distance',
+    'euclidean_distance',
+    'eder_delta',
+    'get_relative_frequencies',
+    'compute_yule_k',
+]
 
 
 # =============================================================================
@@ -44,11 +64,6 @@ def burrows_delta(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
     A classic stylometric measure; lower values indicate more similar writing styles.
     """
     return np.mean(np.abs(vec_a - vec_b))
-
-
-def cosine_distance(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
-    """Cosine distance (1 - cosine_similarity)."""
-    return 1.0 - _cosine_similarity(vec_a, vec_b)
 
 
 def manhattan_distance(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
@@ -139,11 +154,6 @@ class Stylometry:
     Parameters:
         n_features: Number of most frequent n-grams to use as features.
         ngram_range: Tuple (min_n, max_n) for n-grams. Default (1, 1) = unigrams.
-        ngram_type: Type of n-grams - 'word' (default) or 'char'.
-            - 'word': Word n-grams (e.g., "the cat" for bigram)
-            - 'char': Character n-grams (e.g., "th", "he" for bigrams of "the")
-            Character n-grams are useful for short texts, cross-language analysis,
-            or capturing morphological patterns.
         transform: Feature transformation - 'zscore' or 'tfidf'.
         distance: Distance metric - 'cosine' (default), 'burrows_delta', 'manhattan',
             'euclidean', or 'eder_delta'.
@@ -159,9 +169,6 @@ class Stylometry:
         >>> stylo.predict(disputed_text)
         >>> stylo.plot()
         >>> stylo.dendrogram()
-        
-        # Using character n-grams:
-        >>> stylo = Stylometry(n_features=200, ngram_range=(2, 4), ngram_type='char')
     """
     
     # Registries for extensibility
@@ -176,14 +183,12 @@ class Stylometry:
     VALID_TRANSFORMS = ('zscore', 'tfidf')
     VALID_CLASSIFIERS = ('delta', 'svm')
     VALID_MODES = ('centroid', 'instance')
-    VALID_NGRAM_TYPES = ('word', 'char')
     VALID_CLUSTERING_METHODS = ('single', 'complete', 'average', 'weighted', 'ward')
     
     def __init__(
         self,
         n_features: int = 100,
         ngram_range: Tuple[int, int] = (1, 1),
-        ngram_type: str = 'word',
         transform: str = 'zscore',
         distance: str = 'cosine',
         classifier: str = 'delta',
@@ -205,10 +210,6 @@ class Stylometry:
             raise TypeError(f"ngram_range values must be integers")
         if min_n < 1 or max_n < min_n:
             raise ValueError(f"ngram_range must satisfy 1 <= min_n <= max_n, got {ngram_range}")
-        
-        # Validate ngram_type
-        if ngram_type not in self.VALID_NGRAM_TYPES:
-            raise ValueError(f"ngram_type must be one of {self.VALID_NGRAM_TYPES}, got '{ngram_type}'")
         
         # Validate transform
         if transform not in self.VALID_TRANSFORMS:
@@ -239,7 +240,6 @@ class Stylometry:
         # Store parameters
         self.n_features = n_features
         self.ngram_range = ngram_range
-        self.ngram_type = ngram_type
         self.transform_type = transform
         self.distance_metric = distance
         self.classifier = classifier
@@ -309,35 +309,23 @@ class Stylometry:
     
     def _extract_ngrams(self, tokens: List[str]) -> List[str]:
         """
-        Extract n-grams from a list of tokens based on ngram_range and ngram_type.
+        Extract n-grams from a list of tokens based on ngram_range.
         
         Args:
             tokens: List of word tokens
             
         Returns:
-            List of n-gram strings.
-            - For word n-grams: joined with space for n > 1 (e.g., "the cat")
-            - For char n-grams: concatenated characters (e.g., "th", "he")
+            List of n-gram strings (joined with space for n > 1, e.g., "the cat")
         """
         min_n, max_n = self.ngram_range
         ngrams = []
         
-        if self.ngram_type == 'word':
-            # Word n-grams
-            for n in range(min_n, max_n + 1):
-                if n == 1:
-                    ngrams.extend(tokens)
-                else:
-                    for i in range(len(tokens) - n + 1):
-                        ngram = ' '.join(tokens[i:i + n])
-                        ngrams.append(ngram)
-        else:
-            # Character n-grams
-            # Concatenate all tokens into a single string (preserving word boundaries)
-            text = ''.join(tokens)
-            for n in range(min_n, max_n + 1):
-                for i in range(len(text) - n + 1):
-                    ngram = text[i:i + n]
+        for n in range(min_n, max_n + 1):
+            if n == 1:
+                ngrams.extend(tokens)
+            else:
+                for i in range(len(tokens) - n + 1):
+                    ngram = ' '.join(tokens[i:i + n])
                     ngrams.append(ngram)
         
         return ngrams
@@ -867,10 +855,21 @@ class Stylometry:
         """
         Convenience method to get just the predicted author name.
         
-        For 'instance' mode with k > 1 and delta classifier, returns majority vote.
+        Args:
+            text: List of tokens (the disputed text)
+            k: For 'instance' mode only: number of nearest neighbors for majority voting.
+                In 'centroid' mode, this parameter is ignored.
+            distance: Distance metric override (for delta classifier).
+            classifier: Classifier override ('delta' or 'svm').
+        
+        Returns:
+            Predicted author name (str).
         """
         clf = classifier if classifier is not None else self.classifier
-        results = self.predict(text, k=k, distance=distance, classifier=classifier)
+        
+        # In centroid mode, k doesn't affect the result, so we always use k=1
+        effective_k = k if (clf == 'delta' and self.mode == 'instance') else 1
+        results = self.predict(text, k=effective_k, distance=distance, classifier=classifier)
         
         if clf == 'delta' and self.mode == 'instance' and k > 1:
             # Majority vote for instance mode
@@ -1680,3 +1679,175 @@ class Stylometry:
             dendro_result['fig'] = fig
             dendro_result['ax'] = ax
             return dendro_result
+
+
+# =============================================================================
+# Corpus Comparison Functions
+# =============================================================================
+
+def compare_corpora(corpusA: Union[List[str], List[List[str]]], 
+                    corpusB: Union[List[str], List[List[str]]], 
+                    method: str = 'fisher', 
+                    filters: Dict = None,
+                    as_dataframe: bool = True) -> List[Dict]:
+    """
+    Compare two corpora to identify statistically significant differences in word usage.
+    
+    Parameters:
+      corpusA: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
+      corpusB: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
+      method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' for the chi-square test.
+                    All tests use two-sided alternatives.
+      filters (dict, optional): Dictionary of filters to apply to results:
+          - 'min_count': int or tuple - Minimum count threshold(s) for a word to be included 
+            (can be a single int for both corpora or tuple (min_countA, min_countB)).
+            Default is 0, which includes words that appear in either corpus, even if absent in one.
+          - 'max_p': float - Maximum p-value threshold for statistical significance
+          - 'stopwords': list - Words to exclude from results
+          - 'min_word_length': int - Minimum character length for words
+      as_dataframe (bool): Whether to return a pandas DataFrame.
+      
+    Returns:
+      If as_dataframe is True:
+        pandas.DataFrame: A DataFrame containing information about each word's frequency in both corpora,
+                          the p-value, and the ratio of relative frequencies.
+      If as_dataframe is False:
+        List[dict]: Each dict contains information about a word's frequency in both corpora,
+                    the p-value, and the ratio of relative frequencies.
+    
+    Notes:
+      Two-sided tests are used because we want to detect whether words are overrepresented in either corpus.
+    """
+    # Validate filter keys
+    valid_filter_keys = {'min_count', 'max_p', 'stopwords', 'min_word_length'}
+    validate_filters(filters, valid_filter_keys, context='compare_corpora')
+    
+    # Validate and print filters
+    if filters:
+        
+        # Validate filter values
+        if 'min_count' in filters:
+            min_count_val = filters['min_count']
+            if isinstance(min_count_val, int):
+                if min_count_val < 0:
+                    raise ValueError("min_count must be non-negative")
+            elif isinstance(min_count_val, tuple):
+                if len(min_count_val) != 2 or any(v < 0 for v in min_count_val):
+                    raise ValueError("min_count tuple must have 2 non-negative values")
+            else:
+                raise ValueError("min_count must be an int or tuple of 2 ints")
+        
+        if 'max_p' in filters:
+            if not isinstance(filters['max_p'], (int, float)) or filters['max_p'] < 0 or filters['max_p'] > 1:
+                raise ValueError("max_p must be a number between 0 and 1")
+        
+        if 'stopwords' in filters:
+            if not isinstance(filters['stopwords'], (list, set)):
+                raise ValueError("stopwords must be a list or set")
+        
+        if 'min_word_length' in filters:
+            if not isinstance(filters['min_word_length'], int) or filters['min_word_length'] < 1:
+                raise ValueError("min_word_length must be a positive integer")
+        
+        # Print filters
+        filter_strs = []
+        if 'min_count' in filters:
+            filter_strs.append(f"min_count={filters['min_count']}")
+        if 'max_p' in filters:
+            filter_strs.append(f"max_p={filters['max_p']}")
+        if 'stopwords' in filters:
+            filter_strs.append(f"stopwords=<{len(filters['stopwords'])} words>")
+        if 'min_word_length' in filters:
+            filter_strs.append(f"min_word_length={filters['min_word_length']}")
+        logger.info(f"Filters: {', '.join(filter_strs)}")
+    
+    # Helper function to flatten list of sentences if needed
+    def flatten(corpus):
+        if not corpus:
+            return []
+        if isinstance(corpus[0], list): # if a list of sentences
+            # Filter out empty sentences
+            return [word for sentence in corpus if sentence for word in sentence]
+        return corpus
+    
+    # Flatten corpora if they are lists of sentences
+    corpusA = flatten(corpusA)
+    abs_freqA = Counter(corpusA)
+    totalA = sum(abs_freqA.values())
+    del corpusA
+    
+    corpusB = flatten(corpusB)
+    abs_freqB = Counter(corpusB)
+    totalB = sum(abs_freqB.values())
+    del corpusB
+    
+    if totalA == 0:
+        raise ValueError("corpusA is empty or contains only empty sentences")
+    if totalB == 0:
+        raise ValueError("corpusB is empty or contains only empty sentences")
+    
+    # Create a union of all words
+    all_words = set(abs_freqA.keys()).union(abs_freqB.keys())
+    results = []
+    
+    # Get min_count from filters if available, default to 0
+    min_count = filters.get('min_count', 0) if filters else 0
+    if isinstance(min_count, int):
+        min_count = (min_count, min_count)
+    
+    table = np.zeros((2, 2), dtype=np.int64)
+    for word in tqdm(all_words):
+        a = abs_freqA.get(word, 0)  # Count in Corpus A
+        b = abs_freqB.get(word, 0)  # Count in Corpus B
+        
+        # Check minimum counts
+        if a < min_count[0] or b < min_count[1]:
+            continue
+            
+        c = totalA - a          # Other words in Corpus A
+        d = totalB - b          # Other words in Corpus B
+        
+        table[:] = [[a, b], [c, d]]
+
+        # Compute the p-value using the selected statistical test.
+        if method == 'fisher':
+            p_value = fisher_exact(table, alternative='two-sided')[1]
+        elif method == 'chi2':
+            _, p_value, _, _ = chi2_contingency(table, correction=False)
+        elif method == 'chi2_corrected':
+            _, p_value, _, _ = chi2_contingency(table, correction=True)
+        else:
+            raise ValueError("Invalid method specified. Use 'fisher' or 'chi2'")
+        
+        # Calculate the relative frequency ratio (avoiding division by zero)
+        rel_freqA = a / totalA if totalA > 0 else 0
+        rel_freqB = b / totalB if totalB > 0 else 0
+        ratio = (rel_freqA / rel_freqB) if rel_freqB > 0 else np.inf
+        
+        results.append({
+            "word": word,
+            "abs_freqA": a,
+            "abs_freqB": b,
+            "rel_freqA": rel_freqA,
+            "rel_freqB": rel_freqB,
+            "rel_ratio": ratio,
+            "p_value": p_value,
+        })
+    
+    # Apply other filters if specified
+    if filters:
+        # Filter by p-value threshold
+        if 'max_p' in filters:
+            results = [result for result in results if result["p_value"] <= filters['max_p']]
+        
+        # Filter out stopwords
+        if 'stopwords' in filters:
+            results = [result for result in results if result["word"] not in filters['stopwords']]
+        
+        # Filter by minimum length
+        if 'min_word_length' in filters:
+            results = [result for result in results if len(result["word"]) >= filters['min_word_length']]
+            
+    if as_dataframe:
+        results = pd.DataFrame(results)
+    return results

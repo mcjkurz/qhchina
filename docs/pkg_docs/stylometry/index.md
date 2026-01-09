@@ -29,12 +29,18 @@ functions:
     anchor: plot
   - name: dendrogram()
     anchor: dendrogram
+  - name: bootstrap_predict()
+    anchor: bootstrap_predict
+  - name: rolling_delta()
+    anchor: rolling_delta
   - name: extract_mfw()
     anchor: extract_mfw
   - name: burrows_delta()
     anchor: burrows_delta
   - name: compute_yule_k()
     anchor: compute_yule_k
+  - name: compare_corpora()
+    anchor: compare_corpora
 ---
 
 # Stylometry
@@ -80,16 +86,13 @@ The main class for stylometric analysis supports both supervised (with labeled t
 3. Analyze with: `plot()`, `dendrogram()`, `most_similar()`, `similarity()`, `distance()`, `predict()`
 
 ```python
-Stylometry(n_features=100, ngram_range=(1, 1), ngram_type='word', transform='zscore',
+Stylometry(n_features=100, ngram_range=(1, 1), transform='zscore',
            distance='cosine', classifier='delta', cull=None, chunk_size=None, mode='centroid')
 ```
 
 **Parameters:**
 - `n_features` (int): Number of most frequent n-grams to use as features (default: 100)
 - `ngram_range` (tuple): Range of n-gram sizes as (min_n, max_n). Default (1, 1) = unigrams only. Use (1, 2) for unigrams + bigrams, (2, 3) for bigrams + trigrams, etc.
-- `ngram_type` (str): Type of n-grams to extract
-  - `'word'`: Word n-grams (default) - e.g., "the cat" for bigrams
-  - `'char'`: Character n-grams - e.g., "th", "he" for bigrams of "the". Useful for short texts, cross-language analysis, or capturing morphological patterns.
 - `transform` (str): Feature transformation method
   - `'zscore'`: Z-score normalization (default)
   - `'tfidf'`: TF-IDF weighting
@@ -179,11 +182,9 @@ Convenience method to get just the predicted author name.
 
 **Parameters:**
 - `text` (list): List of tokens
-- `k` (int): Number of top results to consider for prediction
+- `k` (int): For `'instance'` mode only: number of nearest neighbors for majority voting. In `'centroid'` mode, this parameter is ignored.
 
 **Returns:** (str) Predicted author name
-
-In `'instance'` mode with `k > 1`, returns the majority vote among the k nearest neighbors. In `'centroid'` mode, returns the most similar author (k only affects the underlying `predict()` call).
 
 <br>
 
@@ -341,6 +342,55 @@ Visualize hierarchical clustering as a dendrogram.
 - `show` (bool): If True, display plot. If False, return result dict.
 
 **Returns:** None if show=True, otherwise dict with `'fig'`, `'ax'`, and scipy dendrogram data (`'ivl'`, `'leaves'`, `'color_list'`, etc.).
+
+<br>
+
+<h3 id="bootstrap_predict">bootstrap_predict()</h3>
+
+```python
+bootstrap_predict(text, n_iter=100, sample_ratio=0.8, distance=None)
+```
+
+Bootstrap analysis for prediction robustness. Resamples features n_iter times and computes prediction statistics to assess how robust the attribution is.
+
+**Parameters:**
+- `text` (list): List of tokens (the disputed text)
+- `n_iter` (int): Number of bootstrap iterations (default: 100)
+- `sample_ratio` (float): Fraction of features to use per iteration, 0.0-1.0 (default: 0.8)
+- `distance` (str): Distance metric override (optional)
+
+**Returns:** (dict) Dictionary containing:
+- `'prediction'`: Most frequent prediction across iterations
+- `'confidence'`: Proportion of iterations agreeing with top prediction
+- `'distribution'`: Dict of author -> proportion of iterations
+- `'distances'`: Dict of author -> (mean_distance, std_distance)
+- `'n_iterations'`: Number of iterations performed
+
+<br>
+
+<h3 id="rolling_delta">rolling_delta()</h3>
+
+```python
+rolling_delta(text, reference=None, window=5000, step=1000, distance=None, 
+              show=True, figsize=(12, 6), title=None, filename=None)
+```
+
+Rolling window analysis across a long text. Computes distance to a reference at each window position, useful for detecting authorship changes or style variation within a text.
+
+**Parameters:**
+- `text` (list): List of tokens (the long text to analyze)
+- `reference` (str): Author name to compare against. If None, compares each window to the average representation of the entire text (self-comparison mode for detecting internal variation)
+- `window` (int): Window size in tokens (default: 5000)
+- `step` (int): Step size for sliding window (default: 1000)
+- `distance` (str): Distance metric override (optional)
+- `show` (bool): If True, display plot (default: True)
+- `figsize` (tuple): Figure size (default: (12, 6))
+- `title` (str): Plot title (optional)
+- `filename` (str): Save plot to file (optional)
+
+**Returns:** (DataFrame) Results with columns:
+- `'position'`: Token position of window start
+- `'distance'`: Distance to reference at that position
 
 <br>
 
@@ -613,3 +663,80 @@ stylo.fit_transform(corpus)
 ```
 
 Consider balancing text sizes across authors for more reliable results.
+
+---
+
+<h3 id="compare_corpora">compare_corpora()</h3>
+
+```python
+compare_corpora(corpusA, corpusB, method='fisher', filters=None, 
+                as_dataframe=True)
+```
+
+Identify statistically significant differences in word usage between two corpora.
+
+**Parameters:**
+- `corpusA` (list): First corpus - either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
+- `corpusB` (list): Second corpus - same format as corpusA
+- `method` (str): Statistical test to use (all tests use two-sided alternatives)
+  - `'fisher'`: Fisher's exact test (default)
+  - `'chi2'`: Chi-square test without correction
+  - `'chi2_corrected'`: Chi-square test with Yates' correction
+- `filters` (dict): Optional filters to apply *after* the statistics are computed on the full corpora:
+  - `'min_count'`: Minimum count threshold for a word to be included. Can be:
+    - Single int (applies to both corpora)
+    - Tuple of (min_countA, min_countB)
+  - `'max_p'`: Maximum p-value threshold for statistical significance
+  - `'stopwords'`: List of words to exclude
+  - `'min_word_length'`: Minimum character length for words
+- `as_dataframe` (bool): Return results as pandas DataFrame
+
+**Returns:** (DataFrame or list) Comparison statistics containing:
+- `word`: The word being compared
+- `abs_freqA`: Absolute frequency in corpus A
+- `abs_freqB`: Absolute frequency in corpus B
+- `rel_freqA`: Relative frequency in corpus A
+- `rel_freqB`: Relative frequency in corpus B
+- `rel_ratio`: Ratio of relative frequencies (A:B)
+- `p_value`: Statistical significance of the difference
+
+**Note:** A small p-value indicates that the difference in word frequency between corpora is statistically significant. A `rel_ratio` > 1 indicates the word is more common in corpus A; < 1 indicates more common in corpus B. Two-sided tests are used because we want to detect whether words are overrepresented in either corpus.
+
+**Example:**
+
+```python
+from qhchina.analytics.stylometry import compare_corpora
+
+# Example corpora (tokenized)
+corpus_a = ["中国", "经济", "发展", "改革", "经济", "政策", "中国", "市场"]
+corpus_b = ["美国", "经济", "市场", "金融", "美国", "贸易", "进口", "出口"]
+
+# Compare the corpora
+results = compare_corpora(
+    corpusA=corpus_a,
+    corpusB=corpus_b,
+    method="fisher",
+    filters={
+        "min_count": 3,      # Minimum count in both corpora
+        "max_p": 0.05,       # Only statistically significant differences
+        "stopwords": ["的", "了"],
+        "min_word_length": 2
+    },
+    as_dataframe=True
+)
+
+# Sort by statistical significance
+results = results.sort_values("p_value")
+
+# Identify words overrepresented in corpus A
+words_in_A = results[
+    (results["p_value"] < 0.05) & 
+    (results["rel_ratio"] > 1)
+]
+
+# Identify words overrepresented in corpus B
+words_in_B = results[
+    (results["p_value"] < 0.05) & 
+    (results["rel_ratio"] < 1)
+]
+```

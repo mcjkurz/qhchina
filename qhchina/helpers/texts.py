@@ -3,6 +3,16 @@ import logging
 logger = logging.getLogger("qhchina.helpers.texts")
 
 
+__all__ = [
+    'detect_encoding',
+    'load_text',
+    'load_texts',
+    'load_stopwords',
+    'get_stopword_languages',
+    'split_into_chunks',
+]
+
+
 def detect_encoding(filename, num_bytes=10000):
     """
     Detects the encoding of a file.

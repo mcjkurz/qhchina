@@ -17,6 +17,12 @@ logger = logging.getLogger("qhchina.analytics.topicmodels")
 # Template directory path
 _TEMPLATE_DIR = Path(__file__).parent.parent / "data" / "templates"
 
+
+__all__ = [
+    'LDAGibbsSampler',
+]
+
+
 class LDAGibbsSampler:
     """
     Latent Dirichlet Allocation with Gibbs sampling implementation. 

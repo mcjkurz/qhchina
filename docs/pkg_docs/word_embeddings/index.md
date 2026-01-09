@@ -176,7 +176,7 @@ Save or load model to/from file.
 Specialized implementation for tracking semantic change over time. Creates temporal variants of target words in a single vector space.
 
 ```python
-TempRefWord2Vec(corpora, labels, targets, vector_size=100, window=5, 
+TempRefWord2Vec(corpora, labels, targets, balance=True, vector_size=100, window=5, 
                 min_word_count=5, sg=1, negative=5, alpha=0.025, seed=1, ...)
 ```
 
@@ -184,7 +184,10 @@ TempRefWord2Vec(corpora, labels, targets, vector_size=100, window=5,
 - `corpora` (list): List of corpora for different time periods (list of lists of sentences)
 - `labels` (list): Labels for each time period (list of strings)
 - `targets` (list): Words to track for semantic change (list of strings)
+- `balance` (bool): Whether to balance corpus sizes across time periods (default: True)
 - Additional parameters: Same as Word2Vec
+
+**Note:** Currently only Skip-gram (sg=1) is supported for TempRefWord2Vec.
 
 <br>
 

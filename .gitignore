@@ -16,12 +16,6 @@ __pycache__/
 venv/
 env/
 
-#tests and data
-tests
-tests/*
-test
-test/*
-
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -42,6 +36,3 @@ dist/
 download_wheels.sh
 upload_to_pypi.sh
 release_to_pypi.sh
-
-# gitignore
-.gitignore

@@ -33,7 +33,7 @@
             <nav class="docs-nav">
               <h3>Package Documentation</h3>
               <ul>
-                {% assign nav_items = "Overview:/pkg_docs/,Preprocessing:/pkg_docs/preprocessing/,Word Embeddings:/pkg_docs/word_embeddings/,Topic Modeling:/pkg_docs/topic_modeling/,Stylometry:/pkg_docs/stylometry/,Collocations:/pkg_docs/collocations/,Corpora:/pkg_docs/corpora/,Helpers:/pkg_docs/helpers/" | split: "," %}
+                {% assign nav_items = "Overview:/pkg_docs/,Preprocessing:/pkg_docs/preprocessing/,Word Embeddings:/pkg_docs/word_embeddings/,Topic Modeling:/pkg_docs/topic_modeling/,Stylometry:/pkg_docs/stylometry/,Collocations:/pkg_docs/collocations/,Helpers:/pkg_docs/helpers/" | split: "," %}
                 {% for item in nav_items %}
                   {% assign parts = item | split: ":" %}
                   {% assign name = parts[0] %}
