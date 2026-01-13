@@ -694,13 +694,12 @@ def cooc_matrix(
 
     if method == 'window':
         # Normalize horizon to (left, right) tuple
-        # User specifies (left, right) relative to each word, but internally we need to
-        # swap because the algorithm iterates over center words and looks outward
+        # User specifies (left, right) relative to each word - no swap needed here
+        # because we directly iterate over center words and look at their context
         if isinstance(horizon, int):
             left_horizon, right_horizon = horizon, horizon
         else:
-            # Swap: user's "right" becomes algorithm's "left from center"
-            left_horizon, right_horizon = horizon[1], horizon[0]
+            left_horizon, right_horizon = horizon[0], horizon[1]
         
         for document in filtered_documents:
             for i, word1 in enumerate(document):
