@@ -9,6 +9,14 @@ Poetic phenomena have geometric substrates. This underlying geometry is detectab
 
 ## Publications
 
+### From Character to Poem: Nested Contexts and Scalar Limits of Parallelism in Classical Chinese Poetry
+
+<img src="parallelism_benchmarking.png" alt="Benchmarking - From Character to Poem" style="max-width: 80%; height: auto; margin: 2rem auto; display: block;">
+
+Benchmarking for literary analysis is complicated by a persistent mismatch between the fixed context windows of classification models and the emergent properties of literary forms. Here, I approach this challenge through the lens of information theory, treating aesthetic features as signals encoded at specific scales. Using semantic parallelism in Chinese regulated verse (*lüshi* 律詩) as a case study, I first employ a "teacher" model to encode parallelism at the couplet (meso) level and then test which "student" model architecture—micro (character), meso (couplet), or macro (poem)—can most effectively decode this signal. The experiment points to a "Goldilocks hypothesis": performance is maximized when the classifier is structurally aligned with the scale at which the feature has been encoded. Furthermore, the results yield a tripartite theoretical insight: (1) bottom-up aggregation of local predictions sacrifices raw performance but offers greater interpretability by exposing the specific decisions of a misaligned model; (2) top-down inference requires additional training computation to compensate for global noise and achieve performance comparable to aligned models; (3) if the goal is to explain how artificial intelligence represents complex literary phenomena internally ("vector poetics"), aligned classifiers afford the most direct and promising access. As such, the study invites discussion on whether meaningful benchmarking requires matching the computational "unit of analysis" with the humanistic "unit of inquiry."
+
+Kurzynski, Maciej, "[From Character to Poem: Nested Contexts and Scalar Limits of Parallelism in Classical Chinese Poetry](#)," *Journal of Open Humanities Data*, forthcoming.
+
 ### The Game of Keys and Queries: Parallelism and Cognitive Geometry in Chinese Regulated Verse
 
 <img src="main.png" alt="Geometry of Parallelism" style="max-width: 80%; height: auto; margin: 2rem auto; display: block;">

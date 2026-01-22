@@ -6,6 +6,10 @@ permalink: /publications/
 
 # Publications
 
+## 2026
+
+Kurzynski, Maciej, "[From Character to Poem: Nested Contexts and Scalar Limits of Parallelism in Classical Chinese Poetry](#)," *Journal of Open Humanities Data*, forthcoming.
+
 ## 2025
 
 Kurzynski, Maciej, ["Cognitive Stylometry: A Computational Study of Defamiliarization in Modern Chinese,"](https://www.cambridge.org/core/journals/computational-humanities-research/article/cognitive-stylometry-a-computational-study-of-defamiliarization-in-modern-chinese/806CD4721AEC85C07473396825C3D7DD) *Computational Humanities Research*, 5 December 2025, pp. 1-17.
