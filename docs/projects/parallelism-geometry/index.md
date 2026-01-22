@@ -17,6 +17,8 @@ Benchmarking for literary analysis is complicated by a persistent mismatch betwe
 
 Kurzynski, Maciej, "[From Character to Poem: Nested Contexts and Scalar Limits of Parallelism in Classical Chinese Poetry](#)," *Journal of Open Humanities Data*, forthcoming.
 
+<img src="{{ site.baseurl }}/assets/img/separator.png" alt="Separator" class="separator">
+
 ### The Game of Keys and Queries: Parallelism and Cognitive Geometry in Chinese Regulated Verse
 
 <img src="main.png" alt="Geometry of Parallelism" style="max-width: 80%; height: auto; margin: 2rem auto; display: block;">
