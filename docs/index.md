@@ -32,7 +32,7 @@ title: Home
 
 ## What is qh?
 
-"Quantitative Humanities" is a set of scholarly disciplines which can be characterized by the following keywords:
+"Quantitative Humanities" is understood here as a set of scholarly disciplines characterized by the following keywords:
 
 - **Experimentation**: probing literary and visual texts with digital tools and statistical methods
 - **Text-centrism**: considering literary artifacts as more than mere anecdotes reflecting extra-textual forces and ideologies
