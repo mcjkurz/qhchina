@@ -1,5 +1,6 @@
 import logging
 import shutil
+import threading
 from typing import Optional
 try:
     import matplotlib
@@ -42,7 +43,8 @@ FONT_FILES = {
     'Noto Serif SC': 'NotoSerifSC-Regular.otf',
 }
 
-# Global flag to track if bundled fonts have been loaded
+# Thread-safe global state for font loading
+_fonts_lock = threading.Lock()
 _fonts_loaded = False
 
 def set_font(font='Noto Sans CJK TC') -> None:
@@ -86,9 +88,10 @@ def set_font(font='Noto Sans CJK TC') -> None:
         except Exception as e:
             raise ValueError(f"Error loading custom font from: {font_path}") from e
     else:
-        # Auto-load bundled fonts if not already loaded
-        if not _fonts_loaded:
-            load_fonts(target_font=None, verbose=False)
+        # Auto-load bundled fonts if not already loaded (thread-safe check)
+        with _fonts_lock:
+            if not _fonts_loaded:
+                load_fonts(target_font=None, verbose=False)
         
         # Resolve alias to actual font name
         resolved_font = FONT_ALIASES.get(font, font)
@@ -113,6 +116,8 @@ def set_font(font='Noto Sans CJK TC') -> None:
 def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> list[dict] | None:
     """
     Load CJK fonts into matplotlib and optionally set a default font.
+    
+    This function is thread-safe and can be called from multiple threads simultaneously.
     
     Args:
         target_font: Font name or alias to set as default. Can be:
@@ -156,13 +161,14 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
         except Exception as e:
             errors.append(f"{font}: {e}")
     
-    if errors and not _fonts_loaded:
-        # Only raise on first load attempt if all fonts failed
-        if len(errors) == len(cjk_fonts):
-            raise OSError(f"Failed to load any fonts. Errors: {errors}")
-    
-    # Mark fonts as loaded
-    _fonts_loaded = True
+    with _fonts_lock:
+        if errors and not _fonts_loaded:
+            # Only raise on first load attempt if all fonts failed
+            if len(errors) == len(cjk_fonts):
+                raise OSError(f"Failed to load any fonts. Errors: {errors}")
+        
+        # Mark fonts as loaded
+        _fonts_loaded = True
     
     if target_font:
         # Resolve alias before setting

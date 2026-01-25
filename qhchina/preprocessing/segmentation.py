@@ -733,6 +733,7 @@ class LLMSegmenter(SegmentationWrapper):
                  temperature: float = 1,
                  max_tokens: int = 2048,
                  retry_patience: int = 1,
+                 timeout: float = 60.0,
                  strategy: str = "whole",
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
@@ -748,6 +749,7 @@ class LLMSegmenter(SegmentationWrapper):
             temperature: Temperature for model sampling (lower for more deterministic output)
             max_tokens: Maximum tokens in the response
             retry_patience: Number of retry attempts for API calls (default 1, meaning try once with no retries)
+            timeout: Timeout in seconds for API calls (default 60.0). Set to None for no timeout.
             strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
             chunk_size: Size of chunks when using 'chunk' strategy
             filters: Dictionary of filters to apply during segmentation
@@ -766,6 +768,7 @@ class LLMSegmenter(SegmentationWrapper):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.retry_patience = max(1, retry_patience)  # Ensure at least 1 attempt
+        self.timeout = timeout
         
         # Try to import OpenAI
         try:
@@ -773,16 +776,17 @@ class LLMSegmenter(SegmentationWrapper):
         except ImportError:
             raise ImportError("openai is not installed. Please install it with 'pip install openai'")
         
-        # Configure OpenAI client
+        # Configure OpenAI client with timeout
         if endpoint:
             # Custom API endpoint
             self.client = openai.OpenAI(
                 api_key=api_key,
-                base_url=endpoint
+                base_url=endpoint,
+                timeout=timeout
             )
         else:
             # Default OpenAI endpoint
-            self.client = openai.OpenAI(api_key=api_key)
+            self.client = openai.OpenAI(api_key=api_key, timeout=timeout)
     
     def _call_llm_api(self, text: str) -> List[str]:
         """Call the LLM API with the provided text and parse the response as a list of tokens.
@@ -925,6 +929,7 @@ def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size
                 - stopwords: Set of stopwords to exclude
                 - excluded_pos: Set of POS tags to exclude (for backends that support POS tagging)
             - retry_patience: (LLM backend only) Number of retry attempts for API calls (default 1)
+            - timeout: (LLM backend only) Timeout in seconds for API calls (default 60.0)
             - Other backend-specific arguments
         
     Returns:

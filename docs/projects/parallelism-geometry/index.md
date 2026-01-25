@@ -1,11 +1,11 @@
 ---
 layout: default
-title: Parallelism and Geometry
+title: The Geometry of Parallelism
 permalink: /projects/parallelism-geometry/
 ---
 # Parallelism and Geometry
 
-Poetic phenomena have geometric substrates. This underlying geometry is detectable and measurable as patterns of alignment within a multidimensional semantic space, much as symbolic-metric relationships are measurable on textual surfaces. Poetic artistry can be thus understood as the discovery and articulation of latent symmetries within our conceptual world.
+Many poetic phenomena have geometric interpretations. In language models, this underlying geometry is detectable and measurable as patterns of alignment within a semantic space, much as symbolic-metric relationships are measurable on textual surfaces. Poetic artistry can be thus understood as the discovery and articulation of latent symmetries within our conceptual world.
 
 ## Publications
 
