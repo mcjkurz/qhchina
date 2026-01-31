@@ -493,6 +493,24 @@ aside.docs-sidebar {
       border-left-color: var(--primary-color);
     }
   }
+  
+  // Examples link styling
+  li.examples-link {
+    margin-top: calc(0.5 * var(--spacing-unit));
+    padding-top: calc(0.25 * var(--spacing-unit));
+    border-top: 1px dashed var(--border-color);
+    
+    a {
+      font-weight: 600;
+      color: var(--primary-color);
+      
+      &:hover {
+        background-color: var(--primary-color);
+        color: white;
+        border-left-color: var(--primary-color);
+      }
+    }
+  }
 }
 
 .docs-content {

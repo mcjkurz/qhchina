@@ -27,6 +27,7 @@ functions:
     anchor: get_stopword_languages
   - name: detect_encoding()
     anchor: detect_encoding
+has_examples: True
 import_from: qhchina.helpers
 include_imported: True
 ---

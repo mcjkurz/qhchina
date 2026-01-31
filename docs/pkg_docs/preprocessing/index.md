@@ -17,6 +17,7 @@ functions:
     anchor: llmsegmenter
   - name: create_segmenter()
     anchor: create_segmenter
+has_examples: True
 import_from: qhchina.preprocessing.segmentation
 ---
 

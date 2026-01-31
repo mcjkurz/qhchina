@@ -55,6 +55,7 @@ functions:
     anchor: get_relative_frequencies
   - name: compute_yule_k()
     anchor: compute_yule_k
+has_examples: True
 import_from: qhchina.analytics.stylometry
 ---
 

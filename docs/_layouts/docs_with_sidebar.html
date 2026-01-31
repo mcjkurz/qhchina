@@ -67,6 +67,9 @@
                       {% for func in page.functions %}
                         <li><a href="#{{ func.anchor }}">{{ func.name }}</a></li>
                       {% endfor %}
+                      {% if page.has_examples %}
+                        <li class="examples-link"><a href="#examples">Examples</a></li>
+                      {% endif %}
                     </ul>
                     {% endif %}
                   </li>

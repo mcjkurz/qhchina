@@ -11,6 +11,7 @@ functions:
     anchor: cooc_matrix
   - name: plot_collocates()
     anchor: plot_collocates
+has_examples: True
 import_from: qhchina.analytics.collocations
 ---
 

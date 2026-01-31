@@ -49,6 +49,7 @@ functions:
     anchor: ldagibbssampler-topic_similarity
   - name: LDAGibbsSampler.visualize_documents()
     anchor: ldagibbssampler-visualize_documents
+has_examples: True
 import_from: qhchina.analytics.topicmodels
 ---
 

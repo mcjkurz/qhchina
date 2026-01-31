@@ -61,6 +61,7 @@ functions:
     anchor: most_similar
   - name: align_vectors()
     anchor: align_vectors
+has_examples: True
 import_from: ['qhchina.analytics.word2vec', 'qhchina.analytics.vectors']
 ---
 
