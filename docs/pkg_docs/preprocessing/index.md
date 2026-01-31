@@ -85,7 +85,7 @@ contains tokens for a line, sentence, or chunk respectively
 ```python
 SpacySegmenter(
     model_name: str = 'zh_core_web_lg',
-    disable: Optional[List[str]] = None,
+    disable: Optional[List[str]] = ['ner', 'lemmatizer'],
     batch_size: int = 200,
     user_dict: Union[List[str], str] = None,
     strategy: str = 'whole',
