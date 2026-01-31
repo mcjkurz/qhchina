@@ -23,25 +23,22 @@ def validate_filters(
     """
     Validate that all filter keys are recognized.
     
-    Parameters
-    ----------
-    filters: Dictionary of filter parameters to validate
-    valid_keys: Set of valid/recognized filter keys
-    context: String describing the calling context for error messages
+    Args:
+        filters: Dictionary of filter parameters to validate.
+        valid_keys: Set of valid/recognized filter keys.
+        context: String describing the calling context for error messages.
     
-    Raises
-    ------
-    ValueError: If filters contains unrecognized keys
+    Raises:
+        ValueError: If filters contains unrecognized keys.
     
-    Example
-    -------
-    >>> validate_filters(
-    ...     {'min_count': 5, 'max_p': 0.05, 'invalid_key': 'value'},
-    ...     {'min_count', 'max_p', 'stopwords'},
-    ...     context='compare_corpora'
-    ... )
-    ValueError: Unknown filter keys in compare_corpora: {'invalid_key'}. 
-                Valid keys are: {'max_p', 'min_count', 'stopwords'}
+    Example:
+        >>> validate_filters(
+        ...     {'min_count': 5, 'max_p': 0.05, 'invalid_key': 'value'},
+        ...     {'min_count', 'max_p', 'stopwords'},
+        ...     context='compare_corpora'
+        ... )
+        ValueError: Unknown filter keys in compare_corpora: {'invalid_key'}. 
+                    Valid keys are: {'max_p', 'min_count', 'stopwords'}
     """
     if filters is None:
         return

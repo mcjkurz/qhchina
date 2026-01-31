@@ -35,19 +35,24 @@ def project_2d(
     """
     Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
-    Parameters
-    vectors (list of vectors or dict {label: vector}): Vectors to project.
-    labels (list of str, optional): List of labels for the vectors. Defaults to None.
-    method (str, optional): Method to use for projection ('pca', 'tsne', or 'umap'). Defaults to 'pca'.
-    title (str, optional): Title of the plot. Defaults to None.
-    color (list of str or str, optional): List of colors for the vectors or a single color. Defaults to None.
-    figsize (tuple, optional): Figure size as (width, height). Defaults to (8, 8).
-    fontsize (int, optional): Font size for labels. Defaults to 12.
-    perplexity (float, optional): Perplexity parameter for t-SNE. Required if method is 'tsne'.
-    filename (str, optional): Path to save the figure. Defaults to None.
-    adjust_text_labels (bool, optional): Whether to adjust text labels to avoid overlap. Defaults to False.
-    n_neighbors (int, optional): Number of neighbors for UMAP. Defaults to 15.
-    min_dist (float, optional): Minimum distance between points for UMAP. Defaults to 0.1.
+    Args:
+        vectors (list or dict): Vectors to project. Can be a list of vectors or a dict 
+            mapping labels to vectors.
+        labels (list of str, optional): List of labels for the vectors.
+        method (str): Method to use for projection ('pca', 'tsne', or 'umap'). 
+            Default is 'pca'.
+        title (str, optional): Title of the plot.
+        color (list of str or str, optional): List of colors for the vectors or a 
+            single color.
+        figsize (tuple): Figure size as (width, height). Default is (8, 8).
+        fontsize (int): Font size for labels. Default is 12.
+        perplexity (float, optional): Perplexity parameter for t-SNE. Required if 
+            method is 'tsne'.
+        filename (str, optional): Path to save the figure.
+        adjust_text_labels (bool): Whether to adjust text labels to avoid overlap. 
+            Default is False.
+        n_neighbors (int): Number of neighbors for UMAP. Default is 15.
+        min_dist (float): Minimum distance between points for UMAP. Default is 0.1.
     """
     # Ensure labels match the number of vectors if provided
     if labels is not None:
@@ -120,16 +125,18 @@ def get_bias_direction(
     anchors: Union[Tuple[np.ndarray, np.ndarray], List[Tuple[np.ndarray, np.ndarray]]]
 ) -> np.ndarray:
     """
-    Given either a single tuple (pos_anchor, neg_anchor) or a list of tuples,
-    compute the direction vector for measuring bias by taking the mean of 
-    differences between positive and negative anchor pairs.
+    Compute the direction vector for measuring bias.
     
-    Parameters
-    anchors: A tuple (pos_vector, neg_vector) or list of such tuples
-            Each vector in the pairs should be a numpy array
+    Given either a single tuple (pos_anchor, neg_anchor) or a list of tuples,
+    computes the direction vector by taking the mean of differences between 
+    positive and negative anchor pairs.
+    
+    Args:
+        anchors: A tuple (pos_vector, neg_vector) or list of such tuples.
+            Each vector in the pairs should be a numpy array.
     
     Returns:
-    numpy array representing the bias direction vector (unnormalized)
+        numpy.ndarray: The bias direction vector (normalized).
     """
     if isinstance(anchors, tuple):
         anchors = [anchors]
@@ -154,13 +161,14 @@ def calculate_bias(
     """
     Calculate bias scores for target words along an axis defined by anchor pairs.
     
-    Parameters
-    anchors: tuple or list of tuples, e.g. ("man", "woman") or [("king", "queen"), ("man", "woman")]
-    targets: list of words to calculate bias for
-    word_vectors: keyed vectors (e.g. from word2vec_model.wv)
+    Args:
+        anchors: Tuple or list of tuples defining the bias axis, e.g. ("man", "woman") 
+            or [("king", "queen"), ("man", "woman")].
+        targets: List of words to calculate bias for.
+        word_vectors: Keyed vectors (e.g. from word2vec_model.wv).
     
     Returns:
-    numpy array of bias scores (dot products) for each target word
+        numpy.ndarray: Bias scores (dot products) for each target word.
     """
     # Ensure anchors is a list of tuples
     if isinstance(anchors, tuple) and len(anchors) == 2:
@@ -182,11 +190,28 @@ def project_bias(x, y, targets, word_vectors,
                     title=None, color=None, figsize=(8,8),
                     fontsize=12, filename=None, adjust_text_labels=False, disperse_y=False):
     """
-    Plots words on either a 1D or 2D chart by projecting them onto:
-      - axis_x: derived from x (single tuple or list of tuples)
-      - axis_y: derived from y (single tuple or list of tuples), if provided
-
-    Parameters remain the same as before, but calculation of bias scores is now handled separately.
+    Plot words on a 1D or 2D chart by projecting them onto bias axes.
+    
+    Projects words onto:
+      - x-axis: derived from x (single tuple or list of tuples)
+      - y-axis: derived from y (single tuple or list of tuples), if provided
+    
+    Args:
+        x: Tuple or list of tuples defining the x-axis bias direction, 
+            e.g. ("man", "woman").
+        y: Tuple or list of tuples defining the y-axis bias direction, or None 
+            for 1D plot.
+        targets: List of words to plot.
+        word_vectors: Keyed vectors (e.g. from word2vec_model.wv).
+        title (str, optional): Title of the plot.
+        color: Color(s) for the points. Can be a single color or list of colors.
+        figsize (tuple): Figure size as (width, height). Default is (8, 8).
+        fontsize (int): Font size for labels. Default is 12.
+        filename (str, optional): Path to save the figure.
+        adjust_text_labels (bool): Whether to adjust text labels to avoid overlap. 
+            Default is False.
+        disperse_y (bool): Whether to add random y-dispersion for 1D plots. 
+            Default is False.
     """
     # Input validation
     if isinstance(x, tuple) and len(x) == 2:
@@ -283,23 +308,19 @@ def cosine_similarity(
 ) -> Union[float, np.ndarray]:
     """
     Compute the cosine similarity between vectors.
+    
     If v1 and v2 are single vectors, computes similarity between them.
     If either is a matrix of vectors, uses sklearn's implementation for efficiency.
-    
     Returns 0.0 if either vector has zero norm (to avoid division by zero).
     
-    Parameters
-    ----------
-    v1 : numpy.ndarray or list
-        First vector or matrix of vectors
-    v2 : numpy.ndarray or list  
-        Second vector or matrix of vectors
-        
-    Returns
-    -------
-    float or numpy.ndarray
-        Cosine similarity score(s). For single vectors, returns a float in range [-1, 1].
-        For matrices, returns a 2D similarity matrix.
+    Args:
+        v1 (numpy.ndarray or list): First vector or matrix of vectors.
+        v2 (numpy.ndarray or list): Second vector or matrix of vectors.
+    
+    Returns:
+        float or numpy.ndarray: Cosine similarity score(s). For single vectors, 
+            returns a float in range [-1, 1]. For matrices, returns a 2D 
+            similarity matrix.
     """
     # Convert inputs to numpy arrays if they aren't already
     v1 = np.asarray(v1)
@@ -328,18 +349,14 @@ def cosine_distance(
     Cosine distance is a dissimilarity measure where 0 means identical vectors
     and 2 means opposite vectors.
     
-    Parameters
-    ----------
-    v1 : numpy.ndarray or list
-        First vector or matrix of vectors
-    v2 : numpy.ndarray or list  
-        Second vector or matrix of vectors
-        
-    Returns
-    -------
-    float or numpy.ndarray
-        Cosine distance score(s). For single vectors, returns a float in range [0, 2].
-        For matrices, returns a 2D distance matrix.
+    Args:
+        v1 (numpy.ndarray or list): First vector or matrix of vectors.
+        v2 (numpy.ndarray or list): Second vector or matrix of vectors.
+    
+    Returns:
+        float or numpy.ndarray: Cosine distance score(s). For single vectors, 
+            returns a float in range [0, 2]. For matrices, returns a 2D 
+            distance matrix.
     """
     return 1.0 - cosine_similarity(v1, v2)
 
@@ -353,16 +370,19 @@ def most_similar(
     """
     Find the most similar vectors to a target vector using the specified similarity metric.
     
-    Parameters
-    target_vector (numpy.ndarray): The reference vector to compare against
-    vectors (list or numpy.ndarray): List of vectors to compare with the target
-    labels (list, optional): Labels corresponding to the vectors. If provided, returns (label, score) pairs
-    metric (str or callable, optional): Similarity metric to use. Can be 'cosine' or a callable that takes two vectors
-    top_n (int, optional): Number of top results to return. If None, returns all results
+    Args:
+        target_vector (numpy.ndarray): The reference vector to compare against.
+        vectors (list or numpy.ndarray): List of vectors to compare with the target.
+        labels (list, optional): Labels corresponding to the vectors. If provided, 
+            returns (label, score) pairs.
+        metric (str or callable): Similarity metric to use. Can be 'cosine' or a 
+            callable that takes two vectors. Default is 'cosine'.
+        top_n (int, optional): Number of top results to return. If None, returns 
+            all results.
     
     Returns:
-    If labels provided: List of (label, score) tuples sorted by similarity score in descending order
-    If no labels: List of (index, score) tuples sorted by similarity score in descending order
+        list: List of (label, score) or (index, score) tuples sorted by similarity 
+            score in descending order.
     """
     if not isinstance(vectors, np.ndarray):
         vectors = np.array(vectors)

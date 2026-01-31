@@ -17,16 +17,16 @@ def detect_encoding(filename, num_bytes=10000):
     """
     Detects the encoding of a file.
     
-    Parameters
-    filename (str): The path to the file.
-    num_bytes (int): Number of bytes to read for detection. Default is 10000.
-                     Larger values may be more accurate but slower.
+    Args:
+        filename (str): The path to the file.
+        num_bytes (int): Number of bytes to read for detection. Default is 10000.
+            Larger values may be more accurate but slower.
     
     Returns:
-    str: The detected encoding (e.g., 'utf-8', 'gb2312', 'gbk', 'big5').
+        str: The detected encoding (e.g., 'utf-8', 'gb2312', 'gbk', 'big5').
     
     Raises:
-    ImportError: If chardet is not installed.
+        ImportError: If chardet is not installed.
     """
     try:
         import chardet
@@ -59,13 +59,13 @@ def load_text(filename, encoding="utf-8"):
     """
     Loads text from a file.
 
-    Parameters
-    filename (str): The filename to load text from.
-    encoding (str): The encoding of the file. Default is "utf-8".
-                    Use "auto" to automatically detect the encoding.
+    Args:
+        filename (str): The filename to load text from.
+        encoding (str): The encoding of the file. Default is "utf-8".
+            Use "auto" to automatically detect the encoding.
     
     Returns:
-    str: The text content of the file.
+        str: The text content of the file.
     """
     if not isinstance(filename, str):
         raise ValueError("filename must be a string")
@@ -80,13 +80,13 @@ def load_texts(filenames, encoding="utf-8"):
     """
     Loads text from multiple files.
 
-    Parameters
-    filenames (list): A list of filenames to load text from.
-    encoding (str): The encoding of the files. Default is "utf-8".
-                    Use "auto" to automatically detect encoding for each file.
+    Args:
+        filenames (list): A list of filenames to load text from.
+        encoding (str): The encoding of the files. Default is "utf-8".
+            Use "auto" to automatically detect encoding for each file.
     
     Returns:
-    list: A list of text contents from the files.
+        list: A list of text contents from the files.
     """
     if isinstance(filenames, str):
         filenames = [filenames]
@@ -170,21 +170,23 @@ def split_into_chunks(sequence, chunk_size, overlap=0.0):
     """
     Splits text or a list of tokens into chunks with optional overlap between consecutive chunks.
     
-    Parameters
-    sequence (str or list): The text string or list of tokens to be split.
-    chunk_size (int): The size of each chunk (characters for text, items for lists).
-    overlap (float): The fraction of overlap between consecutive chunks (0.0 to 1.0).
-                    Default is 0.0 (no overlap).
+    Args:
+        sequence (str or list): The text string or list of tokens to be split.
+        chunk_size (int): The size of each chunk (characters for text, items for lists).
+        overlap (float): The fraction of overlap between consecutive chunks (0.0 to 1.0).
+            Default is 0.0 (no overlap).
     
     Returns:
-    list: A list of chunks. If input is a string, each chunk is a string.
-         If input is a list, each chunk is a list of tokens.
-         Note: The last chunk may be smaller than chunk_size if the sequence
-         doesn't divide evenly.
+        list: A list of chunks. If input is a string, each chunk is a string.
+            If input is a list, each chunk is a list of tokens.
+            Note: The last chunk may be smaller than chunk_size if the sequence
+            doesn't divide evenly.
     
     Raises:
-    ValueError: If overlap is not between 0 and 1.
+        ValueError: If overlap is not between 0 and 1, or if chunk_size is not positive.
     """
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than 0")
     if not 0 <= overlap < 1:
         raise ValueError("Overlap must be between 0 and 1")
         

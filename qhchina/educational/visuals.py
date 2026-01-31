@@ -13,18 +13,20 @@ def show_vectors(vectors, labels=None, draw_arrows=True, draw_axes=True, colors=
     """
     Visualizes vectors in 2D using matplotlib.
 
-    Parameters
-    vectors (list of tuples): List of vectors to visualize.
-    labels (list of str, optional): List of labels for the vectors. Defaults to None.
-    draw_arrows (bool, optional): Whether to draw arrows from the origin to the vectors. Defaults to True.
-    draw_axes (bool, optional): Whether to draw x and y axes. Defaults to True.
-    colors (list of str, optional): List of colors for the vectors. Defaults to None.
-    fontsize (int, optional): Font size for labels. Defaults to 12.
-    colormap (str, optional): Colormap to use if colors are not provided. Defaults to 'viridis'.
-    title (str, optional): Title of the plot. Defaults to None.
-    normalize (bool, optional): Whether to normalize the vectors. Defaults to False.
-    filename (str, optional): If provided, saves the figure to the specified file. Defaults to None.
-    show_components (bool, optional): Whether to display vector components along axes. Defaults to False.
+    Args:
+        vectors (list of tuples): List of vectors to visualize.
+        labels (list of str, optional): List of labels for the vectors.
+        draw_arrows (bool): Whether to draw arrows from the origin to the vectors. 
+            Default is True.
+        draw_axes (bool): Whether to draw x and y axes. Default is True.
+        colors (list of str, optional): List of colors for the vectors.
+        fontsize (int): Font size for labels. Default is 12.
+        colormap (str): Colormap to use if colors are not provided. Default is 'viridis'.
+        title (str, optional): Title of the plot.
+        normalize (bool): Whether to normalize the vectors. Default is False.
+        filename (str, optional): If provided, saves the figure to the specified file.
+        show_components (bool): Whether to display vector components along axes. 
+            Default is False.
     """
 
     vectors = np.array(vectors)
@@ -41,7 +43,7 @@ def show_vectors(vectors, labels=None, draw_arrows=True, draw_axes=True, colors=
         vectors = vectors / norms
 
     if colors is None:
-        cmap = cm.get_cmap(colormap)
+        cmap = cm[colormap]
         colors = [cmap(i / len(vectors)) for i in range(len(vectors))]
     elif isinstance(colors, str):
         colors = [colors] * len(vectors)

@@ -2,6 +2,7 @@ import logging
 from typing import List, Dict, Any, Union, Optional, Set
 from tqdm.auto import tqdm
 import importlib
+import importlib.util
 import re
 import json
 from datetime import datetime
@@ -39,6 +40,8 @@ class SegmentationWrapper:
                 - excluded_pos: List or set of POS tags to exclude (converted to set internally)
             sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
         """
+        if strategy is None:
+            raise ValueError("strategy cannot be None")
         self.strategy = strategy.strip().lower()
         if self.strategy not in ["line", "sentence", "chunk", "whole"]:
             raise ValueError(f"Invalid segmentation strategy: {strategy}. Must be one of: line, sentence, chunk, whole")
@@ -102,6 +105,8 @@ class SegmentationWrapper:
         Returns:
             List of text units (lines, sentences, chunks, or whole text)
         """
+        if text is None:
+            return []
         if self.strategy == "line":
             return self._split_into_lines(text)
         elif self.strategy == "sentence":
@@ -284,8 +289,12 @@ class SpacySegmenter(SegmentationWrapper):
     def _filter_tokens(self, tokens):
         """Filter tokens based on excluded POS tags and minimum length."""
         min_word_length = self.filters.get('min_word_length', 1)
-        excluded_pos = self.filters.get('excluded_pos', [])
-        stopwords = set(self.filters.get('stopwords', []))
+        excluded_pos = self.filters.get('excluded_pos', set())
+        if not isinstance(excluded_pos, set):
+            excluded_pos = set(excluded_pos)
+        stopwords = self.filters.get('stopwords', set())
+        if not isinstance(stopwords, set):
+            stopwords = set(stopwords)
         return [token for token in tokens 
                 if token.pos_ not in excluded_pos 
                 and len(token.text) >= min_word_length
@@ -748,7 +757,7 @@ class LLMSegmenter(SegmentationWrapper):
             system_message: Optional system message to prepend to API calls
             temperature: Temperature for model sampling (lower for more deterministic output)
             max_tokens: Maximum tokens in the response
-            retry_patience: Number of retry attempts for API calls (default 1, meaning try once with no retries)
+            retry_patience: Number of retries for API calls (default 1, meaning 1 retry = 2 total attempts)
             timeout: Timeout in seconds for API calls (default 60.0). Set to None for no timeout.
             strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
             chunk_size: Size of chunks when using 'chunk' strategy
@@ -767,7 +776,7 @@ class LLMSegmenter(SegmentationWrapper):
         self.system_message = system_message
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.retry_patience = max(1, retry_patience)  # Ensure at least 1 attempt
+        self.retry_patience = max(0, retry_patience)  # Number of retries (0 = no retries, 1 = one retry, etc.)
         self.timeout = timeout
         
         # Try to import OpenAI
@@ -795,7 +804,7 @@ class LLMSegmenter(SegmentationWrapper):
         """
         prompt_text = self.prompt.format(text=text)
         
-        for attempt in range(self.retry_patience):
+        for attempt in range(self.retry_patience + 1):  # +1 because retry_patience is number of retries
             try:
                 # Prepare the messages
                 messages = []

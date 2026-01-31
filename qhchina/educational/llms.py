@@ -107,7 +107,7 @@ def predict_next_token(
         if result == "horizontal":
             # Create horizontal bars
             # Sort in descending order for horizontal bars to have longest bar at top
-            sorted_indices = np.argsort(probabilities)  # Descending order
+            sorted_indices = np.argsort(probabilities)[::-1]  # Descending order
             sorted_tokens = [tokens[i] for i in sorted_indices]
             sorted_probs = [probabilities[i] for i in sorted_indices]
             

@@ -462,27 +462,29 @@ compare_corpora(
 
 Compare two corpora to identify statistically significant differences in word usage.
 
-Parameters
-  corpusA: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
-  corpusB: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
-  method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' for the chi-square test.
-                All tests use two-sided alternatives.
-  filters (dict, optional): Dictionary of filters to apply to results:
-      - 'min_count': int or tuple - Minimum count threshold(s) for a word to be included 
-        (can be a single int for both corpora or tuple (min_countA, min_countB)).
-        Default is 0, which includes words that appear in either corpus, even if absent in one.
-      - 'max_p': float - Maximum p-value threshold for statistical significance
-      - 'stopwords': list - Words to exclude from results
-      - 'min_word_length': int - Minimum character length for words
-  as_dataframe (bool): Whether to return a pandas DataFrame.
+**Parameters:**
+- `corpusA`: Either a flat list of tokens or a list of sentences (each sentence 
+  being a list of tokens).
+- `corpusB`: Either a flat list of tokens or a list of sentences (each sentence 
+  being a list of tokens).
+- `method` (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
+  for the chi-square test. All tests use two-sided alternatives.
+- `filters` (dict): Dictionary of filters to apply to results:
+  - 'min_count': int or tuple - Minimum count threshold(s) for a word to be 
+    included (can be a single int for both corpora or tuple (min_countA, 
+    min_countB)). Default is 0.
+  - 'max_p': float - Maximum p-value threshold for statistical significance.
+  - 'stopwords': list - Words to exclude from results.
+  - 'min_word_length': int - Minimum character length for words.
+- `as_dataframe` (bool): Whether to return a pandas DataFrame.
 
 **Returns:**
-If as_dataframe is True:
-  pandas.DataFrame: A DataFrame containing information about each word's frequency in both corpora,
-                    the p-value, and the ratio of relative frequencies.
-If as_dataframe is False:
-  List[dict]: Each dict contains information about a word's frequency in both corpora,
-              the p-value, and the ratio of relative frequencies.
+If as_dataframe is True: pandas.DataFrame containing information about each 
+    word's frequency in both corpora, the p-value, and the ratio of relative 
+    frequencies.
+If as_dataframe is False: List[dict] where each dict contains information 
+    about a word's frequency in both corpora, the p-value, and the ratio of 
+    relative frequencies.
 
 <br>
 
@@ -795,80 +797,3 @@ stylo.fit_transform(corpus)
 ```
 
 Consider balancing text sizes across authors for more reliable results.
-
----
-
-<h3 id="compare_corpora">compare_corpora()</h3>
-
-```python
-compare_corpora(corpusA, corpusB, method='fisher', filters=None, 
-                as_dataframe=True)
-```
-
-Identify statistically significant differences in word usage between two corpora.
-
-**Parameters:**
-- `corpusA` (list): First corpus - either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
-- `corpusB` (list): Second corpus - same format as corpusA
-- `method` (str): Statistical test to use (all tests use two-sided alternatives)
-  - `'fisher'`: Fisher's exact test (default)
-  - `'chi2'`: Chi-square test without correction
-  - `'chi2_corrected'`: Chi-square test with Yates' correction
-- `filters` (dict): Optional filters to apply *after* the statistics are computed on the full corpora:
-  - `'min_count'`: Minimum count threshold for a word to be included. Can be:
-    - Single int (applies to both corpora)
-    - Tuple of (min_countA, min_countB)
-  - `'max_p'`: Maximum p-value threshold for statistical significance
-  - `'stopwords'`: List of words to exclude
-  - `'min_word_length'`: Minimum character length for words
-- `as_dataframe` (bool): Return results as pandas DataFrame
-
-**Returns:** (DataFrame or list) Comparison statistics containing:
-- `word`: The word being compared
-- `abs_freqA`: Absolute frequency in corpus A
-- `abs_freqB`: Absolute frequency in corpus B
-- `rel_freqA`: Relative frequency in corpus A
-- `rel_freqB`: Relative frequency in corpus B
-- `rel_ratio`: Ratio of relative frequencies (A:B)
-- `p_value`: Statistical significance of the difference
-
-**Note:** A small p-value indicates that the difference in word frequency between corpora is statistically significant. A `rel_ratio` > 1 indicates the word is more common in corpus A; < 1 indicates more common in corpus B. Two-sided tests are used because we want to detect whether words are overrepresented in either corpus.
-
-**Example:**
-
-```python
-from qhchina.analytics.stylometry import compare_corpora
-
-# Example corpora (tokenized)
-corpus_a = ["中国", "经济", "发展", "改革", "经济", "政策", "中国", "市场"]
-corpus_b = ["美国", "经济", "市场", "金融", "美国", "贸易", "进口", "出口"]
-
-# Compare the corpora
-results = compare_corpora(
-    corpusA=corpus_a,
-    corpusB=corpus_b,
-    method="fisher",
-    filters={
-        "min_count": 3,      # Minimum count in both corpora
-        "max_p": 0.05,       # Only statistically significant differences
-        "stopwords": ["的", "了"],
-        "min_word_length": 2
-    },
-    as_dataframe=True
-)
-
-# Sort by statistical significance
-results = results.sort_values("p_value")
-
-# Identify words overrepresented in corpus A
-words_in_A = results[
-    (results["p_value"] < 0.05) & 
-    (results["rel_ratio"] > 1)
-]
-
-# Identify words overrepresented in corpus B
-words_in_B = results[
-    (results["p_value"] < 0.05) & 
-    (results["rel_ratio"] < 1)
-]
-```

@@ -179,10 +179,7 @@ build_vocab(sentences: Union[List[List[str]], Iterator[List[str]]])
 Build vocabulary from a list or iterator of sentences.
 
 **Parameters:**
-- `sentences` (List or iterator of tokenized sentences (each sentence is a list of words)): 
-
-**Returns:**
-(None)
+- `sentences`: List or iterator of tokenized sentences (each sentence is a list of words).
 
 <h4 id="word2vec-generate_cbow_examples">Word2Vec.generate_cbow_examples()</h4>
 
@@ -199,10 +196,10 @@ A CBOW example is a tuple (input_indices, output_idx) where:
 For each positive example, the caller should generate negative examples using the noise distribution.
 
 **Parameters:**
-- `sentences` (List or iterator of sentences (lists of words)): 
+- `sentences`: List or iterator of sentences (lists of words).
 
 **Returns:**
-(Generator yielding (input_indices, output_idx) tuples for positive examples)
+Generator yielding (input_indices, output_idx) tuples for positive examples.
 
 <h4 id="word2vec-generate_skipgram_examples">Word2Vec.generate_skipgram_examples()</h4>
 
@@ -219,10 +216,10 @@ A Skip-gram example is a tuple (input_idx, output_idx) where:
 For each positive example, the caller should generate negative examples using the noise distribution.
 
 **Parameters:**
-- `sentences` (List or iterator of sentences (lists of words)): 
+- `sentences`: List or iterator of sentences (lists of words).
 
 **Returns:**
-(Generator yielding (input_idx, output_idx) tuples for positive examples)
+Generator yielding (input_idx, output_idx) tuples for positive examples.
 
 <h4 id="word2vec-get_vector">Word2Vec.get_vector()</h4>
 
@@ -232,12 +229,15 @@ get_vector(word: str, normalize: bool = False)
 
 Get the vector for a word.
 
+Parameters
+----------
+
 **Parameters:**
-- `word` (Input word): 
-- `normalize` (If True, return the normalized vector (unit length)): 
+- `word`: Input word.
+- `normalize`: If True, return the normalized vector (unit length).
 
 **Returns:**
-(Word vector)
+Word vector.
 
 <h4 id="word2vec-most_similar">Word2Vec.most_similar()</h4>
 
@@ -248,11 +248,11 @@ most_similar(word: str, topn: int = 10)
 Find the topn most similar words to the given word.
 
 **Parameters:**
-- `word` (Input word): 
-- `topn` (Number of similar words to return): 
+- `word`: Input word.
+- `topn`: Number of similar words to return.
 
 **Returns:**
-(List of (word, similarity) tuples)
+List of (word, similarity) tuples.
 
 <h4 id="word2vec-save">Word2Vec.save()</h4>
 
@@ -263,10 +263,7 @@ save(path: str)
 Save the model to a file.
 
 **Parameters:**
-- `path` (Path to save the model): 
-
-**Returns:**
-(None)
+- `path`: Path to save the model.
 
 <h4 id="word2vec-similarity">Word2Vec.similarity()</h4>
 
@@ -277,11 +274,14 @@ similarity(word1: str, word2: str)
 Calculate cosine similarity between two words.
 
 **Parameters:**
-- `word1` (First word): 
-- `word2` (Second word): 
+- `word1`: First word.
+- `word2`: Second word.
 
 **Returns:**
-(Cosine similarity between the two words (float between -1 and 1))
+Cosine similarity between the two words (float between -1 and 1).
+
+**Raises:**
+- `KeyError`: If either word is not in the vocabulary.
 
 <h4 id="word2vec-train">Word2Vec.train()</h4>
 
@@ -292,23 +292,26 @@ train(sentences: Union[List[List[str]], Iterator[List[str]]], epochs: int = 1, a
 Train word2vec model on given sentences.
 
 **Parameters:**
-- `sentences` (List or iterator of tokenized sentences (lists of words)): 
-- `epochs` (Number of training iterations over the corpus): 
-- `alpha` (Initial learning rate): 
-- `min_alpha` (Minimum allowed learning rate. When provided, enables learning rate decay): from `alpha` down to `min_alpha` over the course of training. By default, this
-  requires counting the total number of training examples upfront to calculate
-  the decay schedule (which can be slow). Use `total_examples` to skip counting.
-- `total_examples` (Total number of training examples per epoch. When provided along): with `min_alpha`, skips the automatic counting step and uses this value for
-  learning rate decay scheduling. This is useful when you already know the
-  corpus size or want to control the decay rate independently of corpus size.
-- `batch_size` (Batch size for training; if 0, no batching is used; default is 2000): 
-- `callbacks` (List of callback functions to call after each epoch): 
-- `calculate_loss` (Whether to calculate and return the final loss): 
-- `verbose` (Controls logging frequency. If None, no batch-level logging in simple mode.): If an integer, logs progress every `verbose` batches (when batched) or every
-  `verbose * 1000` examples (when not batched).
+- `sentences`: List or iterator of tokenized sentences (lists of words).
+- `epochs`: Number of training iterations over the corpus.
+- `alpha`: Initial learning rate.
+- `min_alpha`: Minimum allowed learning rate. When provided, enables learning rate 
+  decay from `alpha` down to `min_alpha` over the course of training. By 
+  default, this requires counting the total number of training examples 
+  upfront to calculate the decay schedule (which can be slow). Use 
+  `total_examples` to skip counting.
+- `total_examples`: Total number of training examples per epoch. When provided 
+  along with `min_alpha`, skips the automatic counting step and uses this 
+  value for learning rate decay scheduling.
+- `batch_size`: Batch size for training; if 0, no batching is used. Default is 2000.
+- `callbacks`: List of callback functions to call after each epoch.
+- `calculate_loss`: Whether to calculate and return the final loss.
+- `verbose`: Controls logging frequency. If None, no batch-level logging in simple 
+  mode. If an integer, logs progress every `verbose` batches (when batched) 
+  or every `verbose * 1000` examples (when not batched).
 
 **Returns:**
-(Final loss value if calculate_loss is True, None otherwise)
+Final loss value if calculate_loss is True, None otherwise.
 
 <br>
 
@@ -378,7 +381,7 @@ Extends the parent build_vocab method to handle temporal word variants.
 Explicitly adds base words to the vocabulary even if they don't appear in the corpus.
 
 **Parameters:**
-- `sentences` (List of tokenized sentences): 
+- `sentences`: List of tokenized sentences.
 
 <h4 id="temprefword2vec-calculate_semantic_change">TempRefWord2Vec.calculate_semantic_change()</h4>
 
@@ -389,11 +392,22 @@ calculate_semantic_change(target_word: str, labels: Optional[List[str]] = None)
 Calculate semantic change by comparing cosine similarities across time periods.
 
 **Parameters:**
-- `target_word` (Target word to analyze (must be one of the targets specified during initialization)): 
-- `labels` (Time period labels (optional, defaults to labels from model initialization)): 
+- `target_word`: Target word to analyze (must be one of the targets specified 
+  during initialization).
+- `labels`: Time period labels (optional, defaults to labels from model initialization).
 
 **Returns:**
-(Dict mapping transition names to lists of (word, change) tuples, sorted by change score (descending))
+Dict mapping transition names to lists of (word, change) tuples, sorted by 
+change score (descending).
+
+**Example:**
+```python
+>>> changes = model.calculate_semantic_change("人民")
+>>> for transition, word_changes in changes.items():
+>>>     print(f"\n{transition}:")
+>>>     print("Words moved towards:", word_changes[:5])  # Top 5 increases
+>>>     print("Words moved away:", word_changes[-5:])   # Top 5 decreases
+```
 
 <h4 id="temprefword2vec-generate_cbow_examples">TempRefWord2Vec.generate_cbow_examples()</h4>
 
@@ -411,10 +425,10 @@ This implementation calls the parent's implementation and then modifies the yiel
 examples by converting any temporal variant context words to their base form.
 
 **Parameters:**
-- `sentences` (List of sentences (lists of words)): 
+- `sentences`: List of sentences (lists of words).
 
 **Returns:**
-(Generator yielding (input_indices, output_idx) tuples for positive examples)
+Generator yielding (input_indices, output_idx) tuples for positive examples.
 
 <h4 id="temprefword2vec-generate_skipgram_examples">TempRefWord2Vec.generate_skipgram_examples()</h4>
 
@@ -431,10 +445,10 @@ This implementation calls the parent's implementation and then modifies the yiel
 examples by converting any temporal variant context words to their base form.
 
 **Parameters:**
-- `sentences` (List of sentences (lists of words)): 
+- `sentences`: List of sentences (lists of words).
 
 **Returns:**
-(Generator yielding (input_idx, output_idx) tuples for positive examples)
+Generator yielding (input_idx, output_idx) tuples for positive examples.
 
 <h4 id="temprefword2vec-get_available_targets">TempRefWord2Vec.get_available_targets()</h4>
 
@@ -490,10 +504,7 @@ This overrides the parent save method to also save:
 Note: The combined corpus is NOT saved to reduce file size.
 
 **Parameters:**
-- `path` (str): Path to save the model file
-
-**Returns:**
-(None)
+- `path` (str): Path to save the model file.
 
 <h4 id="temprefword2vec-train">TempRefWord2Vec.train()</h4>
 
@@ -508,11 +519,12 @@ that was created and preprocessed during initialization. This ensures the traini
 data has the proper temporal references.
 
 **Parameters:**
-- `sentences` (Ignored in TempRefWord2Vec, will use self.combined_corpus instead): 
-- `**kwargs` (All additional arguments are passed to the parent's train method): (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.)
+- `sentences`: Ignored in TempRefWord2Vec, will use self.combined_corpus instead.
+- `**kwargs`: All additional arguments are passed to the parent's train method
+  (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.).
 
 **Returns:**
-(Final loss value if calculate_loss is True in kwargs, None otherwise)
+Final loss value if calculate_loss is True in kwargs, None otherwise.
 
 <br>
 
@@ -533,12 +545,14 @@ of tokens reaches or slightly exceeds the target count. This is useful for balan
 corpus sizes when comparing different time periods or domains.
 
 **Parameters:**
-- `corpus` (List[List[str]]): A list of sentences, where each sentence is a list of tokens
-- `target_tokens` (int): The target number of tokens to sample
+- `corpus` (List[List[str]]): A list of sentences, where each sentence is a list 
+  of tokens.
+- `target_tokens` (int): The target number of tokens to sample.
 - `seed` (Optional[int]): Random seed for reproducibility. If None, uses global seed.
 
 **Returns:**
-(List[List[str]]) A list of sampled sentences with token count close to target_tokens
+(List[List[str]]) A list of sampled sentences with token count close to 
+target_tokens.
 
 <br>
 
@@ -585,19 +599,24 @@ project_2d(
 
 Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
-Parameters
-vectors (list of vectors or dict {label: vector}): Vectors to project.
-labels (list of str, optional): List of labels for the vectors. Defaults to None.
-method (str, optional): Method to use for projection ('pca', 'tsne', or 'umap'). Defaults to 'pca'.
-title (str, optional): Title of the plot. Defaults to None.
-color (list of str or str, optional): List of colors for the vectors or a single color. Defaults to None.
-figsize (tuple, optional): Figure size as (width, height). Defaults to (8, 8).
-fontsize (int, optional): Font size for labels. Defaults to 12.
-perplexity (float, optional): Perplexity parameter for t-SNE. Required if method is 'tsne'.
-filename (str, optional): Path to save the figure. Defaults to None.
-adjust_text_labels (bool, optional): Whether to adjust text labels to avoid overlap. Defaults to False.
-n_neighbors (int, optional): Number of neighbors for UMAP. Defaults to 15.
-min_dist (float, optional): Minimum distance between points for UMAP. Defaults to 0.1.
+**Parameters:**
+- `vectors` (list or dict): Vectors to project. Can be a list of vectors or a dict 
+  mapping labels to vectors.
+- `labels` (list of str): List of labels for the vectors.
+- `method` (str): Method to use for projection ('pca', 'tsne', or 'umap'). 
+  Default is 'pca'.
+- `title` (str): Title of the plot.
+- `color` (list of str or str): List of colors for the vectors or a 
+  single color.
+- `figsize` (tuple): Figure size as (width, height). Default is (8, 8).
+- `fontsize` (int): Font size for labels. Default is 12.
+- `perplexity` (float): Perplexity parameter for t-SNE. Required if 
+  method is 'tsne'.
+- `filename` (str): Path to save the figure.
+- `adjust_text_labels` (bool): Whether to adjust text labels to avoid overlap. 
+  Default is False.
+- `n_neighbors` (int): Number of neighbors for UMAP. Default is 15.
+- `min_dist` (float): Minimum distance between points for UMAP. Default is 0.1.
 
 <br>
 
@@ -609,17 +628,18 @@ get_bias_direction(
 )
 ```
 
+Compute the direction vector for measuring bias.
+
 Given either a single tuple (pos_anchor, neg_anchor) or a list of tuples,
+computes the direction vector by taking the mean of differences between 
+positive and negative anchor pairs.
 
-compute the direction vector for measuring bias by taking the mean of 
-differences between positive and negative anchor pairs.
-
-Parameters
-anchors: A tuple (pos_vector, neg_vector) or list of such tuples
-        Each vector in the pairs should be a numpy array
+**Parameters:**
+- `anchors`: A tuple (pos_vector, neg_vector) or list of such tuples.
+  Each vector in the pairs should be a numpy array.
 
 **Returns:**
-
+(numpy.ndarray) The bias direction vector (normalized).
 
 <br>
 
@@ -635,13 +655,14 @@ calculate_bias(
 
 Calculate bias scores for target words along an axis defined by anchor pairs.
 
-Parameters
-anchors: tuple or list of tuples, e.g. ("man", "woman") or [("king", "queen"), ("man", "woman")]
-targets: list of words to calculate bias for
-word_vectors: keyed vectors (e.g. from word2vec_model.wv)
+**Parameters:**
+- `anchors`: Tuple or list of tuples defining the bias axis, e.g. ("man", "woman") 
+  or [("king", "queen"), ("man", "woman")].
+- `targets`: List of words to calculate bias for.
+- `word_vectors`: Keyed vectors (e.g. from word2vec_model.wv).
 
 **Returns:**
-
+(numpy.ndarray) Bias scores (dot products) for each target word.
 
 <br>
 
@@ -663,12 +684,28 @@ project_bias(
 )
 ```
 
-Plots words on either a 1D or 2D chart by projecting them onto:
+Plot words on a 1D or 2D chart by projecting them onto bias axes.
 
-- axis_x: derived from x (single tuple or list of tuples)
-  - axis_y: derived from y (single tuple or list of tuples), if provided
+Projects words onto:
+  - x-axis: derived from x (single tuple or list of tuples)
+  - y-axis: derived from y (single tuple or list of tuples), if provided
 
-Parameters remain the same as before, but calculation of bias scores is now handled separately.
+**Parameters:**
+- `x`: Tuple or list of tuples defining the x-axis bias direction, 
+  e.g. ("man", "woman").
+- `y`: Tuple or list of tuples defining the y-axis bias direction, or None 
+  for 1D plot.
+- `targets`: List of words to plot.
+- `word_vectors`: Keyed vectors (e.g. from word2vec_model.wv).
+- `title` (str): Title of the plot.
+- `color`: Color(s) for the points. Can be a single color or list of colors.
+- `figsize` (tuple): Figure size as (width, height). Default is (8, 8).
+- `fontsize` (int): Font size for labels. Default is 12.
+- `filename` (str): Path to save the figure.
+- `adjust_text_labels` (bool): Whether to adjust text labels to avoid overlap. 
+  Default is False.
+- `disperse_y` (bool): Whether to add random y-dispersion for 1D plots. 
+  Default is False.
 
 <br>
 
@@ -685,16 +722,16 @@ Compute the cosine similarity between vectors.
 
 If v1 and v2 are single vectors, computes similarity between them.
 If either is a matrix of vectors, uses sklearn's implementation for efficiency.
-
 Returns 0.0 if either vector has zero norm (to avoid division by zero).
 
 **Parameters:**
-- `v1` (numpy.ndarray or list): First vector or matrix of vectors
-- `v2` (numpy.ndarray or list  ): Second vector or matrix of vectors
+- `v1` (numpy.ndarray or list): First vector or matrix of vectors.
+- `v2` (numpy.ndarray or list): Second vector or matrix of vectors.
 
 **Returns:**
-(float or numpy.ndarray) Cosine similarity score(s). For single vectors, returns a float in range [-1, 1].
-For matrices, returns a 2D similarity matrix.
+float or numpy.ndarray: Cosine similarity score(s). For single vectors, 
+returns a float in range [-1, 1]. For matrices, returns a 2D 
+similarity matrix.
 
 <br>
 
@@ -713,12 +750,13 @@ Cosine distance is a dissimilarity measure where 0 means identical vectors
 and 2 means opposite vectors.
 
 **Parameters:**
-- `v1` (numpy.ndarray or list): First vector or matrix of vectors
-- `v2` (numpy.ndarray or list  ): Second vector or matrix of vectors
+- `v1` (numpy.ndarray or list): First vector or matrix of vectors.
+- `v2` (numpy.ndarray or list): Second vector or matrix of vectors.
 
 **Returns:**
-(float or numpy.ndarray) Cosine distance score(s). For single vectors, returns a float in range [0, 2].
-For matrices, returns a 2D distance matrix.
+float or numpy.ndarray: Cosine distance score(s). For single vectors, 
+returns a float in range [0, 2]. For matrices, returns a 2D 
+distance matrix.
 
 <br>
 
@@ -736,15 +774,19 @@ most_similar(
 
 Find the most similar vectors to a target vector using the specified similarity metric.
 
-Parameters
-target_vector (numpy.ndarray): The reference vector to compare against
-vectors (list or numpy.ndarray): List of vectors to compare with the target
-labels (list, optional): Labels corresponding to the vectors. If provided, returns (label, score) pairs
-metric (str or callable, optional): Similarity metric to use. Can be 'cosine' or a callable that takes two vectors
-top_n (int, optional): Number of top results to return. If None, returns all results
+**Parameters:**
+- `target_vector` (numpy.ndarray): The reference vector to compare against.
+- `vectors` (list or numpy.ndarray): List of vectors to compare with the target.
+- `labels` (list): Labels corresponding to the vectors. If provided, 
+  returns (label, score) pairs.
+- `metric` (str or callable): Similarity metric to use. Can be 'cosine' or a 
+  callable that takes two vectors. Default is 'cosine'.
+- `top_n` (int): Number of top results to return. If None, returns 
+  all results.
 
 **Returns:**
-
+(list) List of (label, score) or (index, score) tuples sorted by similarity 
+score in descending order.
 
 <br>
 

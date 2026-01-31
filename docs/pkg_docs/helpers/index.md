@@ -163,13 +163,13 @@ load_text(filename, encoding='utf-8')
 
 Loads text from a file.
 
-Parameters
-filename (str): The filename to load text from.
-encoding (str): The encoding of the file. Default is "utf-8".
-                Use "auto" to automatically detect the encoding.
+**Parameters:**
+- `filename` (str): The filename to load text from.
+- `encoding` (str): The encoding of the file. Default is "utf-8".
+  Use "auto" to automatically detect the encoding.
 
 **Returns:**
-
+(str) The text content of the file.
 
 <br>
 
@@ -181,13 +181,13 @@ load_texts(filenames, encoding='utf-8')
 
 Loads text from multiple files.
 
-Parameters
-filenames (list): A list of filenames to load text from.
-encoding (str): The encoding of the files. Default is "utf-8".
-                Use "auto" to automatically detect encoding for each file.
+**Parameters:**
+- `filenames` (list): A list of filenames to load text from.
+- `encoding` (str): The encoding of the files. Default is "utf-8".
+  Use "auto" to automatically detect encoding for each file.
 
 **Returns:**
-
+(list) A list of text contents from the files.
 
 <br>
 
@@ -219,20 +219,20 @@ split_into_chunks(sequence, chunk_size, overlap=0.0)
 
 Splits text or a list of tokens into chunks with optional overlap between consecutive chunks.
 
-Parameters
-sequence (str or list): The text string or list of tokens to be split.
-chunk_size (int): The size of each chunk (characters for text, items for lists).
-overlap (float): The fraction of overlap between consecutive chunks (0.0 to 1.0).
-                Default is 0.0 (no overlap).
+**Parameters:**
+- `sequence` (str or list): The text string or list of tokens to be split.
+- `chunk_size` (int): The size of each chunk (characters for text, items for lists).
+- `overlap` (float): The fraction of overlap between consecutive chunks (0.0 to 1.0).
+  Default is 0.0 (no overlap).
 
-Returns:
-list: A list of chunks. If input is a string, each chunk is a string.
-     If input is a list, each chunk is a list of tokens.
-     Note: The last chunk may be smaller than chunk_size if the sequence
-     doesn't divide evenly.
+**Returns:**
+(list) A list of chunks. If input is a string, each chunk is a string.
+If input is a list, each chunk is a list of tokens.
+Note: The last chunk may be smaller than chunk_size if the sequence
+doesn't divide evenly.
 
-Raises:
-ValueError: If overlap is not between 0 and 1.
+**Raises:**
+- `ValueError`: If overlap is not between 0 and 1, or if chunk_size is not positive.
 
 <br>
 
@@ -257,16 +257,16 @@ detect_encoding(filename, num_bytes=10000)
 
 Detects the encoding of a file.
 
-Parameters
-filename (str): The path to the file.
-num_bytes (int): Number of bytes to read for detection. Default is 10000.
-                 Larger values may be more accurate but slower.
+**Parameters:**
+- `filename` (str): The path to the file.
+- `num_bytes` (int): Number of bytes to read for detection. Default is 10000.
+  Larger values may be more accurate but slower.
 
-Returns:
-str: The detected encoding (e.g., 'utf-8', 'gb2312', 'gbk', 'big5').
+**Returns:**
+(str) The detected encoding (e.g., 'utf-8', 'gb2312', 'gbk', 'big5').
 
-Raises:
-ImportError: If chardet is not installed.
+**Raises:**
+- `ImportError`: If chardet is not installed.
 
 <br>
 

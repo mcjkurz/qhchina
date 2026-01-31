@@ -235,7 +235,9 @@ def current_font() -> Optional[str]:
     """
     try:
         # Check serif first if family is serif
-        if matplotlib.rcParams.get('font.family') == ['serif']:
+        font_family = matplotlib.rcParams.get('font.family', [])
+        is_serif = font_family == ['serif'] or font_family == 'serif'
+        if is_serif:
             fonts = matplotlib.rcParams.get('font.serif', [])
         else:
             fonts = matplotlib.rcParams.get('font.sans-serif', [])
