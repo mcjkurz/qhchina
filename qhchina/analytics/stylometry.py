@@ -50,29 +50,73 @@ __all__ = [
 
 def extract_mfw(ngram_counts: Counter, n: int = 100) -> List[str]:
     """
-    Extract the n Most Frequent n-grams from a Counter.
+    Extract the Most Frequent Words (MFW) from a frequency counter.
     
-    Returns a list of the n most common n-grams.
+    Args:
+        ngram_counts (Counter): A Counter object with n-gram/word frequencies.
+        n (int): Number of most frequent items to return (default: 100).
+    
+    Returns:
+        list: The n most common n-grams/words, ordered by frequency.
+    
+    Example:
+        >>> from collections import Counter
+        >>> from qhchina.analytics.stylometry import extract_mfw
+        >>> counts = Counter(['的', '是', '了', '的', '我', '的'])
+        >>> mfw = extract_mfw(counts, n=2)
+        >>> print(mfw)
+        ['的', '是']
     """
     return [ngram for ngram, _ in ngram_counts.most_common(n)]
 
 
 def burrows_delta(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
     """
-    Burrows' Delta distance: the mean absolute difference between z-score vectors.
+    Compute Burrows' Delta distance between two feature vectors.
     
-    A classic stylometric measure; lower values indicate more similar writing styles.
+    A classic stylometric measure for authorship attribution. Calculates the
+    mean absolute difference between z-score normalized frequency vectors.
+    Lower values indicate more similar writing styles.
+    
+    Args:
+        vec_a (np.ndarray): First z-score feature vector.
+        vec_b (np.ndarray): Second z-score feature vector.
+    
+    Returns:
+        float: Burrows' Delta distance (lower = more similar).
+    
+    Reference:
+        Burrows, J. (2002). "Delta: A measure of stylistic difference and a guide
+        to likely authorship." Literary and Linguistic Computing, 17(3), 267-287.
     """
     return np.mean(np.abs(vec_a - vec_b))
 
 
 def manhattan_distance(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
-    """Manhattan (L1) distance: sum of absolute differences."""
+    """
+    Compute Manhattan (L1) distance between two vectors.
+    
+    Args:
+        vec_a (np.ndarray): First feature vector.
+        vec_b (np.ndarray): Second feature vector.
+    
+    Returns:
+        float: Sum of absolute differences between corresponding elements.
+    """
     return np.sum(np.abs(vec_a - vec_b))
 
 
 def euclidean_distance(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
-    """Euclidean (L2) distance: square root of sum of squared differences."""
+    """
+    Compute Euclidean (L2) distance between two vectors.
+    
+    Args:
+        vec_a (np.ndarray): First feature vector.
+        vec_b (np.ndarray): Second feature vector.
+    
+    Returns:
+        float: Square root of sum of squared differences.
+    """
     return np.sqrt(np.sum((vec_a - vec_b) ** 2))
 
 
@@ -151,24 +195,55 @@ class Stylometry:
     """
     Stylometry for authorship attribution and document clustering.
     
-    Parameters:
-        n_features: Number of most frequent n-grams to use as features.
-        ngram_range: Tuple (min_n, max_n) for n-grams. Default (1, 1) = unigrams.
-        transform: Feature transformation - 'zscore' or 'tfidf'.
-        distance: Distance metric - 'cosine' (default), 'burrows_delta', 'manhattan',
-            'euclidean', or 'eder_delta'.
-        classifier: Classification method - 'delta' or 'svm'.
-        cull: Minimum document frequency ratio (0.0-1.0). N-grams appearing in fewer
-              than cull*100% of documents are removed before feature selection.
-        chunk_size: If set, split documents into chunks of this many tokens.
-        mode: Attribution mode for delta classifier - 'centroid' or 'instance'.
+    Implements classic and modern stylometric methods for analyzing writing style,
+    comparing authors, and attributing disputed texts. Inspired by the R package
+    'stylo' but designed for Chinese text analysis.
     
-    Example usage:
+    Args:
+        n_features (int): Number of most frequent n-grams to use as features (default: 100).
+            Higher values capture more stylistic variation but may include noise.
+        ngram_range (tuple): Range of n-gram sizes as (min_n, max_n). Default (1, 1) = unigrams.
+            Use (1, 2) for unigrams + bigrams, (2, 2) for bigrams only.
+        transform (str): Feature transformation method:
+            - 'zscore': Z-score normalization (default, recommended for Delta methods)
+            - 'tfidf': TF-IDF weighting
+        distance (str): Distance metric for comparing documents:
+            - 'cosine': Cosine distance (default)
+            - 'burrows_delta': Classic Burrows' Delta
+            - 'manhattan': Manhattan/L1 distance
+            - 'euclidean': Euclidean/L2 distance
+            - 'eder_delta': Eder's Delta variant
+        classifier (str): Classification method for authorship attribution:
+            - 'delta': Delta-based nearest neighbor (default)
+            - 'svm': Support Vector Machine
+        cull (float): Minimum document frequency ratio (0.0-1.0). N-grams appearing in
+            fewer than cull*100% of documents are removed. Helps filter rare words.
+            Default: None (no culling).
+        chunk_size (int): If set, split documents into chunks of this many tokens.
+            Useful for comparing texts of similar length.
+        mode (str): Attribution mode for delta classifier:
+            - 'centroid': Compare to author centroids (averaged profiles)
+            - 'instance': Compare to individual text instances
+    
+    Example:
+        >>> from qhchina.analytics.stylometry import Stylometry
+        >>> 
+        >>> # Prepare corpus: dict mapping author names to lists of tokenized documents
+        >>> corpus = {
+        ...     '鲁迅': [tokens_luxun_1, tokens_luxun_2],
+        ...     '茅盾': [tokens_maodun_1, tokens_maodun_2]
+        ... }
+        >>> 
+        >>> # Create and fit stylometry model
         >>> stylo = Stylometry(n_features=100, ngram_range=(1, 2), cull=0.2)
-        >>> stylo.fit_transform({'AuthorA': [doc1, doc2], 'AuthorB': [doc3, doc4]})
-        >>> stylo.predict(disputed_text)
-        >>> stylo.plot()
-        >>> stylo.dendrogram()
+        >>> stylo.fit_transform(corpus)
+        >>> 
+        >>> # Visualize results
+        >>> stylo.plot()  # PCA/MDS scatter plot
+        >>> stylo.dendrogram()  # Hierarchical clustering
+        >>> 
+        >>> # Attribute disputed text
+        >>> author, confidence = stylo.predict(disputed_tokens)
     """
     
     # Registries for extensibility

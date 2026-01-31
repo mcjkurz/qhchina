@@ -575,4 +575,96 @@ aside.docs-sidebar {
     font-size: 0.85rem !important;
     padding: calc(0.35 * var(--spacing-unit)) calc(0.5 * var(--spacing-unit)) !important;
   }
+}
+
+/* Documentation Search Styles */
+.docs-search {
+  margin-bottom: calc(1.5 * var(--spacing-unit));
+  position: relative;
+}
+
+.docs-search-input {
+  width: 100%;
+  padding: calc(0.5 * var(--spacing-unit)) calc(0.75 * var(--spacing-unit));
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(22, 113, 141, 0.1);
+  }
+  
+  &::placeholder {
+    color: var(--light-text);
+  }
+}
+
+.docs-search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 1000;
+  display: none;
+  
+  &.visible {
+    display: block;
+  }
+}
+
+.search-result-item {
+  display: flex;
+  flex-direction: column;
+  padding: calc(0.5 * var(--spacing-unit)) calc(0.75 * var(--spacing-unit));
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.15s ease;
+  
+  &:last-child {
+    border-bottom: none;
+  }
+  
+  &:hover,
+  &.active {
+    background-color: var(--secondary-color);
+  }
+}
+
+.search-result-name {
+  color: var(--primary-color);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.search-result-module {
+  color: var(--light-text);
+  font-size: 0.8rem;
+  margin-top: 2px;
+}
+
+.search-no-results {
+  padding: calc(0.75 * var(--spacing-unit));
+  color: var(--light-text);
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+/* Responsive search */
+@media (max-width: 768px) {
+  .docs-search {
+    margin-bottom: calc(var(--spacing-unit));
+  }
+  
+  .docs-search-results {
+    max-height: 250px;
+  }
 } 

@@ -3,30 +3,53 @@ layout: docs_with_sidebar
 title: Topic Modeling
 permalink: /pkg_docs/topic_modeling/
 functions:
-  - name: LDAGibbsSampler()
+  - name: LDAGibbsSampler
     anchor: ldagibbssampler
-  - name: fit()
-    anchor: fit
-  - name: get_topics()
-    anchor: get_topics
-  - name: get_topic_words()
-    anchor: get_topic_words
-  - name: get_document_topics()
-    anchor: get_document_topics
-  - name: get_top_documents()
-    anchor: get_top_documents
-  - name: inference()
-    anchor: inference
-  - name: topic_similarity()
-    anchor: topic_similarity
-  - name: document_similarity()
-    anchor: document_similarity
-  - name: plot_topic_words()
-    anchor: plot_topic_words
-  - name: visualize_documents()
-    anchor: visualize_documents
-  - name: save() / load()
-    anchor: save-load
+  - name: LDAGibbsSampler.coherence()
+    anchor: ldagibbssampler-coherence
+  - name: LDAGibbsSampler.coherence_npmi()
+    anchor: ldagibbssampler-coherence_npmi
+  - name: LDAGibbsSampler.coherence_umass()
+    anchor: ldagibbssampler-coherence_umass
+  - name: LDAGibbsSampler.document_similarity()
+    anchor: ldagibbssampler-document_similarity
+  - name: LDAGibbsSampler.document_similarity_matrix()
+    anchor: ldagibbssampler-document_similarity_matrix
+  - name: LDAGibbsSampler.evaluate()
+    anchor: ldagibbssampler-evaluate
+  - name: LDAGibbsSampler.fit()
+    anchor: ldagibbssampler-fit
+  - name: LDAGibbsSampler.get_document_topics()
+    anchor: ldagibbssampler-get_document_topics
+  - name: LDAGibbsSampler.get_top_documents()
+    anchor: ldagibbssampler-get_top_documents
+  - name: LDAGibbsSampler.get_topic_distribution()
+    anchor: ldagibbssampler-get_topic_distribution
+  - name: LDAGibbsSampler.get_topic_words()
+    anchor: ldagibbssampler-get_topic_words
+  - name: LDAGibbsSampler.get_topics()
+    anchor: ldagibbssampler-get_topics
+  - name: LDAGibbsSampler.inference()
+    anchor: ldagibbssampler-inference
+  - name: LDAGibbsSampler.initialize()
+    anchor: ldagibbssampler-initialize
+  - name: LDAGibbsSampler.perplexity()
+    anchor: ldagibbssampler-perplexity
+  - name: LDAGibbsSampler.plot_topic_words()
+    anchor: ldagibbssampler-plot_topic_words
+  - name: LDAGibbsSampler.preprocess()
+    anchor: ldagibbssampler-preprocess
+  - name: LDAGibbsSampler.run_gibbs_sampling()
+    anchor: ldagibbssampler-run_gibbs_sampling
+  - name: LDAGibbsSampler.save()
+    anchor: ldagibbssampler-save
+  - name: LDAGibbsSampler.topic_correlation_matrix()
+    anchor: ldagibbssampler-topic_correlation_matrix
+  - name: LDAGibbsSampler.topic_similarity()
+    anchor: ldagibbssampler-topic_similarity
+  - name: LDAGibbsSampler.visualize_documents()
+    anchor: ldagibbssampler-visualize_documents
+import_from: qhchina.analytics.topicmodels
 ---
 
 # Topic Modeling
@@ -43,108 +66,192 @@ topics = lda.get_topics(n_words=10)  # Get top words per topic
 
 ---
 
-<h3 id="ldagibbssampler">LDAGibbsSampler()</h3>
+## API Reference
+
+<!-- API-START -->
+
+<h3 id="ldagibbssampler">LDAGibbsSampler</h3>
 
 ```python
-LDAGibbsSampler(n_topics=10, alpha=None, beta=None, iterations=100, burnin=0, 
-                random_state=None, log_interval=None, min_word_count=1, 
-                max_vocab_size=None, min_word_length=1, stopwords=None, 
-                use_cython=True, estimate_alpha=1)
+LDAGibbsSampler(n_topics: int = 10, alpha: Optional[float] = None, beta: Optional[float] = None, iterations: int = 100, burnin: int = 0, random_state: Optional[int] = None, log_interval: Optional[int] = None, min_word_count: int = 1, max_vocab_size: Optional[int] = None, min_word_length: int = 1, stopwords: Optional[set] = None, use_cython: bool = True, estimate_alpha: int = 1, min_doc_length: int = 24)
 ```
 
-**Parameters:**
-- `n_topics` (int): Number of topics (default: 10)
-- `alpha` (float or array): Document-topic prior. Can be a float (symmetric prior) or array of floats (asymmetric prior, one value per topic). If None, uses `50/n_topics` (Griffiths & Steyvers, 2004) (default: None)
-- `beta` (float): Topic-word prior. If None, uses `1/n_topics` (Griffiths & Steyvers, 2004) (default: None)
-- `iterations` (int): Number of Gibbs sampling iterations (default: 100)
-- `burnin` (int): Initial iterations before alpha optimization (default: 0)
-- `random_state` (int): Random seed for reproducibility (default: None)
-- `log_interval` (int): Calculate and print perplexity every N iterations (default: None)
-- `min_word_count` (int): Minimum word count to include in vocabulary (default: 1)
-- `max_vocab_size` (int): Maximum vocabulary size (default: None)
-- `min_word_length` (int): Minimum word length to include (default: 1)
-- `stopwords` (set): Set of words to exclude (default: None)
-- `use_cython` (bool): Use Cython acceleration if available (default: True)
-- `estimate_alpha` (int): Estimate alpha every N iterations (0 = disable) (default: 1)
-- `min_doc_length` (int): Minimum document length (tokens) to trigger a warning during preprocessing (default: 24). Documents shorter than this may produce unreliable topic distributions.
+Latent Dirichlet Allocation with Gibbs sampling implementation. 
 
-<br>
-
-<h3 id="fit">fit()</h3>
+<h4 id="ldagibbssampler-coherence">LDAGibbsSampler.coherence()</h4>
 
 ```python
-fit(documents)
+coherence(method: str = 'umass', n_words: int = 10, window_size: Optional[int] = None, **kwargs)
 ```
 
-Fit the LDA model to documents.
+Calculate topic coherence using the specified method.
+
+Coherence measures how semantically similar the top words in each topic are.
+Higher coherence generally indicates more interpretable topics.
 
 **Parameters:**
-- `documents` (list): List of tokenized documents (each document is a list of tokens)
+- `method`: Coherence measure to use. Options:
+  - 'umass': UMass coherence (Mimno et al., 2011). Uses document co-occurrence.
+             Range: typically negative, higher (less negative) is better.
+  - 'npmi': NPMI coherence. Uses sliding window co-occurrence.
+           Range: -1 to 1, higher is better.
+- `n_words`: Number of top words per topic to use (default: 10)
+- `window_size`: Size of sliding window for 'npmi' method (default: 10).
+- `**kwargs`: Additional arguments passed to the specific coherence method
 
-<br>
+**Returns:**
+Tuple of:
+- Average coherence across all topics
+- List of coherence values for each topic
 
-<h3 id="get_topics">get_topics()</h3>
+**Example:**
+```python
+>>> model.fit(documents)
+>>> avg_coherence, topic_coherences = model.coherence('npmi')
+>>> print(f"Average NPMI coherence: {avg_coherence:.4f}")
+```
+
+<h4 id="ldagibbssampler-coherence_npmi">LDAGibbsSampler.coherence_npmi()</h4>
 
 ```python
-get_topics(n_words=10)
+coherence_npmi(n_words: int = 10, window_size: int = 10, eps: float = 1e-12)
 ```
 
-Get top words for all topics.
+Calculate NPMI (Normalized Pointwise Mutual Information) topic coherence.
+
+NPMI coherence uses sliding window co-occurrence and is defined as:
+NPMI(w_i, w_j) = (log(P(w_i, w_j) / (P(w_i) * P(w_j)))) / (-log(P(w_i, w_j)))
+
+Values range from -1 (never co-occur) to +1 (always co-occur).
 
 **Parameters:**
-- `n_words` (int): Number of words per topic
+- `n_words`: Number of top words per topic to use
+- `window_size`: Size of the sliding window for co-occurrence
+- `eps`: Small constant to avoid division by zero
 
-**Returns:** (list) List of lists containing (word, probability) tuples
+**Returns:**
+Tuple of:
+- Average coherence across all topics
+- List of coherence values for each topic
 
-<br>
-
-<h3 id="get_topic_words">get_topic_words()</h3>
+<h4 id="ldagibbssampler-coherence_umass">LDAGibbsSampler.coherence_umass()</h4>
 
 ```python
-get_topic_words(topic_id, n_words=10)
+coherence_umass(n_words: int = 10, eps: float = 1e-12)
 ```
 
-Get top words for a specific topic.
+Calculate UMass topic coherence (Mimno et al., 2011).
+
+UMass coherence uses document co-occurrence and is defined as:
+C_UMass = (2 / (N*(N-1))) * sum_{i<j} log((D(w_i, w_j) + eps) / D(w_j))
+
+where D(w) is the document frequency of word w, and D(w_i, w_j) is the 
+number of documents containing both words.
 
 **Parameters:**
-- `topic_id` (int): Topic ID
-- `n_words` (int): Number of words to return
+- `n_words`: Number of top words per topic to use for coherence calculation
+- `eps`: Small constant to avoid log(0)
 
-**Returns:** (list) List of (word, probability) tuples
+**Returns:**
+Tuple of:
+- Average coherence across all topics
+- List of coherence values for each topic
 
-<br>
-
-<h3 id="get_document_topics">get_document_topics()</h3>
+<h4 id="ldagibbssampler-document_similarity">LDAGibbsSampler.document_similarity()</h4>
 
 ```python
-get_document_topics(doc_id, sort_by_prob=False)
+document_similarity(doc_i: int, doc_j: int, metric: str = 'jsd')
 ```
 
-Get topic distribution for a document.
+Calculate similarity between two documents based on their topic distributions.
 
 **Parameters:**
-- `doc_id` (int): Document ID
-- `sort_by_prob` (bool): Sort topics by probability
+- `doc_i`: First document ID
+- `doc_j`: Second document ID
+- `metric`: Similarity metric to use. Options:
+  - 'jsd': Jensen-Shannon divergence (default, lower is more similar)
+  - 'hellinger': Hellinger distance (lower is more similar)
+  - 'cosine': Cosine similarity (higher is more similar)
+  - 'kl': KL divergence (lower is more similar, asymmetric)
 
-**Returns:** (list) List of (topic_id, probability) tuples
+**Returns:**
+Similarity/distance value based on chosen metric
 
-<br>
-
-<h3 id="get_top_documents">get_top_documents()</h3>
+<h4 id="ldagibbssampler-document_similarity_matrix">LDAGibbsSampler.document_similarity_matrix()</h4>
 
 ```python
-get_top_documents(topic_id, n_docs=10)
+document_similarity_matrix(doc_ids: Optional[List[int]] = None, metric: str = 'jsd')
 ```
 
-Get top documents for a topic.
+Calculate pairwise similarity/distance between documents.
 
 **Parameters:**
-- `topic_id` (int): Topic ID
-- `n_docs` (int): Number of documents to return
+- `doc_ids`: List of document IDs to compare. If None, compares all documents.
+- `metric`: Similarity metric to use (see document_similarity for options)
 
-**Returns:** (list) List of (doc_id, probability) tuples
+**Returns:**
+Square matrix with pairwise similarities/distances
 
-<br>
+<h4 id="ldagibbssampler-evaluate">LDAGibbsSampler.evaluate()</h4>
+
+```python
+evaluate(n_words: int = 10, verbose: bool = True)
+```
+
+Comprehensive evaluation of the topic model.
+
+Calculates multiple quality metrics including perplexity, coherence measures,
+and topic diversity.
+
+**Parameters:**
+- `n_words`: Number of top words per topic for coherence calculation
+- `verbose`: Whether to print results
+
+**Returns:**
+Dictionary containing all evaluation metrics
+
+<h4 id="ldagibbssampler-fit">LDAGibbsSampler.fit()</h4>
+
+```python
+fit(documents: List[List[str]])
+```
+
+Fit the LDA model to the given documents.
+
+**Parameters:**
+- `documents`: List of tokenized documents (each document is a list of tokens)
+
+<h4 id="ldagibbssampler-get_document_topics">LDAGibbsSampler.get_document_topics()</h4>
+
+```python
+get_document_topics(doc_id: int, sort_by_prob: bool = False)
+```
+
+Get topic distribution for a specific document.
+
+**Parameters:**
+- `doc_id`: ID of the document
+- `sort_by_prob`: If True, sort topics by probability in descending order (default: False)
+
+**Returns:**
+List of (topic_id, probability) tuples
+
+<h4 id="ldagibbssampler-get_top_documents">LDAGibbsSampler.get_top_documents()</h4>
+
+```python
+get_top_documents(topic_id: int, n_docs: int = 10)
+```
+
+Get the top n documents for a specific topic.
+
+**Parameters:**
+- `topic_id`: ID of the topic
+- `n_docs`: Number of top documents to return
+
+**Returns:**
+List of (document_id, probability) tuples, sorted by probability in descending order
+
+<h4 id="ldagibbssampler-get_topic_distribution">LDAGibbsSampler.get_topic_distribution()</h4>
 
 ```python
 get_topic_distribution()
@@ -152,180 +259,221 @@ get_topic_distribution()
 
 Get overall topic distribution across the corpus.
 
-**Returns:** (numpy.ndarray) Topic distribution
+**Returns:**
+Array of topic probabilities
 
-<br>
-
-<h3 id="inference">inference()</h3>
+<h4 id="ldagibbssampler-get_topic_words">LDAGibbsSampler.get_topic_words()</h4>
 
 ```python
-inference(new_doc, inference_iterations=100)
+get_topic_words(topic_id: int, n_words: int = 10)
+```
+
+Get the top n words for a specific topic.
+
+**Parameters:**
+- `topic_id`: ID of the topic
+- `n_words`: Number of top words to return
+
+**Returns:**
+List of (word, probability) tuples, sorted by probability in descending order
+
+<h4 id="ldagibbssampler-get_topics">LDAGibbsSampler.get_topics()</h4>
+
+```python
+get_topics(n_words: int = 10)
+```
+
+Get the top words for each topic along with their probabilities.
+
+**Parameters:**
+- `n_words`: Number of top words to return for each topic
+
+**Returns:**
+List of topics, each containing a list of (word, probability) tuples
+
+<h4 id="ldagibbssampler-inference">LDAGibbsSampler.inference()</h4>
+
+```python
+inference(new_doc: List[str], inference_iterations: int = 100)
 ```
 
 Infer topic distribution for a new document.
 
 **Parameters:**
-- `new_doc` (list): Tokenized document
-- `inference_iterations` (int): Number of inference iterations
+- `new_doc`: Tokenized document (list of tokens)
+- `inference_iterations`: Number of sampling iterations for inference
 
-**Returns:** (numpy.ndarray) Topic distribution
+**Returns:**
+Topic distribution for the document
 
-<br>
-
-<h3 id="topic_similarity">topic_similarity()</h3>
+<h4 id="ldagibbssampler-initialize">LDAGibbsSampler.initialize()</h4>
 
 ```python
-topic_similarity(topic_i, topic_j, metric='jsd')
+initialize(docs_as_ids: List[List[int]])
+```
+
+Initialize data structures for Gibbs sampling.
+
+**Parameters:**
+- `docs_as_ids`: Documents with tokens as integer IDs
+
+<h4 id="ldagibbssampler-perplexity">LDAGibbsSampler.perplexity()</h4>
+
+```python
+perplexity()
+```
+
+Calculate perplexity of the model on the training data.
+
+**Returns:**
+Perplexity value (lower is better)
+
+<h4 id="ldagibbssampler-plot_topic_words">LDAGibbsSampler.plot_topic_words()</h4>
+
+```python
+plot_topic_words(n_words: int = 10, figsize: Tuple[int, int] = (12, 8), fontsize: int = 10, filename: Optional[str] = None, separate_files: bool = False, dpi: int = 72, orientation: str = 'horizontal')
+```
+
+Plot the top words for each topic as a bar chart.
+
+**Parameters:**
+- `n_words`: Number of top words to display per topic
+- `figsize`: Figure size as (width, height)
+- `fontsize`: Font size for the plot
+- `filename`: If provided, save the plot to this file (or use as base name for separate files)
+- `separate_files`: If True, save each topic as a separate file
+- `dpi`: Resolution of the output image in dots per inch
+- `orientation`: "horizontal" (words on x-axis, probabilities on y-axis) or 
+  "vertical" (probabilities on x-axis, words on y-axis with highest at top)
+
+<h4 id="ldagibbssampler-preprocess">LDAGibbsSampler.preprocess()</h4>
+
+```python
+preprocess(documents: List[List[str]])
+```
+
+Convert token documents to word IDs and build vocabulary.
+
+Filter vocabulary based on min_word_count, min_word_length, stopwords, and max_vocab_size.
+
+**Parameters:**
+- `documents`: List of tokenized documents (each document is a list of tokens)
+
+**Returns:**
+Tuple containing:
+- docs_as_ids: Documents with tokens converted to integer IDs
+- word_to_id: Mapping from words to integer IDs
+- id_to_word: Mapping from integer IDs to words
+
+<h4 id="ldagibbssampler-run_gibbs_sampling">LDAGibbsSampler.run_gibbs_sampling()</h4>
+
+```python
+run_gibbs_sampling()
+```
+
+Run Gibbs sampling for the specified number of iterations. 
+
+Uses Cython if available and enabled.
+
+<h4 id="ldagibbssampler-save">LDAGibbsSampler.save()</h4>
+
+```python
+save(filepath: str)
+```
+
+Save the model to a file.
+
+**Parameters:**
+- `filepath`: Path to save the model
+
+<h4 id="ldagibbssampler-topic_correlation_matrix">LDAGibbsSampler.topic_correlation_matrix()</h4>
+
+```python
+topic_correlation_matrix(metric: str = 'jsd')
+```
+
+Calculate pairwise similarity/distance between all topics.
+
+**Parameters:**
+- `metric`: Similarity metric to use (see topic_similarity for options)
+
+**Returns:**
+Square matrix of shape (n_topics, n_topics) with pairwise similarities/distances
+
+<h4 id="ldagibbssampler-topic_similarity">LDAGibbsSampler.topic_similarity()</h4>
+
+```python
+topic_similarity(topic_i: int, topic_j: int, metric: str = 'jsd')
 ```
 
 Calculate similarity between two topics.
 
 **Parameters:**
-- `topic_i` (int): First topic ID
-- `topic_j` (int): Second topic ID
-- `metric` (str): Similarity metric. Available options:
-  - `'jsd'` - Jensen-Shannon Divergence
-  - `'hellinger'` - Hellinger Distance
-  - `'cosine'` - Cosine Similarity
-  - `'kl'` - Kullback-Leibler Divergence
+- `topic_i`: First topic ID
+- `topic_j`: Second topic ID
+- `metric`: Similarity metric to use. Options:
+  - 'jsd': Jensen-Shannon divergence (default, lower is more similar)
+  - 'hellinger': Hellinger distance (lower is more similar)
+  - 'cosine': Cosine similarity (higher is more similar)
+  - 'kl': KL divergence (lower is more similar, asymmetric)
 
-**Returns:** (float) Similarity score
+**Returns:**
+Similarity/distance value based on chosen metric
 
-<br>
-
-```python
-topic_correlation_matrix(metric='jsd')
-```
-
-Calculate pairwise similarity between all topics.
-
-**Parameters:**
-- `metric` (str): Similarity metric
-
-**Returns:** (numpy.ndarray) Similarity matrix
-
-<br>
-
-<h3 id="document_similarity">document_similarity()</h3>
+<h4 id="ldagibbssampler-visualize_documents">LDAGibbsSampler.visualize_documents()</h4>
 
 ```python
-document_similarity(doc_i, doc_j, metric='jsd')
-```
-
-Calculate similarity between two documents.
-
-**Parameters:**
-- `doc_i` (int): First document ID
-- `doc_j` (int): Second document ID
-- `metric` (str): Similarity metric
-
-**Returns:** (float) Similarity score
-
-<br>
-
-```python
-document_similarity_matrix(doc_ids=None, metric='jsd')
-```
-
-Calculate pairwise similarity between documents.
-
-**Parameters:**
-- `doc_ids` (list): List of document IDs (None for all)
-- `metric` (str): Similarity metric
-
-**Returns:** (numpy.ndarray) Similarity matrix
-
-<br>
-
-<h3 id="plot_topic_words">plot_topic_words()</h3>
-
-```python
-plot_topic_words(n_words=10, figsize=(12, 8), fontsize=10, filename=None, 
-                 separate_files=False, dpi=72, orientation='horizontal')
-```
-
-Plot top words for topics as bar charts.
-
-**Parameters:**
-- `n_words` (int): Number of words per topic
-- `figsize` (tuple): Figure size
-- `fontsize` (int): Font size
-- `filename` (str): Output filename (None for display)
-- `separate_files` (bool): Create separate file for each topic
-- `dpi` (int): Resolution
-- `orientation` (str): Bar orientation ('horizontal' or 'vertical')
-
-<br>
-
-<h3 id="visualize_documents">visualize_documents()</h3>
-
-```python
-visualize_documents(method='pca', n_clusters=None, doc_labels=None,
-                   show_labels=False, label_strategy='auto', use_adjusttext=True,
-                   max_labels=None, figsize=(12, 10), dpi=150, alpha=0.7, size=50,
-                   cmap='tab10', title=None, filename=None, format='static',
-                   random_state=None, highlight=None, n_topic_words=4, **kwargs)
+visualize_documents(method: str = 'pca', n_clusters: Optional[int] = None, doc_labels: Optional[List[str]] = None, show_labels: bool = False, label_strategy: str = 'auto', use_adjusttext: bool = True, max_labels: Optional[int] = None, figsize: Optional[Tuple[int, int]] = None, dpi: int = 150, alpha: float = 0.7, size: float = 50, cmap: str = 'tab10', title: Optional[str] = None, filename: Optional[str] = None, format: str = 'static', random_state: Optional[int] = None, highlight: Union[int, List[int], NoneType] = None, n_topic_words: int = 4, **kwargs)
 ```
 
 Visualize documents in 2D space using dimensionality reduction.
 
-Documents are automatically colored by dominant topic, or by k-means clusters if `n_clusters` is specified.
+Documents are automatically colored by dominant topic, or by k-means clusters if n_clusters is specified.
 
 **Parameters:**
-- `method` (str): Dimensionality reduction method. Options:
-  - `'pca'` - Principal Component Analysis (fast, linear)
-  - `'tsne'` - t-SNE (captures non-linear structure)
-  - `'mds'` - Multidimensional Scaling
-  - `'umap'` - UMAP (requires `umap-learn` package)
-- `n_clusters` (int): If specified, use k-means clustering instead of topic coloring
-- `doc_labels` (list): Optional document names/labels
-- `show_labels` (bool): Whether to show document labels
-- `label_strategy` (str): Label display strategy ('auto', 'all', 'sample', 'none')
-- `use_adjusttext` (bool): Use adjustText for better label placement (if available)
-- `max_labels` (int): Maximum number of labels to show per topic/cluster
-- `figsize` (tuple): Figure size
-- `dpi` (int): Resolution
-- `alpha` (float): Point transparency (0-1)
-- `size` (float): Point size
-- `cmap` (str): Matplotlib colormap name
-- `title` (str): Plot title
-- `filename` (str): Output filename
-- `format` (str): Output format ('static' or 'html')
-- `random_state` (int): Random seed
-- `highlight` (int or list): Topic ID(s) to highlight. Non-highlighted topics shown in gray. In HTML format, all topics appear in legend and can be toggled interactively
-- `n_topic_words` (int): Number of representative words per topic in legend (default: 4). Increase figsize width if using many words
-- `**kwargs`: Additional parameters for dimensionality reduction (e.g., `perplexity` for t-SNE, `n_neighbors` for UMAP)
-
-**Returns:** 2D coordinates array (if format='static'), None (if format='html')
-
-**Note:** Optional dependencies: `umap-learn` for UMAP, `adjusttext` for label adjustment
-
-<br>
-
-<h3 id="save-load">save() / load()</h3>
-
-```python
-save(filepath)
-```
-
-Save model to file.
-
-**Parameters:**
-- `filepath` (str): Path to save the model
-
-<br>
-
-```python
-LDAGibbsSampler.load(filepath)
-```
-
-Load model from file. This is a class method.
-
-**Parameters:**
-- `filepath` (str): Path to load the model from
+- `method`: Dimensionality reduction method. Options:
+  - 'pca': Principal Component Analysis (fast, linear)
+  - 'tsne': t-SNE (slower, captures non-linear structure)
+  - 'mds': Multidimensional Scaling (moderate speed)
+  - 'umap': UMAP (requires umap-learn package, fast and effective)
+- `n_clusters`: If specified, apply k-means clustering and color by cluster instead of topic
+- `doc_labels`: Optional list of document names/labels (same length as number of documents)
+- `show_labels`: Whether to show document labels on the plot
+- `label_strategy`: How to handle label display:
+  - 'auto': Automatically decide based on number of documents
+  - 'all': Show all labels (use adjustText if available)
+  - 'sample': Show a random sample of labels (controlled by max_labels)
+  - 'none': Don't show any labels
+- `use_adjusttext`: Use adjustText package for better label placement (if available)
+- `max_labels`: Maximum number of labels to show per topic/cluster (used with 'sample' or 'auto' strategy)
+- `figsize`: Figure size as (width, height). If None, automatically scales based on number of documents
+- `dpi`: Resolution in dots per inch
+- `alpha`: Transparency of points (0-1)
+- `size`: Size of scatter plot points
+- `cmap`: Colormap to use (matplotlib colormap name)
+- `title`: Optional plot title (auto-generated if None)
+- `filename`: If provided, save the plot to this file
+- `format`: Output format:
+  - 'static': Static matplotlib plot
+  - 'html': Interactive HTML visualization with hover tooltips
+- `random_state`: Random seed for reproducibility
+- `highlight`: Topic ID(s) to highlight. Can be a single int or list of ints.
+  Only the specified topics will be colored; others will be gray.
+  In HTML format, all topics are shown in legend and can be toggled interactively.
+- `n_topic_words`: Number of representative words to show for each topic in the legend (default: 4).
+  Increase figsize width if using many words to accommodate longer legend labels.
+- `**kwargs`: Additional keyword arguments to pass to the dimensionality reduction method.
+  For t-SNE: perplexity, learning_rate, max_iter, etc.
+  For UMAP: n_neighbors, min_dist, metric, etc.
+  For PCA: whiten, svd_solver, tol, etc.
+  For MDS: metric, max_iter, eps, etc.
 
 **Returns:**
-- Loaded LDAGibbsSampler instance
+2D coordinates array of shape (n_docs, 2) if format='static', None if format='html'
+
+<br>
+
+<!-- API-END -->
 
 ---
 

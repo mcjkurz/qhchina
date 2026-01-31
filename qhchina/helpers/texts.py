@@ -15,18 +15,28 @@ __all__ = [
 
 def detect_encoding(filename, num_bytes=10000):
     """
-    Detects the encoding of a file.
+    Detect the encoding of a text file automatically.
     
-    Parameters:
-    filename (str): The path to the file.
-    num_bytes (int): Number of bytes to read for detection. Default is 10000.
-                     Larger values may be more accurate but slower.
+    Uses the chardet library to detect the character encoding of a file
+    by analyzing a sample of bytes from the beginning.
+    
+    Args:
+        filename (str): Path to the file to analyze.
+        num_bytes (int): Number of bytes to read for detection (default: 10000).
+            Larger values improve accuracy but slow down detection.
     
     Returns:
-    str: The detected encoding (e.g., 'utf-8', 'gb2312', 'gbk', 'big5').
+        str: The detected encoding (e.g., 'utf-8', 'gb18030', 'big5').
+            Returns 'gb18030' for GB2312/GBK files as it's a superset.
     
     Raises:
-    ImportError: If chardet is not installed.
+        ImportError: If chardet is not installed.
+    
+    Example:
+        >>> from qhchina.helpers import detect_encoding
+        >>> encoding = detect_encoding("chinese_text.txt")
+        >>> print(encoding)
+        'utf-8'
     """
     try:
         import chardet
@@ -57,15 +67,25 @@ def detect_encoding(filename, num_bytes=10000):
 
 def load_text(filename, encoding="utf-8"):
     """
-    Loads text from a file.
-
-    Parameters:
-    filename (str): The filename to load text from.
-    encoding (str): The encoding of the file. Default is "utf-8".
-                    Use "auto" to automatically detect the encoding.
+    Load text content from a single file.
+    
+    Args:
+        filename (str): Path to the text file.
+        encoding (str): File encoding (default: "utf-8").
+            Use "auto" to automatically detect the encoding using chardet.
     
     Returns:
-    str: The text content of the file.
+        str: The complete text content of the file.
+    
+    Raises:
+        ValueError: If filename is not a string.
+        FileNotFoundError: If the file does not exist.
+    
+    Example:
+        >>> from qhchina.helpers import load_text
+        >>> text = load_text("novel.txt", encoding="utf-8")
+        >>> # Or with auto-detection for unknown encodings
+        >>> text = load_text("old_text.txt", encoding="auto")
     """
     if not isinstance(filename, str):
         raise ValueError("filename must be a string")
@@ -78,15 +98,23 @@ def load_text(filename, encoding="utf-8"):
 
 def load_texts(filenames, encoding="utf-8"):
     """
-    Loads text from multiple files.
-
-    Parameters:
-    filenames (list): A list of filenames to load text from.
-    encoding (str): The encoding of the files. Default is "utf-8".
-                    Use "auto" to automatically detect encoding for each file.
+    Load text content from multiple files.
+    
+    Args:
+        filenames (list): List of file paths to load.
+            Can also pass a single string for one file.
+        encoding (str): File encoding (default: "utf-8").
+            Use "auto" to detect encoding for each file individually.
     
     Returns:
-    list: A list of text contents from the files.
+        list: List of text strings, one per file, in the same order as filenames.
+    
+    Example:
+        >>> from qhchina.helpers import load_texts
+        >>> import glob
+        >>> files = glob.glob("corpus/*.txt")
+        >>> texts = load_texts(files)
+        >>> print(f"Loaded {len(texts)} documents")
     """
     if isinstance(filenames, str):
         filenames = [filenames]
@@ -98,17 +126,34 @@ def load_texts(filenames, encoding="utf-8"):
 
 def load_stopwords(language: str = "zh_sim") -> set:
     """
-    Load stopwords from a file for the specified language.
+    Load a stopword list for Chinese text processing.
+    
+    Provides pre-built stopword lists for different Chinese variants.
+    These can be used with segmenters and other text processing tools.
     
     Args:
-        language: Language code (default: "zh_sim" for simplified Chinese).
-                  Use get_stopword_languages() to see available options.
+        language (str): Stopword list identifier. Available options:
+            - 'zh_sim': Modern simplified Chinese (default)
+            - 'zh_tr': Modern traditional Chinese
+            - 'zh_cl_sim': Classical Chinese in simplified characters
+            - 'zh_cl_tr': Classical Chinese in traditional characters
+            Use get_stopword_languages() to see all available options.
     
     Returns:
-        Set of stopwords
+        set: A set of stopword strings.
     
     Raises:
         ValueError: If the specified language is not available.
+    
+    Example:
+        >>> from qhchina.helpers import load_stopwords
+        >>> from qhchina.preprocessing import create_segmenter
+        >>> 
+        >>> stopwords = load_stopwords("zh_sim")
+        >>> segmenter = create_segmenter(
+        ...     backend="jieba",
+        ...     filters={"stopwords": stopwords}
+        ... )
     """
     import os
     
@@ -142,10 +187,16 @@ def load_stopwords(language: str = "zh_sim") -> set:
 
 def get_stopword_languages() -> list:
     """
-    Get all available stopword language codes.
+    List all available stopword language codes.
     
     Returns:
-        List of available language codes (e.g., ['zh_sim', 'zh_cl_sim', 'zh_cl_tr'])
+        list: Sorted list of available language codes.
+            Typical values include: 'zh_sim', 'zh_tr', 'zh_cl_sim', 'zh_cl_tr'
+    
+    Example:
+        >>> from qhchina.helpers import get_stopword_languages
+        >>> print(get_stopword_languages())
+        ['zh_cl_sim', 'zh_cl_tr', 'zh_sim', 'zh_tr']
     """
     import os
     
@@ -168,22 +219,38 @@ def get_stopword_languages() -> list:
     
 def split_into_chunks(sequence, chunk_size, overlap=0.0):
     """
-    Splits text or a list of tokens into chunks with optional overlap between consecutive chunks.
+    Split a sequence into fixed-size chunks with optional overlap.
     
-    Parameters:
-    sequence (str or list): The text string or list of tokens to be split.
-    chunk_size (int): The size of each chunk (characters for text, items for lists).
-    overlap (float): The fraction of overlap between consecutive chunks (0.0 to 1.0).
-                    Default is 0.0 (no overlap).
+    Works with both strings (splits by character) and lists (splits by item).
+    Useful for processing long texts that exceed model limits.
+    
+    Args:
+        sequence (str or list): The text or token list to split.
+        chunk_size (int): Maximum size of each chunk.
+            For strings: number of characters.
+            For lists: number of items.
+        overlap (float): Fraction of overlap between consecutive chunks (0.0 to 1.0).
+            Default is 0.0 (no overlap). Use overlap for context preservation
+            when processing with models that need surrounding context.
     
     Returns:
-    list: A list of chunks. If input is a string, each chunk is a string.
-         If input is a list, each chunk is a list of tokens.
-         Note: The last chunk may be smaller than chunk_size if the sequence
-         doesn't divide evenly.
+        list: List of chunks (strings if input was string, lists if input was list).
+            The last chunk may be smaller than chunk_size.
     
     Raises:
-    ValueError: If overlap is not between 0 and 1.
+        ValueError: If overlap is not between 0.0 and 1.0.
+    
+    Example:
+        >>> from qhchina.helpers import split_into_chunks
+        >>> # Split text into 100-character chunks with 10% overlap
+        >>> text = "这是一段很长的中文文本..." * 50
+        >>> chunks = split_into_chunks(text, chunk_size=100, overlap=0.1)
+        >>> 
+        >>> # Split a token list
+        >>> tokens = ["word1", "word2", "word3", "word4", "word5"]
+        >>> chunks = split_into_chunks(tokens, chunk_size=2)
+        >>> print(chunks)
+        [['word1', 'word2'], ['word3', 'word4'], ['word5']]
     """
     if not 0 <= overlap < 1:
         raise ValueError("Overlap must be between 0 and 1")
