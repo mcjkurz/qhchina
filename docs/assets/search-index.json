@@ -1,0 +1,20 @@
+---
+layout: null
+---
+[
+{% assign first = true %}
+{% for page in site.pages %}
+  {% if page.functions %}
+    {% for func in page.functions %}
+{% unless first %},{% endunless %}
+{% assign first = false %}
+    {
+      "name": {{ func.name | jsonify }},
+      "anchor": {{ func.anchor | jsonify }},
+      "url": "{{ page.url | relative_url }}#{{ func.anchor }}",
+      "module": {{ page.title | jsonify }}
+    }
+    {% endfor %}
+  {% endif %}
+{% endfor %}
+]
