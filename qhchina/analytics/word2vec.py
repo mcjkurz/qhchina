@@ -1717,8 +1717,8 @@ def sample_sentences_to_token_count(
     of tokens reaches or slightly exceeds the target count. This is useful for balancing
     corpus sizes when comparing different time periods or domains.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     corpus : List[List[str]]
         A list of sentences, where each sentence is a list of tokens
     target_tokens : int
@@ -1726,8 +1726,8 @@ def sample_sentences_to_token_count(
     seed : Optional[int]
         Random seed for reproducibility. If None, uses global seed.
         
-    Returns:
-    --------
+    Returns
+    -------
     List[List[str]]
         A list of sampled sentences with token count close to target_tokens
     """
@@ -1801,8 +1801,8 @@ class TempRefWord2Vec(Word2Vec):
     4. Access semantic change through most_similar() or by directly analyzing the word vectors
        of temporal variants (e.g., "bread_1800" vs "bread_1900")
     
-    Example:
-    --------
+    Example
+    -------
     ```python
     # Corpora from different time periods
     corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]

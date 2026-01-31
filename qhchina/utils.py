@@ -23,18 +23,18 @@ def validate_filters(
     """
     Validate that all filter keys are recognized.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     filters: Dictionary of filter parameters to validate
     valid_keys: Set of valid/recognized filter keys
     context: String describing the calling context for error messages
     
-    Raises:
-    -------
+    Raises
+    ------
     ValueError: If filters contains unrecognized keys
     
-    Example:
-    --------
+    Example
+    -------
     >>> validate_filters(
     ...     {'min_count': 5, 'max_p': 0.05, 'invalid_key': 'value'},
     ...     {'min_count', 'max_p', 'stopwords'},

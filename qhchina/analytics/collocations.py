@@ -371,8 +371,8 @@ def find_collocates(
     """
     Find collocates for target words within a corpus of sentences.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     sentences : List[List[str]]
         List of tokenized sentences, where each sentence is a list of tokens.
     target_words : Union[str, List[str]]
@@ -416,8 +416,8 @@ def find_collocates(
         - 'less': Test if observed co-occurrence is less than expected
         - 'two-sided': Test if observed co-occurrence differs from expected
     
-    Returns:
-    --------
+    Returns
+    -------
     Union[List[Dict], pd.DataFrame]
         List of dictionaries or DataFrame containing collocation statistics.
     """
@@ -598,8 +598,8 @@ def cooc_matrix(
     """
     Calculate a co-occurrence matrix from a list of documents.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     documents : list
         List of tokenized documents, where each document is a list of tokens.
     method : str, default='window'
@@ -628,8 +628,8 @@ def cooc_matrix(
     use_sparse : bool, default=False
         If True, use a sparse matrix representation for better memory efficiency with large vocabularies.
         
-    Returns:
-    --------
+    Returns
+    -------
     If as_dataframe=True:
         pandas DataFrame with rows and columns labeled by vocabulary
     If as_dataframe=False and use_sparse=False:
@@ -790,8 +790,8 @@ def plot_collocates(
     ratio_local (x-axis) vs p_value (y-axis) with logarithmic scales, but allows
     full flexibility to plot any columns with any scale type.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     collocates : Union[List[Dict], pd.DataFrame]
         Output from find_collocates, either as a list of dictionaries or DataFrame.
     x_col : str, default='ratio_local'
@@ -841,14 +841,14 @@ def plot_collocates(
     ylabel : Optional[str], default=None
         Label for y-axis. If None, auto-generated from y_col and y_scale.
     
-    Returns:
-    --------
+    Returns
+    -------
     None
         Displays the plot using matplotlib. To further customize, use plt.gca() 
         to get the current axes object after calling this function.
     
-    Examples:
-    ---------
+    Examples
+    --------
     >>> # Basic usage: ratio vs p-value with log scales (default)
     >>> collocates = find_collocates(sentences, ['天'])
     >>> plot_collocates(collocates)

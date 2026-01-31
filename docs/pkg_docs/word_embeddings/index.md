@@ -330,6 +330,28 @@ Usage:
 
 **Example:**
 ```python
+```python
+# Corpora from different time periods
+corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
+corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
+
+# Initialize model
+model = TempRefWord2Vec(
+    corpora=[corpus_1800s, corpus_1900s],
+    labels=["1800s", "1900s"],
+    targets=["bread", "food", "money"],
+    vector_size=100,
+    window=5,
+    sg=0  # Use CBOW
+)
+
+# Train (uses preprocessed internal corpus)
+model.train(epochs=5)
+
+# Analyze semantic change
+model.most_similar("bread_1800")  # Words similar to "bread" in the 1800s
+model.most_similar("bread_1900")  # Words similar to "bread" in the 1900s
+```
 ```
 
 <h4 id="temprefword2vec-build_vocab">TempRefWord2Vec.build_vocab()</h4>
@@ -527,19 +549,13 @@ This function randomly selects sentences from the corpus until the total number
 of tokens reaches or slightly exceeds the target count. This is useful for balancing
 corpus sizes when comparing different time periods or domains.
 
-Parameters:
------------
-corpus : List[List[str]]
-    A list of sentences, where each sentence is a list of tokens
-target_tokens : int
-    The target number of tokens to sample
-seed : Optional[int]
-    Random seed for reproducibility. If None, uses global seed.
-    
-Returns:
---------
-List[List[str]]
-    A list of sampled sentences with token count close to target_tokens
+**Parameters:**
+- `corpus` (List[List[str]]): A list of sentences, where each sentence is a list of tokens
+- `target_tokens` (int): The target number of tokens to sample
+- `seed` (Optional[int]): Random seed for reproducibility. If None, uses global seed.
+
+**Returns:**
+(List[List[str]]) A list of sampled sentences with token count close to target_tokens
 
 <br>
 
@@ -689,18 +705,13 @@ If either is a matrix of vectors, uses sklearn's implementation for efficiency.
 
 Returns 0.0 if either vector has zero norm (to avoid division by zero).
 
-Parameters:
------------
-v1 : numpy.ndarray or list
-    First vector or matrix of vectors
-v2 : numpy.ndarray or list  
-    Second vector or matrix of vectors
-    
-Returns:
---------
-float or numpy.ndarray
-    Cosine similarity score(s). For single vectors, returns a float in range [-1, 1].
-    For matrices, returns a 2D similarity matrix.
+**Parameters:**
+- `v1` (numpy.ndarray or list): First vector or matrix of vectors
+- `v2` (numpy.ndarray or list  ): Second vector or matrix of vectors
+
+**Returns:**
+(float or numpy.ndarray) Cosine similarity score(s). For single vectors, returns a float in range [-1, 1].
+For matrices, returns a 2D similarity matrix.
 
 <br>
 
@@ -718,18 +729,13 @@ Compute the cosine distance between vectors (1 - cosine_similarity).
 Cosine distance is a dissimilarity measure where 0 means identical vectors
 and 2 means opposite vectors.
 
-Parameters:
------------
-v1 : numpy.ndarray or list
-    First vector or matrix of vectors
-v2 : numpy.ndarray or list  
-    Second vector or matrix of vectors
-    
-Returns:
---------
-float or numpy.ndarray
-    Cosine distance score(s). For single vectors, returns a float in range [0, 2].
-    For matrices, returns a 2D distance matrix.
+**Parameters:**
+- `v1` (numpy.ndarray or list): First vector or matrix of vectors
+- `v2` (numpy.ndarray or list  ): Second vector or matrix of vectors
+
+**Returns:**
+(float or numpy.ndarray) Cosine distance score(s). For single vectors, returns a float in range [0, 2].
+For matrices, returns a 2D distance matrix.
 
 <br>
 

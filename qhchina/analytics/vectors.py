@@ -288,15 +288,15 @@ def cosine_similarity(
     
     Returns 0.0 if either vector has zero norm (to avoid division by zero).
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     v1 : numpy.ndarray or list
         First vector or matrix of vectors
     v2 : numpy.ndarray or list  
         Second vector or matrix of vectors
         
-    Returns:
-    --------
+    Returns
+    -------
     float or numpy.ndarray
         Cosine similarity score(s). For single vectors, returns a float in range [-1, 1].
         For matrices, returns a 2D similarity matrix.
@@ -328,15 +328,15 @@ def cosine_distance(
     Cosine distance is a dissimilarity measure where 0 means identical vectors
     and 2 means opposite vectors.
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     v1 : numpy.ndarray or list
         First vector or matrix of vectors
     v2 : numpy.ndarray or list  
         Second vector or matrix of vectors
         
-    Returns:
-    --------
+    Returns
+    -------
     float or numpy.ndarray
         Cosine distance score(s). For single vectors, returns a float in range [0, 2].
         For matrices, returns a 2D distance matrix.
