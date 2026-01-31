@@ -44,7 +44,7 @@ The `qhchina.helpers` module provides utilities for font management and text loa
 <h3 id="load_fonts">load_fonts()</h3>
 
 ```python
-load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> list[dict] | None
+load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False)
 ```
 
 Load bundled CJK fonts into matplotlib.
@@ -86,7 +86,7 @@ When verbose=False, returns None.
 <h3 id="current_font">current_font()</h3>
 
 ```python
-current_font() -> Optional[str]
+current_font()
 ```
 
 Get the name of the currently configured matplotlib font.
@@ -110,7 +110,7 @@ str | None: The current font name, or None if no font is configured.
 <h3 id="set_font">set_font()</h3>
 
 ```python
-set_font(font='Noto Sans CJK TC') -> None
+set_font(font='Noto Sans CJK TC')
 ```
 
 Set the matplotlib font for Chinese text rendering.
@@ -147,7 +147,7 @@ characters in matplotlib figures.
 <h3 id="list_available_fonts">list_available_fonts()</h3>
 
 ```python
-list_available_fonts() -> dict
+list_available_fonts()
 ```
 
 List all CJK fonts bundled with the package.
@@ -169,7 +169,7 @@ Example: {'NotoSansTCSC-Regular.otf': 'Noto Sans CJK TC'}
 <h3 id="list_font_aliases">list_font_aliases()</h3>
 
 ```python
-list_font_aliases() -> dict
+list_font_aliases()
 ```
 
 List all available font aliases.
@@ -191,7 +191,7 @@ Example: {'sans': 'Noto Sans CJK TC', 'serif-tc': 'Noto Serif TC'}
 <h3 id="get_font_path">get_font_path()</h3>
 
 ```python
-get_font_path(font: str = 'Noto Sans CJK TC') -> str
+get_font_path(font: str = 'Noto Sans CJK TC')
 ```
 
 Get the file path to a CJK font for external libraries.
@@ -283,7 +283,7 @@ Load text content from multiple files.
 <h3 id="load_stopwords">load_stopwords()</h3>
 
 ```python
-load_stopwords(language: str = 'zh_sim') -> set
+load_stopwords(language: str = 'zh_sim')
 ```
 
 Load a stopword list for Chinese text processing.
@@ -365,7 +365,7 @@ The last chunk may be smaller than chunk_size.
 <h3 id="get_stopword_languages">get_stopword_languages()</h3>
 
 ```python
-get_stopword_languages() -> list
+get_stopword_languages()
 ```
 
 List all available stopword language codes.

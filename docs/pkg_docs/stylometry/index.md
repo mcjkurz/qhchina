@@ -98,7 +98,16 @@ dist = stylo.distance('鲁迅_1', '沈从文_1')     # Compare two documents (lo
 <h3 id="stylometry">Stylometry</h3>
 
 ```python
-Stylometry(n_features: int = 100, ngram_range: Tuple[int, int] = (1, 1), transform: str = 'zscore', distance: str = 'cosine', classifier: str = 'delta', cull: Optional[float] = None, chunk_size: Optional[int] = None, mode: str = 'centroid')
+Stylometry(
+    n_features: int = 100,
+    ngram_range: Tuple[int, int] = (1, 1),
+    transform: str = 'zscore',
+    distance: str = 'cosine',
+    classifier: str = 'delta',
+    cull: Optional[float] = None,
+    chunk_size: Optional[int] = None,
+    mode: str = 'centroid'
+)
 ```
 
 Stylometry for authorship attribution and document clustering.
@@ -442,7 +451,13 @@ DataFrame with columns: doc_id, author, yule_k, token_count, type_count
 <h3 id="compare_corpora">compare_corpora()</h3>
 
 ```python
-compare_corpora(corpusA: Union[List[str], List[List[str]]], corpusB: Union[List[str], List[List[str]]], method: str = 'fisher', filters: Dict = None, as_dataframe: bool = True) -> List[Dict]
+compare_corpora(
+    corpusA: Union[List[str], List[List[str]]],
+    corpusB: Union[List[str], List[List[str]]],
+    method: str = 'fisher',
+    filters: Dict = None,
+    as_dataframe: bool = True
+)
 ```
 
 Compare two corpora to identify statistically significant differences in word usage.
@@ -474,7 +489,7 @@ If as_dataframe is False:
 <h3 id="extract_mfw">extract_mfw()</h3>
 
 ```python
-extract_mfw(ngram_counts: collections.Counter, n: int = 100) -> List[str]
+extract_mfw(ngram_counts: collections.Counter, n: int = 100)
 ```
 
 Extract the Most Frequent Words (MFW) from a frequency counter.
@@ -501,7 +516,7 @@ Extract the Most Frequent Words (MFW) from a frequency counter.
 <h3 id="burrows_delta">burrows_delta()</h3>
 
 ```python
-burrows_delta(vec_a: numpy.ndarray, vec_b: numpy.ndarray) -> float
+burrows_delta(vec_a: numpy.ndarray, vec_b: numpy.ndarray)
 ```
 
 Compute Burrows' Delta distance between two feature vectors.
@@ -522,7 +537,7 @@ Lower values indicate more similar writing styles.
 <h3 id="manhattan_distance">manhattan_distance()</h3>
 
 ```python
-manhattan_distance(vec_a: numpy.ndarray, vec_b: numpy.ndarray) -> float
+manhattan_distance(vec_a: numpy.ndarray, vec_b: numpy.ndarray)
 ```
 
 Compute Manhattan (L1) distance between two vectors.
@@ -539,7 +554,7 @@ Compute Manhattan (L1) distance between two vectors.
 <h3 id="euclidean_distance">euclidean_distance()</h3>
 
 ```python
-euclidean_distance(vec_a: numpy.ndarray, vec_b: numpy.ndarray) -> float
+euclidean_distance(vec_a: numpy.ndarray, vec_b: numpy.ndarray)
 ```
 
 Compute Euclidean (L2) distance between two vectors.
@@ -556,7 +571,7 @@ Compute Euclidean (L2) distance between two vectors.
 <h3 id="eder_delta">eder_delta()</h3>
 
 ```python
-eder_delta(vec_a: numpy.ndarray, vec_b: numpy.ndarray) -> float
+eder_delta(vec_a: numpy.ndarray, vec_b: numpy.ndarray)
 ```
 
 Eder's Delta distance: a variation of Burrows' Delta with different weighting.
@@ -564,7 +579,7 @@ Eder's Delta distance: a variation of Burrows' Delta with different weighting.
 Eder's Delta squares the differences and takes the square root of the mean,
 giving more weight to larger differences. It also normalizes by vector length.
 
-Formula: sqrt(sum((a_i - b_i)^2 / n))
+Formula: $\Delta_E = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (a_i - b_i)^2}$
 
 Reference: Eder, M. (2013). "Mind your corpus: systematic errors in authorship attribution"
 
@@ -573,7 +588,7 @@ Reference: Eder, M. (2013). "Mind your corpus: systematic errors in authorship a
 <h3 id="get_relative_frequencies">get_relative_frequencies()</h3>
 
 ```python
-get_relative_frequencies(items: List[str]) -> Dict[str, float]
+get_relative_frequencies(items: List[str])
 ```
 
 Compute relative frequencies for a list of items (tokens or n-grams).
@@ -586,7 +601,7 @@ Dict mapping each unique item to its relative frequency (count / total)
 <h3 id="compute_yule_k">compute_yule_k()</h3>
 
 ```python
-compute_yule_k(tokens: List[str]) -> float
+compute_yule_k(tokens: List[str])
 ```
 
 Compute Yule's K characteristic for vocabulary richness.
@@ -594,8 +609,10 @@ Compute Yule's K characteristic for vocabulary richness.
 Yule's K is a measure of lexical diversity that is relatively independent
 of text length. Higher values indicate less diverse vocabulary.
 
-Formula: K = 10^4 * (M2 - M1) / (M1^2)
-where M1 = total tokens, M2 = sum of (frequency^2 * count_of_words_with_that_frequency)
+Formula: $K = 10^4 \cdot \frac{M_2 - M_1}{M_1^2}$
+
+where $M_1$ = total tokens, $M_2 = \sum_r r^2 \cdot V_r$ (sum of frequency squared 
+times count of words with that frequency)
 
 **Parameters:**
 - `tokens`: List of tokens

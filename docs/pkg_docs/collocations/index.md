@@ -34,7 +34,7 @@ top_collocates = collocates.sort_values("p_value").head(10)  # Most significant 
 <h3 id="filteroptions">FilterOptions</h3>
 
 ```python
-FilterOptions()
+FilterOptions(*args, **kwargs)
 ```
 
 Type definition for filter options in collocation analysis.
@@ -44,7 +44,16 @@ Type definition for filter options in collocation analysis.
 <h3 id="find_collocates">find_collocates()</h3>
 
 ```python
-find_collocates(sentences: List[List[str]], target_words: Union[str, List[str]], method: str = 'window', horizon: Union[int, tuple, NoneType] = None, filters: Optional[qhchina.analytics.collocations.FilterOptions] = None, as_dataframe: bool = True, max_sentence_length: Optional[int] = 256, alternative: str = 'greater') -> Union[List[Dict], pandas.core.frame.DataFrame]
+find_collocates(
+    sentences: List[List[str]],
+    target_words: Union[str, List[str]],
+    method: str = 'window',
+    horizon: Union[int, tuple, NoneType] = None,
+    filters: Optional[qhchina.analytics.collocations.FilterOptions] = None,
+    as_dataframe: bool = True,
+    max_sentence_length: Optional[int] = 256,
+    alternative: str = 'greater'
+)
 ```
 
 Find collocates for target words within a corpus of sentences.
@@ -104,7 +113,18 @@ Union[List[Dict], pd.DataFrame]
 <h3 id="cooc_matrix">cooc_matrix()</h3>
 
 ```python
-cooc_matrix(documents: List[List[str]], method: str = 'window', horizon: Union[int, Tuple[int, int], NoneType] = None, min_abs_count: int = 1, min_doc_count: int = 1, vocab_size: Optional[int] = None, binary: bool = False, as_dataframe: bool = True, vocab: Union[List[str], set, NoneType] = None, use_sparse: bool = False) -> Union[pandas.core.frame.DataFrame, Tuple[numpy.ndarray, Dict[str, int]]]
+cooc_matrix(
+    documents: List[List[str]],
+    method: str = 'window',
+    horizon: Union[int, Tuple[int, int], NoneType] = None,
+    min_abs_count: int = 1,
+    min_doc_count: int = 1,
+    vocab_size: Optional[int] = None,
+    binary: bool = False,
+    as_dataframe: bool = True,
+    vocab: Union[List[str], set, NoneType] = None,
+    use_sparse: bool = False
+)
 ```
 
 Calculate a co-occurrence matrix from a list of documents.
@@ -153,7 +173,28 @@ If as_dataframe=False and use_sparse=True:
 <h3 id="plot_collocates">plot_collocates()</h3>
 
 ```python
-plot_collocates(collocates: Union[List[Dict], pandas.core.frame.DataFrame], x_col: str = 'ratio_local', y_col: str = 'p_value', x_scale: str = 'log', y_scale: str = 'log', color: Union[str, List[str], NoneType] = None, colormap: str = 'viridis', color_by: Optional[str] = None, title: Optional[str] = None, figsize: tuple = (10, 8), fontsize: int = 10, show_labels: bool = False, label_top_n: Optional[int] = None, alpha: float = 0.6, marker_size: int = 50, show_diagonal: bool = False, diagonal_color: str = 'red', filename: Optional[str] = None, xlabel: Optional[str] = None, ylabel: Optional[str] = None) -> None
+plot_collocates(
+    collocates: Union[List[Dict], pandas.core.frame.DataFrame],
+    x_col: str = 'ratio_local',
+    y_col: str = 'p_value',
+    x_scale: str = 'log',
+    y_scale: str = 'log',
+    color: Union[str, List[str], NoneType] = None,
+    colormap: str = 'viridis',
+    color_by: Optional[str] = None,
+    title: Optional[str] = None,
+    figsize: tuple = (10, 8),
+    fontsize: int = 10,
+    show_labels: bool = False,
+    label_top_n: Optional[int] = None,
+    alpha: float = 0.6,
+    marker_size: int = 50,
+    show_diagonal: bool = False,
+    diagonal_color: str = 'red',
+    filename: Optional[str] = None,
+    xlabel: Optional[str] = None,
+    ylabel: Optional[str] = None
+)
 ```
 
 Visualize collocation results as a 2D scatter plot.

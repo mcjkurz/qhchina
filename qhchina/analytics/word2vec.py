@@ -206,8 +206,9 @@ class Word2Vec:
         """
         Precompute sigmoid values for faster training.
         
-        This method creates a lookup table for sigmoid(x) and log(sigmoid(x))
-        for x values from -max_exp to +max_exp, discretized into exp_table_size bins.
+        Creates a lookup table for $\\sigma(x) = \\frac{1}{1 + e^{-x}}$ and 
+        $\\log(\\sigma(x))$ for x values from -max_exp to +max_exp, discretized 
+        into exp_table_size bins.
         """
         self.sigmoid_table = np.zeros(self.exp_table_size, dtype=self.dtype)
         self.log_sigmoid_table = np.zeros(self.exp_table_size, dtype=self.dtype)
@@ -338,10 +339,13 @@ class Word2Vec:
         Calculate the probability of discarding frequent words during subsampling.
         
         Formula from the original word2vec paper:
-        P(w_i) = 1 - sqrt(t/f(w_i)) where t is the sample threshold
-        and f(w_i) is the word frequency normalized by the total corpus word count.
         
-        A word will be discarded with probability P(w_i).
+        $P(w_i) = 1 - \\sqrt{\\frac{t}{f(w_i)}}$
+        
+        where $t$ is the sample threshold and $f(w_i)$ is the word frequency 
+        normalized by the total corpus word count.
+        
+        A word will be discarded with probability $P(w_i)$.
         """
         
         self.discard_probs = {}

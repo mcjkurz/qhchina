@@ -41,7 +41,12 @@ sentences = segmenter.segment("深度学习正在改变世界。自然语言处�
 <h3 id="segmentationwrapper">SegmentationWrapper</h3>
 
 ```python
-SegmentationWrapper(strategy: str = 'whole', chunk_size: int = 512, filters: Dict[str, Any] = None, sentence_end_pattern: str = '([。！？\\.!?……]+)')
+SegmentationWrapper(
+    strategy: str = 'whole',
+    chunk_size: int = 512,
+    filters: Dict[str, Any] = None,
+    sentence_end_pattern: str = '([。！？\\.!?……]+)'
+)
 ```
 
 Base segmentation wrapper class that can be extended for different segmentation tools.
@@ -67,7 +72,16 @@ contains tokens for a line, sentence, or chunk respectively
 <h3 id="spacysegmenter">SpacySegmenter</h3>
 
 ```python
-SpacySegmenter(model_name: str = 'zh_core_web_lg', disable: Optional[List[str]] = None, batch_size: int = 200, user_dict: Union[List[str], str] = None, strategy: str = 'whole', chunk_size: int = 512, filters: Dict[str, Any] = None, sentence_end_pattern: str = '([。！？\\.!?……]+)')
+SpacySegmenter(
+    model_name: str = 'zh_core_web_lg',
+    disable: Optional[List[str]] = None,
+    batch_size: int = 200,
+    user_dict: Union[List[str], str] = None,
+    strategy: str = 'whole',
+    chunk_size: int = 512,
+    filters: Dict[str, Any] = None,
+    sentence_end_pattern: str = '([。！？\\.!?……]+)'
+)
 ```
 
 Segmentation wrapper for spaCy Chinese models.
@@ -111,7 +125,14 @@ Supports custom user dictionaries and POS-based filtering.
 <h3 id="jiebasegmenter">JiebaSegmenter</h3>
 
 ```python
-JiebaSegmenter(user_dict_path: str = None, pos_tagging: bool = False, strategy: str = 'whole', chunk_size: int = 512, filters: Dict[str, Any] = None, sentence_end_pattern: str = '([。！？\\.!?……]+)')
+JiebaSegmenter(
+    user_dict_path: str = None,
+    pos_tagging: bool = False,
+    strategy: str = 'whole',
+    chunk_size: int = 512,
+    filters: Dict[str, Any] = None,
+    sentence_end_pattern: str = '([。！？\\.!?……]+)'
+)
 ```
 
 Segmentation wrapper for Jieba Chinese text segmentation.
@@ -154,7 +175,20 @@ Jieba is lightweight and fast, making it suitable for large-scale processing.
 <h3 id="bertsegmenter">BertSegmenter</h3>
 
 ```python
-BertSegmenter(model_name: str = None, model=None, tokenizer=None, tagging_scheme: Union[str, List[str]] = 'be', batch_size: int = 32, device: Optional[str] = None, remove_special_tokens: bool = True, max_sequence_length: int = 512, strategy: str = 'whole', chunk_size: int = 512, filters: Dict[str, Any] = None, sentence_end_pattern: str = '([。！？\\.!?……]+)')
+BertSegmenter(
+    model_name: str = None,
+    model=None,
+    tokenizer=None,
+    tagging_scheme: Union[str, List[str]] = 'be',
+    batch_size: int = 32,
+    device: Optional[str] = None,
+    remove_special_tokens: bool = True,
+    max_sequence_length: int = 512,
+    strategy: str = 'whole',
+    chunk_size: int = 512,
+    filters: Dict[str, Any] = None,
+    sentence_end_pattern: str = '([。！？\\.!?……]+)'
+)
 ```
 
 Segmentation wrapper for BERT-based Chinese word segmentation.
@@ -201,7 +235,21 @@ as a sequence labeling task. Supports various tagging schemes (BE, BME, BMES).
 <h3 id="llmsegmenter">LLMSegmenter</h3>
 
 ```python
-LLMSegmenter(api_key: str, model: str, endpoint: str, prompt: str = None, system_message: str = None, temperature: float = 1, max_tokens: int = 2048, retry_patience: int = 1, timeout: float = 60.0, strategy: str = 'whole', chunk_size: int = 512, filters: Dict[str, Any] = None, sentence_end_pattern: str = '([。！？\\.!?……]+)')
+LLMSegmenter(
+    api_key: str,
+    model: str,
+    endpoint: str,
+    prompt: str = None,
+    system_message: str = None,
+    temperature: float = 1,
+    max_tokens: int = 2048,
+    retry_patience: int = 1,
+    timeout: float = 60.0,
+    strategy: str = 'whole',
+    chunk_size: int = 512,
+    filters: Dict[str, Any] = None,
+    sentence_end_pattern: str = '([。！？\\.!?……]+)'
+)
 ```
 
 Segmentation wrapper using Large Language Model APIs.
@@ -249,7 +297,13 @@ and API costs are acceptable.
 <h3 id="create_segmenter">create_segmenter()</h3>
 
 ```python
-create_segmenter(backend: str = 'spacy', strategy: str = 'whole', chunk_size: int = 512, sentence_end_pattern: str = '([。！？\\.!?……]+)', **kwargs) -> qhchina.preprocessing.segmentation.SegmentationWrapper
+create_segmenter(
+    backend: str = 'spacy',
+    strategy: str = 'whole',
+    chunk_size: int = 512,
+    sentence_end_pattern: str = '([。！？\\.!?……]+)',
+    **kwargs
+)
 ```
 
 Factory function to create a segmenter based on the specified backend.

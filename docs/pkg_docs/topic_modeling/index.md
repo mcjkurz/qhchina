@@ -73,7 +73,22 @@ topics = lda.get_topics(n_words=10)  # Get top words per topic
 <h3 id="ldagibbssampler">LDAGibbsSampler</h3>
 
 ```python
-LDAGibbsSampler(n_topics: int = 10, alpha: Optional[float] = None, beta: Optional[float] = None, iterations: int = 100, burnin: int = 0, random_state: Optional[int] = None, log_interval: Optional[int] = None, min_word_count: int = 1, max_vocab_size: Optional[int] = None, min_word_length: int = 1, stopwords: Optional[set] = None, use_cython: bool = True, estimate_alpha: int = 1, min_doc_length: int = 24)
+LDAGibbsSampler(
+    n_topics: int = 10,
+    alpha: Optional[float] = None,
+    beta: Optional[float] = None,
+    iterations: int = 100,
+    burnin: int = 0,
+    random_state: Optional[int] = None,
+    log_interval: Optional[int] = None,
+    min_word_count: int = 1,
+    max_vocab_size: Optional[int] = None,
+    min_word_length: int = 1,
+    stopwords: Optional[set] = None,
+    use_cython: bool = True,
+    estimate_alpha: int = 1,
+    min_doc_length: int = 24
+)
 ```
 
 Latent Dirichlet Allocation with Gibbs sampling implementation. 
@@ -120,7 +135,8 @@ coherence_npmi(n_words: int = 10, window_size: int = 10, eps: float = 1e-12)
 Calculate NPMI (Normalized Pointwise Mutual Information) topic coherence.
 
 NPMI coherence uses sliding window co-occurrence and is defined as:
-NPMI(w_i, w_j) = (log(P(w_i, w_j) / (P(w_i) * P(w_j)))) / (-log(P(w_i, w_j)))
+
+$$NPMI(w_i, w_j) = \frac{\log \frac{P(w_i, w_j)}{P(w_i) \cdot P(w_j)}}{-\log P(w_i, w_j)}$$
 
 Values range from -1 (never co-occur) to +1 (always co-occur).
 
@@ -143,9 +159,10 @@ coherence_umass(n_words: int = 10, eps: float = 1e-12)
 Calculate UMass topic coherence (Mimno et al., 2011).
 
 UMass coherence uses document co-occurrence and is defined as:
-C_UMass = (2 / (N*(N-1))) * sum_{i<j} log((D(w_i, w_j) + eps) / D(w_j))
 
-where D(w) is the document frequency of word w, and D(w_i, w_j) is the 
+$$C_{UMass} = \frac{2}{N(N-1)} \sum_{i<j} \log \frac{D(w_i, w_j) + \epsilon}{D(w_j)}$$
+
+where $D(w)$ is the document frequency of word $w$, and $D(w_i, w_j)$ is the 
 number of documents containing both words.
 
 **Parameters:**

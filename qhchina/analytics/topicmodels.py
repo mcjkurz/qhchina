@@ -1111,9 +1111,10 @@ class LDAGibbsSampler:
         Calculate UMass topic coherence (Mimno et al., 2011).
         
         UMass coherence uses document co-occurrence and is defined as:
-        C_UMass = (2 / (N*(N-1))) * sum_{i<j} log((D(w_i, w_j) + eps) / D(w_j))
         
-        where D(w) is the document frequency of word w, and D(w_i, w_j) is the 
+        $$C_{UMass} = \\frac{2}{N(N-1)} \\sum_{i<j} \\log \\frac{D(w_i, w_j) + \\epsilon}{D(w_j)}$$
+        
+        where $D(w)$ is the document frequency of word $w$, and $D(w_i, w_j)$ is the 
         number of documents containing both words.
         
         Args:
@@ -1170,7 +1171,8 @@ class LDAGibbsSampler:
         Calculate NPMI (Normalized Pointwise Mutual Information) topic coherence.
         
         NPMI coherence uses sliding window co-occurrence and is defined as:
-        NPMI(w_i, w_j) = (log(P(w_i, w_j) / (P(w_i) * P(w_j)))) / (-log(P(w_i, w_j)))
+        
+        $$NPMI(w_i, w_j) = \\frac{\\log \\frac{P(w_i, w_j)}{P(w_i) \\cdot P(w_j)}}{-\\log P(w_i, w_j)}$$
         
         Values range from -1 (never co-occur) to +1 (always co-occur).
         

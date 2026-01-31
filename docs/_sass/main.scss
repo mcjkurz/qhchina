@@ -408,12 +408,12 @@ main.docs-main {
 }
 
 aside.docs-sidebar {
-  width: 200px !important;
-  min-width: 200px !important;
-  max-width: 200px !important;
+  width: 240px !important;
+  min-width: 240px !important;
+  max-width: 240px !important;
   flex-shrink: 0 !important;
   flex-grow: 0 !important;
-  flex-basis: 200px !important;
+  flex-basis: 240px !important;
   position: sticky !important;
   top: calc(2 * var(--spacing-unit)) !important;
   max-height: calc(100vh - 4 * var(--spacing-unit)) !important;
@@ -584,7 +584,7 @@ aside.docs-sidebar {
 }
 
 .docs-search-input {
-  width: 100%;
+  width: 90%;
   padding: calc(0.5 * var(--spacing-unit)) calc(0.75 * var(--spacing-unit));
   border: 1px solid var(--border-color);
   border-radius: 4px;

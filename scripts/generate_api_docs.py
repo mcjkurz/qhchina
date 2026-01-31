@@ -146,22 +146,48 @@ def get_public_members(module: Any, include_imported: bool = False) -> List[Tupl
     return members
 
 
-def format_signature(name: str, obj: Any) -> str:
-    """Format a function or class signature."""
+def format_signature(name: str, obj: Any, max_line_length: int = 80) -> str:
+    """
+    Format a function or class signature, wrapping long signatures across multiple lines.
+    
+    Args:
+        name: Function or class name
+        obj: The function or class object
+        max_line_length: Maximum line length before wrapping (default: 80)
+    
+    Returns:
+        Formatted signature string
+    """
     try:
-        sig = inspect.signature(obj)
         if inspect.isclass(obj):
             # For classes, get __init__ signature
             try:
                 init_sig = inspect.signature(obj.__init__)
                 # Remove 'self' parameter
                 params = list(init_sig.parameters.values())[1:]
-                sig_str = f"{name}({', '.join(str(p) for p in params)})"
             except (ValueError, TypeError):
-                sig_str = f"{name}()"
+                return f"{name}()"
         else:
-            sig_str = f"{name}{sig}"
-        return sig_str
+            sig = inspect.signature(obj)
+            params = list(sig.parameters.values())
+        
+        if not params:
+            return f"{name}()"
+        
+        # Try single-line first
+        single_line = f"{name}({', '.join(str(p) for p in params)})"
+        
+        if len(single_line) <= max_line_length:
+            return single_line
+        
+        # Multi-line format for long signatures
+        indent = "    "
+        param_lines = [f"{indent}{p}," for p in params]
+        # Remove trailing comma from last param
+        param_lines[-1] = param_lines[-1][:-1]
+        
+        return f"{name}(\n" + "\n".join(param_lines) + "\n)"
+        
     except (ValueError, TypeError):
         return f"{name}()"
 

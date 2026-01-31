@@ -127,7 +127,7 @@ def eder_delta(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
     Eder's Delta squares the differences and takes the square root of the mean,
     giving more weight to larger differences. It also normalizes by vector length.
     
-    Formula: sqrt(sum((a_i - b_i)^2 / n))
+    Formula: $\\Delta_E = \\sqrt{\\frac{1}{n} \\sum_{i=1}^{n} (a_i - b_i)^2}$
     
     Reference: Eder, M. (2013). "Mind your corpus: systematic errors in authorship attribution"
     """
@@ -158,8 +158,10 @@ def compute_yule_k(tokens: List[str]) -> float:
     Yule's K is a measure of lexical diversity that is relatively independent
     of text length. Higher values indicate less diverse vocabulary.
     
-    Formula: K = 10^4 * (M2 - M1) / (M1^2)
-    where M1 = total tokens, M2 = sum of (frequency^2 * count_of_words_with_that_frequency)
+    Formula: $K = 10^4 \\cdot \\frac{M_2 - M_1}{M_1^2}$
+    
+    where $M_1$ = total tokens, $M_2 = \\sum_r r^2 \\cdot V_r$ (sum of frequency squared 
+    times count of words with that frequency)
     
     Args:
         tokens: List of tokens

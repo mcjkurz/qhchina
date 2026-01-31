@@ -85,7 +85,26 @@ similar = model.most_similar("经济", topn=10)  # Find words similar to "经济
 <h3 id="word2vec">Word2Vec</h3>
 
 ```python
-Word2Vec(vector_size: int = 100, window: int = 5, min_word_count: int = 5, negative: int = 5, ns_exponent: float = 0.75, cbow_mean: bool = True, sg: int = 0, seed: int = 1, alpha: float = 0.025, min_alpha: Optional[float] = None, sample: float = 0.001, shrink_windows: bool = True, exp_table_size: int = 1000, max_exp: float = 6.0, max_vocab_size: Optional[int] = None, use_double_precision: bool = False, use_cython: bool = True, gradient_clip: float = 1.0)
+Word2Vec(
+    vector_size: int = 100,
+    window: int = 5,
+    min_word_count: int = 5,
+    negative: int = 5,
+    ns_exponent: float = 0.75,
+    cbow_mean: bool = True,
+    sg: int = 0,
+    seed: int = 1,
+    alpha: float = 0.025,
+    min_alpha: Optional[float] = None,
+    sample: float = 0.001,
+    shrink_windows: bool = True,
+    exp_table_size: int = 1000,
+    max_exp: float = 6.0,
+    max_vocab_size: Optional[int] = None,
+    use_double_precision: bool = False,
+    use_cython: bool = True,
+    gradient_clip: float = 1.0
+)
 ```
 
 Implementation of Word2Vec algorithm with sample-based training approach.
@@ -282,7 +301,13 @@ Final loss value if calculate_loss is True, None otherwise
 <h3 id="temprefword2vec">TempRefWord2Vec</h3>
 
 ```python
-TempRefWord2Vec(corpora: List[List[List[str]]], labels: List[str], targets: List[str], balance: bool = True, **kwargs)
+TempRefWord2Vec(
+    corpora: List[List[List[str]]],
+    labels: List[str],
+    targets: List[str],
+    balance: bool = True,
+    **kwargs
+)
 ```
 
 Implementation of Word2Vec with Temporal Referencing (TR) for tracking semantic change.
@@ -489,7 +514,11 @@ Final loss value if calculate_loss is True in kwargs, None otherwise
 <h3 id="sample_sentences_to_token_count">sample_sentences_to_token_count()</h3>
 
 ```python
-sample_sentences_to_token_count(corpus: List[List[str]], target_tokens: int, seed: Optional[int] = None) -> List[List[str]]
+sample_sentences_to_token_count(
+    corpus: List[List[str]],
+    target_tokens: int,
+    seed: Optional[int] = None
+)
 ```
 
 Samples sentences from a corpus until the target token count is reached.
@@ -517,7 +546,11 @@ List[List[str]]
 <h3 id="add_corpus_tags">add_corpus_tags()</h3>
 
 ```python
-add_corpus_tags(corpora: List[List[List[str]]], labels: List[str], target_words: List[str]) -> List[List[List[str]]]
+add_corpus_tags(
+    corpora: List[List[List[str]]],
+    labels: List[str],
+    target_words: List[str]
+)
 ```
 
 Add corpus-specific tags to target words in all corpora at once.
@@ -535,7 +568,20 @@ List of processed corpora where target words have been tagged with their corpus 
 <h3 id="project_2d">project_2d()</h3>
 
 ```python
-project_2d(vectors: Union[List[numpy.ndarray], Dict[str, numpy.ndarray], numpy.ndarray], labels: Optional[List[str]] = None, method: str = 'pca', title: Optional[str] = None, color: Union[str, List[str], NoneType] = None, figsize: Tuple[int, int] = (8, 8), fontsize: int = 12, perplexity: Optional[float] = None, filename: Optional[str] = None, adjust_text_labels: bool = False, n_neighbors: int = 15, min_dist: float = 0.1) -> None
+project_2d(
+    vectors: Union[List[numpy.ndarray], Dict[str, numpy.ndarray], numpy.ndarray],
+    labels: Optional[List[str]] = None,
+    method: str = 'pca',
+    title: Optional[str] = None,
+    color: Union[str, List[str], NoneType] = None,
+    figsize: Tuple[int, int] = (8, 8),
+    fontsize: int = 12,
+    perplexity: Optional[float] = None,
+    filename: Optional[str] = None,
+    adjust_text_labels: bool = False,
+    n_neighbors: int = 15,
+    min_dist: float = 0.1
+)
 ```
 
 Project high-dimensional vectors into 2D and visualize them.
@@ -574,7 +620,9 @@ visualizing word embeddings or document vectors.
 <h3 id="get_bias_direction">get_bias_direction()</h3>
 
 ```python
-get_bias_direction(anchors: Union[Tuple[numpy.ndarray, numpy.ndarray], List[Tuple[numpy.ndarray, numpy.ndarray]]]) -> numpy.ndarray
+get_bias_direction(
+    anchors: Union[Tuple[numpy.ndarray, numpy.ndarray], List[Tuple[numpy.ndarray, numpy.ndarray]]]
+)
 ```
 
 Given either a single tuple (pos_anchor, neg_anchor) or a list of tuples,
@@ -594,7 +642,11 @@ numpy array representing the bias direction vector (unnormalized)
 <h3 id="calculate_bias">calculate_bias()</h3>
 
 ```python
-calculate_bias(anchors: Union[Tuple[str, str], List[Tuple[str, str]]], targets: List[str], word_vectors: Any) -> numpy.ndarray
+calculate_bias(
+    anchors: Union[Tuple[str, str], List[Tuple[str, str]]],
+    targets: List[str],
+    word_vectors: Any
+)
 ```
 
 Calculate bias scores for target words along an axis defined by anchor pairs.
@@ -612,7 +664,19 @@ numpy array of bias scores (dot products) for each target word
 <h3 id="project_bias">project_bias()</h3>
 
 ```python
-project_bias(x, y, targets, word_vectors, title=None, color=None, figsize=(8, 8), fontsize=12, filename=None, adjust_text_labels=False, disperse_y=False)
+project_bias(
+    x,
+    y,
+    targets,
+    word_vectors,
+    title=None,
+    color=None,
+    figsize=(8, 8),
+    fontsize=12,
+    filename=None,
+    adjust_text_labels=False,
+    disperse_y=False
+)
 ```
 
 Plots words on either a 1D or 2D chart by projecting them onto:
@@ -627,7 +691,10 @@ Parameters remain the same as before, but calculation of bias scores is now hand
 <h3 id="cosine_similarity">cosine_similarity()</h3>
 
 ```python
-cosine_similarity(v1: Union[numpy.ndarray, List[float]], v2: Union[numpy.ndarray, List[float]]) -> Union[float, numpy.ndarray]
+cosine_similarity(
+    v1: Union[numpy.ndarray, List[float]],
+    v2: Union[numpy.ndarray, List[float]]
+)
 ```
 
 Compute the cosine similarity between vectors.
@@ -655,7 +722,10 @@ float or numpy.ndarray
 <h3 id="cosine_distance">cosine_distance()</h3>
 
 ```python
-cosine_distance(v1: Union[numpy.ndarray, List[float]], v2: Union[numpy.ndarray, List[float]]) -> Union[float, numpy.ndarray]
+cosine_distance(
+    v1: Union[numpy.ndarray, List[float]],
+    v2: Union[numpy.ndarray, List[float]]
+)
 ```
 
 Compute the cosine distance between vectors (1 - cosine_similarity).
@@ -681,7 +751,13 @@ float or numpy.ndarray
 <h3 id="most_similar">most_similar()</h3>
 
 ```python
-most_similar(target_vector: numpy.ndarray, vectors: Union[List[numpy.ndarray], numpy.ndarray], labels: Optional[List[str]] = None, metric: Union[str, Callable[[numpy.ndarray, numpy.ndarray], float]] = 'cosine', top_n: Optional[int] = None) -> List[Tuple[Union[str, int], float]]
+most_similar(
+    target_vector: numpy.ndarray,
+    vectors: Union[List[numpy.ndarray], numpy.ndarray],
+    labels: Optional[List[str]] = None,
+    metric: Union[str, Callable[[numpy.ndarray, numpy.ndarray], float]] = 'cosine',
+    top_n: Optional[int] = None
+)
 ```
 
 Find the most similar vectors to a target vector using the specified similarity metric.
@@ -702,7 +778,7 @@ If no labels: List of (index, score) tuples sorted by similarity score in descen
 <h3 id="align_vectors">align_vectors()</h3>
 
 ```python
-align_vectors(source_vectors: numpy.ndarray, target_vectors: numpy.ndarray) -> Tuple[numpy.ndarray, numpy.ndarray]
+align_vectors(source_vectors: numpy.ndarray, target_vectors: numpy.ndarray)
 ```
 
 Align source vectors with target vectors using Procrustes analysis.
