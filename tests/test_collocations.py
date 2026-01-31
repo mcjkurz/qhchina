@@ -326,6 +326,418 @@ class TestAsymmetricHorizon:
 
 
 # =============================================================================
+# Deterministic Window Calculation Tests
+# =============================================================================
+
+class TestDeterministicWindowCalculations:
+    """
+    Deterministic tests that verify window calculations are correct.
+    Uses small, controlled examples where expected results are known.
+    """
+    
+    def test_right_only_horizon_finds_only_right_collocates(self):
+        """Verify (0, N) horizon only counts collocates to the RIGHT of target."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # Simple sentence: TARGET is at position 1
+        # Positions: 0=left, 1=TARGET, 2=r1, 3=r2, 4=r3, 5=r4
+        sentences = [["left", "TARGET", "r1", "r2", "r3", "r4"]]
+        
+        # horizon=(0, 3) means: 0 words to the left, 3 words to the right
+        results = find_collocates(
+            sentences, 
+            target_words="TARGET", 
+            method="window",
+            horizon=(0, 3),
+            as_dataframe=False
+        )
+        
+        collocates = {r["collocate"] for r in results}
+        
+        # Should find r1, r2, r3 (within 3 positions to the right)
+        assert "r1" in collocates, "r1 should be found (1 position right)"
+        assert "r2" in collocates, "r2 should be found (2 positions right)"
+        assert "r3" in collocates, "r3 should be found (3 positions right)"
+        
+        # Should NOT find r4 (4 positions right, outside window)
+        assert "r4" not in collocates, "r4 should NOT be found (4 positions right, outside window)"
+        
+        # Should NOT find left (to the left of target)
+        assert "left" not in collocates, "left should NOT be found (it's to the LEFT of target)"
+    
+    def test_left_only_horizon_finds_only_left_collocates(self):
+        """Verify (N, 0) horizon only counts collocates to the LEFT of target."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # Simple sentence: TARGET is at position 4
+        # Positions: 0=l4, 1=l3, 2=l2, 3=l1, 4=TARGET, 5=right
+        sentences = [["l4", "l3", "l2", "l1", "TARGET", "right"]]
+        
+        # horizon=(3, 0) means: 3 words to the left, 0 words to the right
+        results = find_collocates(
+            sentences,
+            target_words="TARGET",
+            method="window",
+            horizon=(3, 0),
+            as_dataframe=False
+        )
+        
+        collocates = {r["collocate"] for r in results}
+        
+        # Should find l1, l2, l3 (within 3 positions to the left)
+        assert "l1" in collocates, "l1 should be found (1 position left)"
+        assert "l2" in collocates, "l2 should be found (2 positions left)"
+        assert "l3" in collocates, "l3 should be found (3 positions left)"
+        
+        # Should NOT find l4 (4 positions left, outside window)
+        assert "l4" not in collocates, "l4 should NOT be found (4 positions left, outside window)"
+        
+        # Should NOT find right (to the right of target)
+        assert "right" not in collocates, "right should NOT be found (it's to the RIGHT of target)"
+    
+    def test_symmetric_horizon_finds_both_sides(self):
+        """Verify symmetric int horizon finds collocates on both sides."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # TARGET in the middle
+        # Positions: 0=l2, 1=l1, 2=TARGET, 3=r1, 4=r2
+        sentences = [["l2", "l1", "TARGET", "r1", "r2"]]
+        
+        # horizon=2 means: 2 words on each side
+        results = find_collocates(
+            sentences,
+            target_words="TARGET",
+            method="window",
+            horizon=2,
+            as_dataframe=False
+        )
+        
+        collocates = {r["collocate"] for r in results}
+        
+        # Should find all neighbors within 2 positions
+        assert "l1" in collocates, "l1 should be found (1 position left)"
+        assert "l2" in collocates, "l2 should be found (2 positions left)"
+        assert "r1" in collocates, "r1 should be found (1 position right)"
+        assert "r2" in collocates, "r2 should be found (2 positions right)"
+    
+    def test_asymmetric_horizon_mixed(self):
+        """Verify asymmetric (2, 3) horizon finds correct collocates."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # Positions: 0=l3, 1=l2, 2=l1, 3=TARGET, 4=r1, 5=r2, 6=r3, 7=r4
+        sentences = [["l3", "l2", "l1", "TARGET", "r1", "r2", "r3", "r4"]]
+        
+        # horizon=(2, 3) means: 2 words to the left, 3 words to the right
+        results = find_collocates(
+            sentences,
+            target_words="TARGET",
+            method="window",
+            horizon=(2, 3),
+            as_dataframe=False
+        )
+        
+        collocates = {r["collocate"] for r in results}
+        
+        # Left side: l1, l2 should be found; l3 should NOT (outside window)
+        assert "l1" in collocates, "l1 should be found (1 position left)"
+        assert "l2" in collocates, "l2 should be found (2 positions left)"
+        assert "l3" not in collocates, "l3 should NOT be found (3 positions left, outside window)"
+        
+        # Right side: r1, r2, r3 should be found; r4 should NOT (outside window)
+        assert "r1" in collocates, "r1 should be found (1 position right)"
+        assert "r2" in collocates, "r2 should be found (2 positions right)"
+        assert "r3" in collocates, "r3 should be found (3 positions right)"
+        assert "r4" not in collocates, "r4 should NOT be found (4 positions right, outside window)"
+    
+    def test_horizon_at_sentence_boundaries(self):
+        """Verify horizon respects sentence boundaries."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # TARGET at the start - left side is truncated by sentence boundary
+        sentences = [["TARGET", "r1", "r2", "r3"]]
+        
+        results = find_collocates(
+            sentences,
+            target_words="TARGET",
+            method="window",
+            horizon=(5, 2),  # Ask for 5 left, but there are none
+            as_dataframe=False
+        )
+        
+        collocates = {r["collocate"] for r in results}
+        
+        # Should find r1, r2 (within 2 positions right)
+        assert "r1" in collocates
+        assert "r2" in collocates
+        # Should NOT find r3 (outside right window)
+        assert "r3" not in collocates
+    
+    def test_multiple_target_occurrences(self):
+        """Verify counts are correct when target appears multiple times."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # TARGET appears twice, each time with "neighbor" next to it
+        sentences = [
+            ["TARGET", "neighbor", "other"],
+            ["word", "TARGET", "neighbor"],
+        ]
+        
+        results = find_collocates(
+            sentences,
+            target_words="TARGET",
+            method="window",
+            horizon=1,
+            as_dataframe=False
+        )
+        
+        # Find the result for "neighbor"
+        neighbor_result = next((r for r in results if r["collocate"] == "neighbor"), None)
+        
+        assert neighbor_result is not None, "neighbor should be found as collocate"
+        # "neighbor" appears next to TARGET twice (once in each sentence)
+        assert neighbor_result["obs_local"] == 2, "neighbor should have obs_local=2"
+    
+    def test_collocate_not_counted_when_outside_all_windows(self):
+        """Verify a word is not counted if it's outside window for all target occurrences."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # "faraway" is always more than 1 position from TARGET
+        sentences = [
+            ["faraway", "x", "TARGET", "y"],      # faraway is 2 positions left of TARGET
+            ["a", "TARGET", "z", "faraway"],      # faraway is 2 positions right of TARGET
+        ]
+        
+        results = find_collocates(
+            sentences,
+            target_words="TARGET",
+            method="window",
+            horizon=1,  # Only 1 position on each side
+            as_dataframe=False
+        )
+        
+        collocates = {r["collocate"] for r in results}
+        
+        # "faraway" is 2 positions away in both sentences, should NOT be found
+        assert "faraway" not in collocates, "faraway should NOT be found (always outside window)"
+        
+        # But immediate neighbors should be found
+        assert "x" in collocates   # 1 position left in sentence 1
+        assert "y" in collocates   # 1 position right in sentence 1
+        assert "a" in collocates   # 1 position left in sentence 2
+        assert "z" in collocates   # 1 position right in sentence 2
+
+
+class TestDeterministicCoocMatrixCalculations:
+    """
+    Deterministic tests that verify co-occurrence matrix window calculations.
+    """
+    
+    def test_cooc_matrix_right_only_horizon(self):
+        """Verify cooc_matrix (0, N) horizon only counts right co-occurrences."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        # Simple document: a -> b -> c -> d
+        documents = [["a", "b", "c", "d"]]
+        
+        # horizon=(0, 1) means: only count word immediately to the RIGHT
+        result = cooc_matrix(
+            documents,
+            method='window',
+            horizon=(0, 1),
+            as_dataframe=True
+        )
+        
+        # "a" should co-occur with "b" (b is to the right of a)
+        assert result.loc["a", "b"] > 0, "a->b should have co-occurrence (b is right of a)"
+        
+        # "b" should NOT co-occur with "a" from b's perspective
+        # because with (0, 1), we only look RIGHT, and "a" is to the LEFT of "b"
+        assert result.loc["b", "a"] == 0, "b->a should be 0 (a is left of b, but we only look right)"
+        
+        # "b" should co-occur with "c"
+        assert result.loc["b", "c"] > 0, "b->c should have co-occurrence"
+    
+    def test_cooc_matrix_left_only_horizon(self):
+        """Verify cooc_matrix (N, 0) horizon only counts left co-occurrences."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        # Simple document: a -> b -> c -> d
+        documents = [["a", "b", "c", "d"]]
+        
+        # horizon=(1, 0) means: only count word immediately to the LEFT
+        result = cooc_matrix(
+            documents,
+            method='window',
+            horizon=(1, 0),
+            as_dataframe=True
+        )
+        
+        # "b" should co-occur with "a" (a is to the left of b)
+        assert result.loc["b", "a"] > 0, "b->a should have co-occurrence (a is left of b)"
+        
+        # "a" should NOT co-occur with "b" from a's perspective
+        # because with (1, 0), we only look LEFT, and "b" is to the RIGHT of "a"
+        assert result.loc["a", "b"] == 0, "a->b should be 0 (b is right of a, but we only look left)"
+    
+    def test_cooc_matrix_symmetric_horizon(self):
+        """Verify symmetric horizon produces symmetric co-occurrence for adjacent words."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        # Simple document
+        documents = [["a", "b", "c"]]
+        
+        # horizon=1 means: 1 word on each side (symmetric)
+        result = cooc_matrix(
+            documents,
+            method='window',
+            horizon=1,
+            as_dataframe=True
+        )
+        
+        # With symmetric horizon, a-b and b-a should both have co-occurrences
+        assert result.loc["a", "b"] > 0, "a-b should co-occur"
+        assert result.loc["b", "a"] > 0, "b-a should co-occur"
+        
+        # And they should be equal (symmetric)
+        assert result.loc["a", "b"] == result.loc["b", "a"], "Co-occurrence should be symmetric"
+    
+    def test_cooc_matrix_window_size_limits(self):
+        """Verify co-occurrence respects window size limits."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        # Document: a -> b -> c -> d -> e
+        documents = [["a", "b", "c", "d", "e"]]
+        
+        # horizon=1: only immediate neighbors
+        result = cooc_matrix(
+            documents,
+            method='window',
+            horizon=1,
+            as_dataframe=True
+        )
+        
+        # "a" and "c" are 2 positions apart, should NOT co-occur with horizon=1
+        assert result.loc["a", "c"] == 0, "a-c should NOT co-occur (2 positions apart, horizon=1)"
+        
+        # "a" and "b" are adjacent, should co-occur
+        assert result.loc["a", "b"] > 0, "a-b should co-occur (adjacent)"
+    
+    def test_cooc_matrix_multiple_occurrences(self):
+        """Verify co-occurrence counts multiple occurrences correctly."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        # "a" appears next to "b" twice
+        documents = [["a", "b", "x", "a", "b"]]
+        
+        result = cooc_matrix(
+            documents,
+            method='window',
+            horizon=1,
+            as_dataframe=True
+        )
+        
+        # "a" should co-occur with "b" twice
+        assert result.loc["a", "b"] == 2, "a-b should have count=2 (appears twice)"
+
+
+class TestPythonCythonConsistencyDeterministic:
+    """
+    Test that Python and Cython implementations produce identical results
+    on deterministic examples.
+    """
+    
+    def test_window_python_cython_identical_results(self):
+        """Verify Python and Cython window implementations match exactly."""
+        from qhchina.analytics.collocations import (
+            _calculate_collocations_window,
+            _calculate_collocations_window_cython,
+            CYTHON_AVAILABLE
+        )
+        
+        if not CYTHON_AVAILABLE:
+            pytest.skip("Cython extension not available")
+        
+        # Deterministic test data
+        sentences = [
+            ["a", "TARGET", "b", "c", "d"],
+            ["x", "y", "TARGET", "z"],
+            ["TARGET", "m", "n"],
+        ]
+        target_words = ["TARGET"]
+        horizon = (2, 3)
+        
+        # Run both implementations
+        python_results = _calculate_collocations_window(
+            sentences, target_words, horizon=horizon
+        )
+        cython_results = _calculate_collocations_window_cython(
+            sentences, target_words, horizon=horizon
+        )
+        
+        # Convert to comparable format
+        def to_dict(results):
+            return {
+                (r["target"], r["collocate"]): (r["obs_local"], r["obs_global"])
+                for r in results
+            }
+        
+        python_dict = to_dict(python_results)
+        cython_dict = to_dict(cython_results)
+        
+        # Same collocates should be found
+        assert set(python_dict.keys()) == set(cython_dict.keys()), \
+            "Python and Cython should find the same collocates"
+        
+        # Same counts
+        for key in python_dict:
+            assert python_dict[key] == cython_dict[key], \
+                f"Counts for {key} should match: Python={python_dict[key]}, Cython={cython_dict[key]}"
+    
+    def test_sentence_python_cython_identical_results(self):
+        """Verify Python and Cython sentence implementations match exactly."""
+        from qhchina.analytics.collocations import (
+            _calculate_collocations_sentence,
+            _calculate_collocations_sentence_cython,
+            CYTHON_AVAILABLE
+        )
+        
+        if not CYTHON_AVAILABLE:
+            pytest.skip("Cython extension not available")
+        
+        # Deterministic test data
+        sentences = [
+            ["a", "TARGET", "b", "c"],
+            ["TARGET", "x", "y", "z"],
+            ["m", "n", "TARGET"],
+            ["no", "target", "here"],
+        ]
+        target_words = ["TARGET"]
+        
+        # Run both implementations
+        python_results = _calculate_collocations_sentence(sentences, target_words)
+        cython_results = _calculate_collocations_sentence_cython(sentences, target_words)
+        
+        # Convert to comparable format
+        def to_dict(results):
+            return {
+                (r["target"], r["collocate"]): (r["obs_local"], r["obs_global"])
+                for r in results
+            }
+        
+        python_dict = to_dict(python_results)
+        cython_dict = to_dict(cython_results)
+        
+        # Same collocates should be found
+        assert set(python_dict.keys()) == set(cython_dict.keys()), \
+            "Python and Cython should find the same collocates"
+        
+        # Same counts
+        for key in python_dict:
+            assert python_dict[key] == cython_dict[key], \
+                f"Counts for {key} should match: Python={python_dict[key]}, Cython={cython_dict[key]}"
+
+
+# =============================================================================
 # Co-occurrence Matrix Validation
 # =============================================================================
 

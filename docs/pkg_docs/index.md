@@ -27,8 +27,7 @@ pip install qhchina
   - *Topic Modeling*: LDA with Gibbs sampling for topic discovery
   - *Stylometry*: Authorship attribution and document clustering
   - *Collocations*: Statistical collocation analysis and co-occurrence matrices
-  - *Perplexity*: Language model perplexity calculation
-- **Educational**: Interactive learning tools and visualizations for teaching NLP concepts
+- **Educational**: Interactive learning tools and visualizations for basic NLP concepts
 - **Helpers**: Font management, text loading, and utility functions
 
 ---
