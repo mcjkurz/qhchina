@@ -28,29 +28,27 @@ jobs:
       # Linux builds using cibuildwheel
       - name: Build Linux wheels
         if: runner.os == 'Linux'
-        uses: pypa/cibuildwheel@v3.2.0
+        uses: pypa/cibuildwheel@v3  # Uses latest v3.x.x release
         env:
           CIBW_ARCHS: "x86_64"  # Only build 64-bit wheels
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"  # Build for Python 3.10-3.13
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"  # Build for Python 3.10-3.14
           CIBW_SKIP: "*-musllinux_* *-manylinux_i686"  # Skip musl and 32-bit builds
 
       # Windows builds
       - name: Build Windows wheels
         if: runner.os == 'Windows'
-        run: |
-          python -m pip install cibuildwheel
-          python -m cibuildwheel --output-dir wheelhouse
+        uses: pypa/cibuildwheel@v3  # Uses latest v3.x.x release
         env:
           CIBW_ARCHS: "AMD64"  # Only build 64-bit wheels
-          CIBW_BUILD: "cp310-win* cp311-win* cp312-win* cp313-win*"  # Build for Python 3.10-3.13
+          CIBW_BUILD: "cp310-win* cp311-win* cp312-win* cp313-win* cp314-win*"  # Build for Python 3.10-3.14
           
       # macOS builds
       - name: Build macOS wheels
         if: runner.os == 'macOS'
-        uses: pypa/cibuildwheel@v3.2.0
+        uses: pypa/cibuildwheel@v3  # Uses latest v3.x.x release
         env:
           CIBW_ARCHS: "x86_64 arm64"
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"  # Build for Python 3.10-3.14
           
       # Upload artifacts
       - name: Upload wheels
