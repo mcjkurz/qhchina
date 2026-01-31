@@ -233,16 +233,16 @@ to get the current axes object after calling this function.
 
 **Example:**
 ```python
->>> # Basic usage: ratio vs p-value with log scales (default)
->>> collocates = find_collocates(sentences, ['天'])
->>> plot_collocates(collocates)
+# Basic usage: ratio vs p-value with log scales (default)
+collocates = find_collocates(sentences, ['天'])
+plot_collocates(collocates)
 
->>> # Plot observed vs expected frequency
->>> plot_collocates(collocates, x_col='exp_local', y_col='obs_local',
+# Plot observed vs expected frequency
+plot_collocates(collocates, x_col='exp_local', y_col='obs_local',
 ...                 x_scale='linear', y_scale='linear')
 
->>> # With labels and custom styling
->>> plot_collocates(collocates, show_labels=True, label_top_n=20,
+# With labels and custom styling
+plot_collocates(collocates, show_labels=True, label_top_n=20,
 ...                 color='red', title='Collocates of 天')
 ```
 

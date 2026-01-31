@@ -50,17 +50,17 @@ class LDAGibbsSampler:
             preprocessing (default: 24).
     
     Example:
-        >>> from qhchina.analytics.topicmodels import LDAGibbsSampler
-        >>> 
-        >>> # Prepare corpus as list of tokenized documents
-        >>> documents = [['word1', 'word2', ...], ['word3', 'word4', ...], ...]
-        >>> 
-        >>> # Create and fit model
-        >>> lda = LDAGibbsSampler(n_topics=10, iterations=100)
-        >>> lda.fit(documents)
-        >>> 
-        >>> # Get topics
-        >>> topics = lda.get_topics(n_words=10)
+        from qhchina.analytics.topicmodels import LDAGibbsSampler
+        
+        # Prepare corpus as list of tokenized documents
+        documents = [['word1', 'word2', ...], ['word3', 'word4', ...], ...]
+        
+        # Create and fit model
+        lda = LDAGibbsSampler(n_topics=10, iterations=100)
+        lda.fit(documents)
+        
+        # Get topics
+        topics = lda.get_topics(n_words=10)
     """
     
     def __init__(
@@ -1265,9 +1265,9 @@ class LDAGibbsSampler:
                 - List of coherence values for each topic
         
         Example:
-            >>> model.fit(documents)
-            >>> avg_coherence, topic_coherences = model.coherence('npmi')
-            >>> print(f"Average NPMI coherence: {avg_coherence:.4f}")
+            model.fit(documents)
+            avg_coherence, topic_coherences = model.coherence('npmi')
+            print(f"Average NPMI coherence: {avg_coherence:.4f}")
         """
         method = method.lower()
         
@@ -1367,11 +1367,11 @@ class LDAGibbsSampler:
                 - 'all_models': List of all models (if return_all_models=True)
         
         Example:
-            >>> results = LDAGibbsSampler.train_multiple(
+            results = LDAGibbsSampler.train_multiple(
             ...     documents, n_runs=5, n_topics=10, iterations=100
             ... )
-            >>> print(f"Stability: {results['stability_score']:.4f}")
-            >>> best_model = results['best_model']
+            print(f"Stability: {results['stability_score']:.4f}")
+            best_model = results['best_model']
         """
         if random_seeds is None:
             random_seeds = list(range(42, 42 + n_runs))

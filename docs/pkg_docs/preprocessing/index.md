@@ -51,6 +51,17 @@ SegmentationWrapper(
 
 Base segmentation wrapper class that can be extended for different segmentation tools.
 
+**Parameters:**
+- `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'. 
+  Default is 'whole'.
+- `chunk_size`: Size of chunks when using 'chunk' strategy.
+- `filters`: Dictionary of filters to apply during segmentation:
+  - stopwords: List or set of stopwords to exclude (converted to set internally)
+  - min_word_length: Minimum length of tokens to include (default 1)
+  - excluded_pos: List or set of POS tags to exclude (converted to set internally)
+- `sentence_end_pattern`: Regular expression pattern for sentence endings (default: 
+  Chinese and English punctuation).
+
 <h4 id="segmentationwrapper-segment">SegmentationWrapper.segment()</h4>
 
 ```python
@@ -86,6 +97,21 @@ SpacySegmenter(
 
 Segmentation wrapper for spaCy models.
 
+**Parameters:**
+- `model_name`: Name of the spaCy model to use.
+- `disable`: List of pipeline components to disable for better performance; 
+  default setting is ["ner", "lemmatizer"].
+- `batch_size`: Batch size for processing multiple texts.
+- `user_dict`: Custom user dictionary - either a list of words or path to a 
+  dictionary file.
+- `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+- `chunk_size`: Size of chunks when using 'chunk' strategy.
+- `filters`: Dictionary of filters to apply during segmentation:
+  - min_word_length: Minimum length of tokens to include (default 1)
+  - excluded_pos: Set of POS tags to exclude from token outputs
+  - stopwords: Set of stopwords to exclude
+- `sentence_end_pattern`: Regular expression pattern for sentence endings.
+
 <br>
 
 <h3 id="jiebasegmenter">JiebaSegmenter</h3>
@@ -102,6 +128,17 @@ JiebaSegmenter(
 ```
 
 Segmentation wrapper for Jieba Chinese text segmentation.
+
+**Parameters:**
+- `user_dict_path`: Path to a user dictionary file for Jieba.
+- `pos_tagging`: Whether to include POS tagging in segmentation.
+- `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+- `chunk_size`: Size of chunks when using 'chunk' strategy.
+- `filters`: Dictionary of filters to apply during segmentation:
+  - min_word_length: Minimum length of tokens to include (default 1)
+  - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
+  - stopwords: Set of stopwords to exclude
+- `sentence_end_pattern`: Regular expression pattern for sentence endings.
 
 <br>
 
@@ -126,6 +163,28 @@ BertSegmenter(
 
 Segmentation wrapper for BERT-based Chinese word segmentation.
 
+**Parameters:**
+- `model_name`: Name of the pre-trained BERT model to load (optional if model and 
+  tokenizer are provided).
+- `model`: Pre-initialized model instance (optional if model_name is provided).
+- `tokenizer`: Pre-initialized tokenizer instance (optional if model_name is provided).
+- `tagging_scheme`: Either a string ('be', 'bmes') or a list of tags in their exact 
+  order (e.g. ["B", "E"]). When a list is provided, the order of tags matters 
+  as it maps to prediction indices.
+- `batch_size`: Batch size for processing.
+- `device`: Device to use ('cpu', 'cuda', etc.).
+- `remove_special_tokens`: Whether to remove special tokens (CLS, SEP) from output. 
+  Default is True, which works for BERT-based models.
+- `max_sequence_length`: Maximum sequence length for BERT models (default 512). If 
+  the text is longer than this, it will be split into chunks.
+- `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+- `chunk_size`: Size of chunks when using 'chunk' strategy.
+- `filters`: Dictionary of filters to apply during segmentation:
+  - min_word_length: Minimum length of tokens to include (default 1)
+  - excluded_pos: Set of POS tags to exclude from token outputs
+  - stopwords: Set of stopwords to exclude
+- `sentence_end_pattern`: Regular expression pattern for sentence endings.
+
 <br>
 
 <h3 id="llmsegmenter">LLMSegmenter</h3>
@@ -149,6 +208,25 @@ LLMSegmenter(
 ```
 
 Segmentation wrapper using Language Model APIs like OpenAI.
+
+**Parameters:**
+- `api_key`: API key for the language model service.
+- `model`: Model name to use.
+- `endpoint`: API endpoint URL.
+- `prompt`: Custom prompt template with {text} placeholder (if None, uses DEFAULT_PROMPT).
+- `system_message`: Optional system message to prepend to API calls.
+- `temperature`: Temperature for model sampling (lower for more deterministic output).
+- `max_tokens`: Maximum tokens in the response.
+- `retry_patience`: Number of retries for API calls (default 1, meaning 1 retry = 
+  2 total attempts).
+- `timeout`: Timeout in seconds for API calls (default 60.0). Set to None for no timeout.
+- `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+- `chunk_size`: Size of chunks when using 'chunk' strategy.
+- `filters`: Dictionary of filters to apply during segmentation:
+  - min_word_length: Minimum length of tokens to include (default 1)
+  - excluded_pos: Set of POS tags to exclude from token outputs
+  - stopwords: Set of stopwords to exclude
+- `sentence_end_pattern`: Regular expression pattern for sentence endings.
 
 <br>
 

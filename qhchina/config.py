@@ -6,15 +6,15 @@ This module provides centralized configuration for:
 - Default settings for various analytics modules
 
 Usage:
-    >>> import qhchina
-    >>> qhchina.set_random_seed(42)  # Set global seed
-    >>> qhchina.get_random_seed()    # Get current seed
+    import qhchina
+    qhchina.set_random_seed(42)  # Set global seed
+    qhchina.get_random_seed()    # Get current seed
     42
 
 For module-specific RNG that doesn't affect other modules:
-    >>> from qhchina.config import get_rng
-    >>> rng = get_rng()  # Returns numpy RandomState seeded with global seed
-    >>> rng.random()     # Use isolated RNG
+    from qhchina.config import get_rng
+    rng = get_rng()  # Returns numpy RandomState seeded with global seed
+    rng.random()     # Use isolated RNG
 """
 
 import numpy as np
@@ -53,12 +53,12 @@ def set_random_seed(seed: Optional[int]) -> None:
         seed: Random seed (integer). Use None to reset to unseeded (random) behavior.
     
     Example:
-        >>> import qhchina
-        >>> qhchina.set_random_seed(42)
-        >>> # All subsequent qhchina operations will be reproducible
+        import qhchina
+        qhchina.set_random_seed(42)
+        # All subsequent qhchina operations will be reproducible
         
-        >>> qhchina.set_random_seed(None)
-        >>> # Reset to random behavior
+        qhchina.set_random_seed(None)
+        # Reset to random behavior
     
     Note:
         For backwards compatibility with existing code, individual modules 
@@ -77,9 +77,9 @@ def get_random_seed() -> Optional[int]:
         The current global seed, or None if unseeded.
     
     Example:
-        >>> import qhchina
-        >>> qhchina.set_random_seed(42)
-        >>> qhchina.get_random_seed()
+        import qhchina
+        qhchina.set_random_seed(42)
+        qhchina.get_random_seed()
         42
     """
     with _config_lock:
@@ -101,12 +101,12 @@ def get_rng(seed: Optional[int] = None) -> np.random.RandomState:
         A numpy RandomState instance.
     
     Example:
-        >>> from qhchina.config import get_rng
-        >>> rng = get_rng(42)  # Specific seed
-        >>> rng.random()
+        from qhchina.config import get_rng
+        rng = get_rng(42)  # Specific seed
+        rng.random()
         
-        >>> rng = get_rng()  # Uses global seed (if set) or random
-        >>> rng.randint(0, 100)
+        rng = get_rng()  # Uses global seed (if set) or random
+        rng.randint(0, 100)
     """
     effective_seed = seed if seed is not None else get_random_seed()
     if effective_seed is not None:
@@ -130,9 +130,9 @@ def get_python_rng(seed: Optional[int] = None) -> random.Random:
         A Python random.Random instance.
     
     Example:
-        >>> from qhchina.config import get_python_rng
-        >>> rng = get_python_rng(42)
-        >>> rng.random()
+        from qhchina.config import get_python_rng
+        rng = get_python_rng(42)
+        rng.random()
     """
     effective_seed = seed if seed is not None else get_random_seed()
     rng = random.Random()
@@ -156,11 +156,11 @@ def resolve_seed(local_seed: Optional[int], default_seed: Optional[int] = None) 
         The resolved seed value, or None if all are None.
     
     Example:
-        >>> from qhchina.config import resolve_seed, set_random_seed
-        >>> set_random_seed(42)  # Global seed
-        >>> resolve_seed(None)   # Returns 42 (global)
+        from qhchina.config import resolve_seed, set_random_seed
+        set_random_seed(42)  # Global seed
+        resolve_seed(None)   # Returns 42 (global)
         42
-        >>> resolve_seed(123)    # Returns 123 (local overrides global)
+        resolve_seed(123)    # Returns 123 (local overrides global)
         123
     """
     if local_seed is not None:

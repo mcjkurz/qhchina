@@ -144,24 +144,24 @@ comparing authors, and attributing disputed texts. Inspired by the R package
 
 **Example:**
 ```python
->>> from qhchina.analytics.stylometry import Stylometry
->>> 
->>> # Prepare corpus: dict mapping author names to lists of tokenized documents
->>> corpus = {
+from qhchina.analytics.stylometry import Stylometry
+
+# Prepare corpus: dict mapping author names to lists of tokenized documents
+corpus = {
 ...     '鲁迅': [tokens_luxun_1, tokens_luxun_2],
 ...     '茅盾': [tokens_maodun_1, tokens_maodun_2]
 ... }
->>> 
->>> # Create and fit stylometry model
->>> stylo = Stylometry(n_features=100, ngram_range=(1, 2), cull=0.2)
->>> stylo.fit_transform(corpus)
->>> 
->>> # Visualize results
->>> stylo.plot()  # PCA/MDS scatter plot
->>> stylo.dendrogram()  # Hierarchical clustering
->>> 
->>> # Attribute disputed text
->>> author, confidence = stylo.predict(disputed_tokens)
+
+# Create and fit stylometry model
+stylo = Stylometry(n_features=100, ngram_range=(1, 2), cull=0.2)
+stylo.fit_transform(corpus)
+
+# Visualize results
+stylo.plot()  # PCA/MDS scatter plot
+stylo.dendrogram()  # Hierarchical clustering
+
+# Attribute disputed text
+author, confidence = stylo.predict(disputed_tokens)
 ```
 
 <h4 id="stylometry-bootstrap_predict">Stylometry.bootstrap_predict()</h4>
@@ -505,11 +505,11 @@ Extract the Most Frequent Words (MFW) from a frequency counter.
 
 **Example:**
 ```python
->>> from collections import Counter
->>> from qhchina.analytics.stylometry import extract_mfw
->>> counts = Counter(['的', '是', '了', '的', '我', '的'])
->>> mfw = extract_mfw(counts, n=2)
->>> print(mfw)
+from collections import Counter
+from qhchina.analytics.stylometry import extract_mfw
+counts = Counter(['的', '是', '了', '的', '我', '的'])
+mfw = extract_mfw(counts, n=2)
+print(mfw)
 ['的', '是']
 ```
 

@@ -60,11 +60,11 @@ def extract_mfw(ngram_counts: Counter, n: int = 100) -> List[str]:
         list: The n most common n-grams/words, ordered by frequency.
     
     Example:
-        >>> from collections import Counter
-        >>> from qhchina.analytics.stylometry import extract_mfw
-        >>> counts = Counter(['的', '是', '了', '的', '我', '的'])
-        >>> mfw = extract_mfw(counts, n=2)
-        >>> print(mfw)
+        from collections import Counter
+        from qhchina.analytics.stylometry import extract_mfw
+        counts = Counter(['的', '是', '了', '的', '我', '的'])
+        mfw = extract_mfw(counts, n=2)
+        print(mfw)
         ['的', '是']
     """
     return [ngram for ngram, _ in ngram_counts.most_common(n)]
@@ -228,24 +228,24 @@ class Stylometry:
             - 'instance': Compare to individual text instances
     
     Example:
-        >>> from qhchina.analytics.stylometry import Stylometry
-        >>> 
-        >>> # Prepare corpus: dict mapping author names to lists of tokenized documents
-        >>> corpus = {
+        from qhchina.analytics.stylometry import Stylometry
+        
+        # Prepare corpus: dict mapping author names to lists of tokenized documents
+        corpus = {
         ...     '鲁迅': [tokens_luxun_1, tokens_luxun_2],
         ...     '茅盾': [tokens_maodun_1, tokens_maodun_2]
         ... }
-        >>> 
-        >>> # Create and fit stylometry model
-        >>> stylo = Stylometry(n_features=100, ngram_range=(1, 2), cull=0.2)
-        >>> stylo.fit_transform(corpus)
-        >>> 
-        >>> # Visualize results
-        >>> stylo.plot()  # PCA/MDS scatter plot
-        >>> stylo.dendrogram()  # Hierarchical clustering
-        >>> 
-        >>> # Attribute disputed text
-        >>> author, confidence = stylo.predict(disputed_tokens)
+        
+        # Create and fit stylometry model
+        stylo = Stylometry(n_features=100, ngram_range=(1, 2), cull=0.2)
+        stylo.fit_transform(corpus)
+        
+        # Visualize results
+        stylo.plot()  # PCA/MDS scatter plot
+        stylo.dendrogram()  # Hierarchical clustering
+        
+        # Attribute disputed text
+        author, confidence = stylo.predict(disputed_tokens)
     """
     
     # Registries for extensibility

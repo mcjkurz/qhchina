@@ -32,7 +32,7 @@ def validate_filters(
         ValueError: If filters contains unrecognized keys.
     
     Example:
-        >>> validate_filters(
+        validate_filters(
         ...     {'min_count': 5, 'max_p': 0.05, 'invalid_key': 'value'},
         ...     {'min_count', 'max_p', 'stopwords'},
         ...     context='compare_corpora'

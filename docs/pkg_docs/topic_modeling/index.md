@@ -117,17 +117,17 @@ Latent Dirichlet Allocation with Gibbs sampling implementation.
 
 **Example:**
 ```python
->>> from qhchina.analytics.topicmodels import LDAGibbsSampler
->>> 
->>> # Prepare corpus as list of tokenized documents
->>> documents = [['word1', 'word2', ...], ['word3', 'word4', ...], ...]
->>> 
->>> # Create and fit model
->>> lda = LDAGibbsSampler(n_topics=10, iterations=100)
->>> lda.fit(documents)
->>> 
->>> # Get topics
->>> topics = lda.get_topics(n_words=10)
+from qhchina.analytics.topicmodels import LDAGibbsSampler
+
+# Prepare corpus as list of tokenized documents
+documents = [['word1', 'word2', ...], ['word3', 'word4', ...], ...]
+
+# Create and fit model
+lda = LDAGibbsSampler(n_topics=10, iterations=100)
+lda.fit(documents)
+
+# Get topics
+topics = lda.get_topics(n_words=10)
 ```
 
 <h4 id="ldagibbssampler-coherence">LDAGibbsSampler.coherence()</h4>
@@ -158,9 +158,9 @@ Tuple of:
 
 **Example:**
 ```python
->>> model.fit(documents)
->>> avg_coherence, topic_coherences = model.coherence('npmi')
->>> print(f"Average NPMI coherence: {avg_coherence:.4f}")
+model.fit(documents)
+avg_coherence, topic_coherences = model.coherence('npmi')
+print(f"Average NPMI coherence: {avg_coherence:.4f}")
 ```
 
 <h4 id="ldagibbssampler-coherence_npmi">LDAGibbsSampler.coherence_npmi()</h4>

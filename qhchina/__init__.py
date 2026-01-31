@@ -39,10 +39,10 @@ def set_log_level(level: str) -> None:
                or 'SILENT' to suppress all messages.
     
     Example:
-        >>> import qhchina
-        >>> qhchina.set_log_level('WARNING')  # Only show warnings and errors
-        >>> qhchina.set_log_level('DEBUG')    # Show all messages including debug
-        >>> qhchina.set_log_level('SILENT')   # Suppress all messages
+        import qhchina
+        qhchina.set_log_level('WARNING')  # Only show warnings and errors
+        qhchina.set_log_level('DEBUG')    # Show all messages including debug
+        qhchina.set_log_level('SILENT')   # Suppress all messages
     """
     if level.upper() == 'SILENT':
         logger.setLevel(logging.CRITICAL + 1)  # Higher than CRITICAL to suppress everything

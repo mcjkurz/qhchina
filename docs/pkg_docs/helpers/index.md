@@ -149,8 +149,8 @@ Get the file path for a CJK font (for use with WordCloud, etc.).
 
 **Example:**
 ```python
->>> font_path = qhchina.get_font_path()
->>> wc = WordCloud(font_path=font_path, ...)
+font_path = qhchina.get_font_path()
+wc = WordCloud(font_path=font_path, ...)
 ```
 
 <br>

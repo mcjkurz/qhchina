@@ -94,21 +94,21 @@ class Word2Vec:
         gradient_clip (float): Maximum absolute value for gradients when using Cython (default: 1.0).
     
     Example:
-        >>> from qhchina.analytics.word2vec import Word2Vec
-        >>> 
-        >>> # Prepare corpus as list of tokenized sentences
-        >>> sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
-        >>> 
-        >>> # Train model
-        >>> model = Word2Vec(vector_size=100, window=5, min_word_count=1)
-        >>> model.build_vocab(sentences)
-        >>> model.train(sentences, epochs=5)
-        >>> 
-        >>> # Get word vector
-        >>> vector = model.wv['喜欢']
-        >>> 
-        >>> # Find similar words
-        >>> similar = model.wv.most_similar('喜欢', topn=5)
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        # Prepare corpus as list of tokenized sentences
+        sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
+        
+        # Train model
+        model = Word2Vec(vector_size=100, window=5, min_word_count=1)
+        model.build_vocab(sentences)
+        model.train(sentences, epochs=5)
+        
+        # Get word vector
+        vector = model.wv['喜欢']
+        
+        # Find similar words
+        similar = model.wv.most_similar('喜欢', topn=5)
     """
     
     def __init__(
@@ -1754,14 +1754,14 @@ class TempRefWord2Vec(Word2Vec):
         **kwargs: Arguments passed to Word2Vec parent class (vector_size, window, sg, etc.).
     
     Example:
-        >>> from qhchina.analytics.word2vec import TempRefWord2Vec
-        >>> 
-        >>> # Corpora from different time periods
-        >>> corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
-        >>> corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
-        >>> 
-        >>> # Initialize model (Note: only sg=1 is supported)
-        >>> model = TempRefWord2Vec(
+        from qhchina.analytics.word2vec import TempRefWord2Vec
+        
+        # Corpora from different time periods
+        corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
+        corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
+        
+        # Initialize model (Note: only sg=1 is supported)
+        model = TempRefWord2Vec(
         ...     corpora=[corpus_1800s, corpus_1900s],
         ...     labels=["1800s", "1900s"],
         ...     targets=["bread", "food", "money"],
@@ -1769,13 +1769,13 @@ class TempRefWord2Vec(Word2Vec):
         ...     window=5,
         ...     sg=1  # Skip-gram required
         ... )
-        >>> 
-        >>> # Train (uses preprocessed internal corpus)
-        >>> model.train(epochs=5)
-        >>> 
-        >>> # Analyze semantic change
-        >>> model.most_similar("bread_1800s")  # Words similar to "bread" in the 1800s
-        >>> model.most_similar("bread_1900s")  # Words similar to "bread" in the 1900s
+        
+        # Train (uses preprocessed internal corpus)
+        model.train(epochs=5)
+        
+        # Analyze semantic change
+        model.most_similar("bread_1800s")  # Words similar to "bread" in the 1800s
+        model.most_similar("bread_1900s")  # Words similar to "bread" in the 1900s
     """
     
     def __init__(
@@ -2053,11 +2053,11 @@ class TempRefWord2Vec(Word2Vec):
             change score (descending).
         
         Example:
-            >>> changes = model.calculate_semantic_change("人民")
-            >>> for transition, word_changes in changes.items():
-            >>>     print(f"\\n{transition}:")
-            >>>     print("Words moved towards:", word_changes[:5])  # Top 5 increases
-            >>>     print("Words moved away:", word_changes[-5:])   # Top 5 decreases
+            changes = model.calculate_semantic_change("人民")
+            for transition, word_changes in changes.items():
+                print(f"\\n{transition}:")
+                print("Words moved towards:", word_changes[:5])  # Top 5 increases
+                print("Words moved away:", word_changes[-5:])   # Top 5 decreases
         """
         # Use stored labels if not provided
         if labels is None:

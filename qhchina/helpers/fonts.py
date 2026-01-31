@@ -210,8 +210,8 @@ def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
         str: Absolute path to the font file
     
     Example:
-        >>> font_path = qhchina.get_font_path()
-        >>> wc = WordCloud(font_path=font_path, ...)
+        font_path = qhchina.get_font_path()
+        wc = WordCloud(font_path=font_path, ...)
     """
     # Resolve alias to font name
     resolved_font = FONT_ALIASES.get(font, font)
