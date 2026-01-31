@@ -544,7 +544,7 @@ aside.docs-sidebar {
 @media (max-width: 768px) {
   // Offset scroll position for anchor links to account for sticky header
   .docs-content [id] {
-    scroll-margin-top: 100px;
+    scroll-margin-top: 250px;
   }
   
   .docs-container {
