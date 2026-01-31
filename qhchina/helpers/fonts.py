@@ -51,6 +51,8 @@ def set_font(font='Noto Sans CJK TC') -> None:
     """
     Set the matplotlib font for Chinese text rendering.
     
+    This function is thread-safe.
+    
     Args:
         font: Font name, alias, or path to font file. Can be:
               - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
@@ -61,8 +63,6 @@ def set_font(font='Noto Sans CJK TC') -> None:
         FileNotFoundError: If a font file path is provided but doesn't exist.
         ValueError: If the font cannot be loaded or set.
     """
-    global _fonts_loaded
-    
     # Check if font is a file path
     is_file_path = False
     font_path = None
@@ -88,7 +88,8 @@ def set_font(font='Noto Sans CJK TC') -> None:
         except Exception as e:
             raise ValueError(f"Error loading custom font from: {font_path}") from e
     else:
-        # Auto-load bundled fonts if not already loaded (thread-safe check)
+        # Auto-load bundled fonts if not already loaded (thread-safe)
+        # Check and load within the same lock to avoid race condition
         with _fonts_lock:
             if not _fonts_loaded:
                 load_fonts(target_font=None, verbose=False)

@@ -206,7 +206,7 @@ class SpacySegmenter(SegmentationWrapper):
     Args:
         model_name: Name of the spaCy model to use.
         disable: List of pipeline components to disable for better performance; 
-            default setting is ["ner", "lemmatizer"].
+            For common applications, use ["ner", "lemmatizer"]. Default is None.
         batch_size: Batch size for processing multiple texts.
         user_dict: Custom user dictionary - either a list of words or path to a 
             dictionary file.
@@ -220,7 +220,7 @@ class SpacySegmenter(SegmentationWrapper):
     """
     
     def __init__(self, model_name: str = "zh_core_web_lg", 
-                 disable: Optional[List[str]] = ["ner", "lemmatizer"],
+                 disable: Optional[List[str]] = None,
                  batch_size: int = 200,
                  user_dict: Union[List[str], str] = None,
                  strategy: str = "whole", 
@@ -887,7 +887,7 @@ class LLMSegmenter(SegmentationWrapper):
                     return []
                     
             except Exception as e:
-                is_last_attempt = (attempt == self.retry_patience - 1)
+                is_last_attempt = (attempt == self.retry_patience)
                 
                 if is_last_attempt:
                     logger.error(f"Error calling LLM API (final attempt {attempt + 1}/{self.retry_patience}): {str(e)}")

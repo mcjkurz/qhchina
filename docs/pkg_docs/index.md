@@ -94,18 +94,16 @@ qhchina.set_random_seed(None)
 
 The global seed affects all modules that use `get_rng()` internally. Individual functions may also accept a `random_state` or `seed` parameter which overrides the global seed for that specific operation.
 
-For advanced use cases requiring isolated random number generators:
+For advanced use cases requiring an isolated random number generator:
 
 ```python
-from qhchina.config import get_rng, get_python_rng
+from qhchina.config import get_rng
 
 # Get numpy RandomState (doesn't affect global numpy.random)
 rng = get_rng(42)
 rng.random()
-
-# Get Python random.Random instance
-py_rng = get_python_rng(42)
-py_rng.random()
+rng.randint(0, 100)
+rng.shuffle(my_list)  # Works on lists too
 ```
 
 ### Logging

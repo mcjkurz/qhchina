@@ -18,8 +18,7 @@ For module-specific RNG that doesn't affect other modules:
 """
 
 import numpy as np
-import random
-from typing import Optional, Union
+from typing import Optional
 import threading
 
 
@@ -27,7 +26,6 @@ __all__ = [
     'set_random_seed',
     'get_random_seed',
     'get_rng',
-    'get_python_rng',
     'resolve_seed',
 ]
 
@@ -113,32 +111,6 @@ def get_rng(seed: Optional[int] = None) -> np.random.RandomState:
         return np.random.RandomState(effective_seed)
     else:
         return np.random.RandomState()
-
-
-def get_python_rng(seed: Optional[int] = None) -> random.Random:
-    """
-    Get an isolated Python random.Random instance.
-    
-    This creates a new Random instance that doesn't affect the global random state,
-    preventing one module's random operations from affecting another's.
-    
-    Args:
-        seed: Optional seed for this specific RNG. If None, uses the global seed.
-              If the global seed is also None, returns an unseeded RNG.
-    
-    Returns:
-        A Python random.Random instance.
-    
-    Example:
-        from qhchina.config import get_python_rng
-        rng = get_python_rng(42)
-        rng.random()
-    """
-    effective_seed = seed if seed is not None else get_random_seed()
-    rng = random.Random()
-    if effective_seed is not None:
-        rng.seed(effective_seed)
-    return rng
 
 
 def resolve_seed(local_seed: Optional[int], default_seed: Optional[int] = None) -> Optional[int]:

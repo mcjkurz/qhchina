@@ -168,7 +168,7 @@ author, confidence = stylo.predict(disputed_tokens)
 <h4 id="stylometry-bootstrap_predict">Stylometry.bootstrap_predict()</h4>
 
 ```python
-bootstrap_predict(text: List[str], n_iter: int = 100, sample_ratio: float = 0.8, distance: Optional[str] = None)
+bootstrap_predict(text: List[str], n_iter: int = 100, sample_ratio: float = 0.8, distance: Optional[str] = None, seed: Optional[int] = None)
 ```
 
 Bootstrap analysis for prediction robustness.
@@ -181,6 +181,8 @@ to assess how robust the attribution is.
 - `n_iter`: Number of bootstrap iterations
 - `sample_ratio`: Fraction of features to use per iteration (0.0-1.0)
 - `distance`: Distance metric override
+- `seed`: Random seed for reproducibility. If None, results will vary
+  between calls.
 
 **Returns:**
 Dict with:

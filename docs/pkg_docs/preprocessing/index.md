@@ -86,7 +86,7 @@ contains tokens for a line, sentence, or chunk respectively
 ```python
 SpacySegmenter(
     model_name: str = 'zh_core_web_lg',
-    disable: Optional[List[str]] = ['ner', 'lemmatizer'],
+    disable: Optional[List[str]] = None,
     batch_size: int = 200,
     user_dict: Union[List[str], str] = None,
     strategy: str = 'whole',
@@ -101,7 +101,7 @@ Segmentation wrapper for spaCy models.
 **Parameters:**
 - `model_name`: Name of the spaCy model to use.
 - `disable`: List of pipeline components to disable for better performance; 
-  default setting is ["ner", "lemmatizer"].
+  For common applications, use ["ner", "lemmatizer"]. Default is None.
 - `batch_size`: Batch size for processing multiple texts.
 - `user_dict`: Custom user dictionary - either a list of words or path to a 
   dictionary file.

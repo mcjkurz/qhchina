@@ -5,4 +5,4 @@ This package provides high-performance implementations of core algorithms
 using Cython for maximum efficiency.
 """
 
-__all__ = ["word2vec", "lda_sampler"] 
+__all__ = ["word2vec", "lda_sampler", "collocations"] 

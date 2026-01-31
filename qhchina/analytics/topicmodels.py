@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from tqdm.auto import trange, tqdm
 from scipy.special import psi, polygamma
 
-from ..config import get_rng, get_python_rng, resolve_seed
+from ..config import get_rng, resolve_seed
 
 logger = logging.getLogger("qhchina.analytics.topicmodels")
 
@@ -144,10 +144,9 @@ class LDAGibbsSampler:
         if use_cython:
             self._attempt_cython_import()
         
-        # Use isolated RNG instances to avoid affecting global state
-        effective_seed = resolve_seed(random_state)
-        self._rng = get_rng(effective_seed)
-        self._python_rng = get_python_rng(effective_seed)
+        # Resolve seed once for reproducibility across Python and Cython
+        self._effective_seed = resolve_seed(random_state)
+        self._rng = get_rng(self._effective_seed)
         
         self.vocabulary = None
         self.vocabulary_size = None
@@ -348,7 +347,7 @@ class LDAGibbsSampler:
         
         if self.use_cython:
             if hasattr(self.lda_sampler, 'seed_rng'):
-                self.lda_sampler.seed_rng(self.random_state)
+                self.lda_sampler.seed_rng(self._effective_seed)
         
         impl_type = "Cython" if self.use_cython else "Python"
         n_iter = total_iterations if self.burnin > 0 else self.iterations
@@ -623,7 +622,7 @@ class LDAGibbsSampler:
         
         if self.use_cython and hasattr(self.lda_sampler, 'run_inference'):
             if hasattr(self.lda_sampler, 'seed_rng'):
-                self.lda_sampler.seed_rng(self.random_state)
+                self.lda_sampler.seed_rng(self._effective_seed)
             
             # Convert to numpy array for Cython
             filtered_doc_array = np.array(filtered_doc, dtype=np.int32)

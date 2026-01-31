@@ -150,7 +150,8 @@ def get_bias_direction(
     # normalize the bias direction
     bias_norm = np.linalg.norm(bias_direction)
     # make sure it's not 0, otherwise make it 1
-
+    if bias_norm == 0:
+        bias_norm = 1.0
     return bias_direction / bias_norm
 
 def calculate_bias(

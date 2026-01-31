@@ -256,8 +256,9 @@ class TestCompareCorpora:
         )
         
         # Results should only include words passing filters
+        # Each word must have freq >= min_count in at least one corpus
         if len(result) > 0:
-            assert all(result['abs_freqA'] >= 5) or all(result['abs_freqB'] >= 5)
+            assert all((result['abs_freqA'] >= 5) | (result['abs_freqB'] >= 5))
             assert all(result['p_value'] <= 0.05)
     
     def test_compare_corpora_chi2_methods(self, song_ming_flat):

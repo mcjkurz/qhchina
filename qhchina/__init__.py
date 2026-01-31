@@ -51,7 +51,7 @@ def set_log_level(level: str) -> None:
 
 
 # Import global configuration functions
-from .config import set_random_seed, get_random_seed, get_rng, get_python_rng
+from .config import set_random_seed, get_random_seed, get_rng
 
 # Import helper functions directly into the package namespace
 from .helpers.fonts import load_fonts, current_font, set_font, list_available_fonts, list_font_aliases, get_font_path

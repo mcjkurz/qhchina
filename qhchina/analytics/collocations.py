@@ -718,8 +718,12 @@ def cooc_matrix(
     n = len(vocab_list)
 
     if use_sparse:
-        row_indices, col_indices, data_values = zip(*((i, j, count) for (i, j), count in cooc_dict.items()))
-        cooc_matrix_array = sparse.coo_matrix((data_values, (row_indices, col_indices)), shape=(n, n)).tocsr()
+        if not cooc_dict:
+            # Return empty sparse matrix
+            cooc_matrix_array = sparse.coo_matrix((n, n)).tocsr()
+        else:
+            row_indices, col_indices, data_values = zip(*((i, j, count) for (i, j), count in cooc_dict.items()))
+            cooc_matrix_array = sparse.coo_matrix((data_values, (row_indices, col_indices)), shape=(n, n)).tocsr()
     else:
         cooc_matrix_array = np.zeros((n, n))
         for (i, j), count in cooc_dict.items():

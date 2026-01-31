@@ -34,7 +34,7 @@ from tqdm.auto import tqdm
 import warnings
 import time
 from .vectors import cosine_similarity
-from ..config import get_rng, get_python_rng, resolve_seed
+from ..config import get_rng, resolve_seed
 
 logger = logging.getLogger("qhchina.analytics.word2vec")
 
@@ -166,10 +166,9 @@ class Word2Vec:
         # Precompute the sigmoid table and log sigmoid table
         self._precompute_sigmoid()
         
-        # Use isolated RNG instances to avoid affecting global state
+        # Use isolated RNG to avoid affecting global state
         effective_seed = resolve_seed(seed)
         self._rng = get_rng(effective_seed)
-        self._python_rng = get_python_rng(effective_seed)
         
         # Initialize vocabulary structures
         self.vocab = {}  # word -> index (direct mapping)
@@ -1246,7 +1245,7 @@ class Word2Vec:
         for epoch in range(epochs):
             # Shuffle sentences each epoch (only if it's a list)
             if isinstance(sentences, list):
-                self._python_rng.shuffle(sentences)
+                self._rng.shuffle(sentences)
                     
             examples_processed_in_epoch = 0
             batch_count = 0
@@ -1684,7 +1683,7 @@ def sample_sentences_to_token_count(
         List[List[str]]: A list of sampled sentences with token count close to 
             target_tokens.
     """
-    rng = get_python_rng(resolve_seed(seed))
+    rng = get_rng(resolve_seed(seed))
     sampled_sentences = []
     current_tokens = 0
     sentence_indices = list(range(len(corpus)))

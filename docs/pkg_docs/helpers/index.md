@@ -96,6 +96,8 @@ set_font(font='Noto Sans CJK TC')
 
 Set the matplotlib font for Chinese text rendering.
 
+This function is thread-safe.
+
 **Parameters:**
 - `font`: Font name, alias, or path to font file. Can be:
   - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
