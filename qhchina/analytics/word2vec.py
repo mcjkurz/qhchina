@@ -71,9 +71,44 @@ class Word2Vec:
     - Optional double precision for numerical stability
     - Optional Cython acceleration for significantly faster training
     
-    Performance options:
-    - Use double precision (use_double_precision=True) for better numerical stability (slightly slower)
-    - Use Cython acceleration (use_cython=True) for much faster training (requires Cython extension)
+    Args:
+        vector_size (int): Dimensionality of the word vectors (default: 100).
+        window (int): Maximum distance between the current and predicted word (default: 5).
+        min_word_count (int): Ignores all words with frequency lower than this (default: 5).
+        negative (int): Number of negative samples for negative sampling (default: 5).
+        ns_exponent (float): Exponent used to shape the negative sampling distribution (default: 0.75).
+        cbow_mean (bool): If True, use mean of context word vectors, else use sum (default: True).
+        sg (int): Training algorithm: 1 for skip-gram; 0 for CBOW (default: 0).
+        seed (int): Seed for random number generator (default: 1).
+        alpha (float): Initial learning rate (default: 0.025).
+        min_alpha (float): Minimum learning rate. If None, learning rate remains constant at alpha.
+        sample (float): Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
+        shrink_windows (bool): If True, the effective window size is uniformly sampled from [1, window] 
+            for each target word during training. If False, always use the full window (default: True).
+        exp_table_size (int): Size of sigmoid lookup table for precomputation (default: 1000).
+        max_exp (float): Range of values for sigmoid precomputation [-max_exp, max_exp] (default: 6.0).
+        max_vocab_size (int): Maximum vocabulary size to keep, keeping the most frequent words.
+            None means no limit (keep all words above min_word_count).
+        use_double_precision (bool): Whether to use float64 precision for better stability (default: False).
+        use_cython (bool): Whether to use Cython acceleration if available (default: True).
+        gradient_clip (float): Maximum absolute value for gradients when using Cython (default: 1.0).
+    
+    Example:
+        >>> from qhchina.analytics.word2vec import Word2Vec
+        >>> 
+        >>> # Prepare corpus as list of tokenized sentences
+        >>> sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
+        >>> 
+        >>> # Train model
+        >>> model = Word2Vec(vector_size=100, window=5, min_word_count=1)
+        >>> model.build_vocab(sentences)
+        >>> model.train(sentences, epochs=5)
+        >>> 
+        >>> # Get word vector
+        >>> vector = model.wv['喜欢']
+        >>> 
+        >>> # Find similar words
+        >>> similar = model.wv.most_similar('喜欢', topn=5)
     """
     
     def __init__(
@@ -97,32 +132,6 @@ class Word2Vec:
         use_cython: bool = True,
         gradient_clip: float = 1.0,
     ):
-        """
-        Initialize the Word2Vec model.
-        
-        Parameters
-        ----------
-        vector_size: Dimensionality of the word vectors
-        window: Maximum distance between the current and predicted word
-        min_word_count: Ignores all words with frequency lower than this
-        negative: Number of negative samples for negative sampling
-        ns_exponent: Exponent used to shape the negative sampling distribution
-        cbow_mean: If True, use mean of context word vectors, else use sum
-        sg: Training algorithm: 1 for skip-gram; 0 for CBOW
-        seed: Seed for random number generator
-        alpha: Initial learning rate
-        min_alpha: Minimum learning rate. If None, learning rate remains constant at alpha.
-        sample: Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
-        shrink_windows: If True, the effective window size is uniformly sampled from [1, window] 
-                        for each target word during training. If False, always use the full window.
-        exp_table_size: Size of sigmoid lookup table for precomputation
-        max_exp: Range of values for sigmoid precomputation [-max_exp, max_exp]
-        max_vocab_size: Maximum vocabulary size to keep, keeping the most frequent words.
-                        None means no limit (keep all words above min_word_count).
-        use_double_precision: Whether to use float64 precision for better stability. Default is False.
-        use_cython: Whether to use Cython acceleration if available. Default is True.
-        gradient_clip: Maximum absolute value for gradients when using Cython. Default is 1.0.
-        """
         self.vector_size = vector_size
         self.window = window
         self.min_word_count = min_word_count
@@ -182,8 +191,8 @@ class Word2Vec:
         """
         Attempt to import the Cython-optimized module.
         
-        Returns:
-        --------
+        Returns
+        -------
         bool: True if import was successful, False otherwise
         """
         try:
@@ -229,11 +238,11 @@ class Word2Vec:
         Get sigmoid values using the precomputed table.
         
         Parameters
-        -----------
+        ----------
         x: Input values
         
-        Returns:
-        --------
+        Returns
+        -------
         Sigmoid values for the inputs
         """
         # Fast conversion of inputs to indices
@@ -254,11 +263,11 @@ class Word2Vec:
         Get log sigmoid values using the precomputed table.
         
         Parameters
-        -----------
+        ----------
         x: Input values
         
-        Returns:
-        --------
+        Returns
+        -------
         Log sigmoid values for the inputs
         """
         # Reuse the exact same fast index calculation from _sigmoid
@@ -273,11 +282,11 @@ class Word2Vec:
         Clip gradient by L2 norm to prevent explosion while preserving direction.
         
         Parameters
-        -----------
+        ----------
         gradient: Gradient vector(s) to clip. Can be 1D or 2D array.
         
-        Returns:
-        --------
+        Returns
+        -------
         Clipped gradient (same shape as input)
         """
         if gradient.ndim == 1:
@@ -300,11 +309,11 @@ class Word2Vec:
         Build vocabulary from a list or iterator of sentences.
         
         Parameters
-        -----------
+        ----------
         sentences: List or iterator of tokenized sentences (each sentence is a list of words)
         
-        Returns:
-        --------
+        Returns
+        -------
         None
         """
         
@@ -447,7 +456,7 @@ class Word2Vec:
         Update the learning rate in the Cython extension when using Cython acceleration.
         
         Parameters
-        -----------
+        ----------
         alpha: New learning rate value
         """
         if self.use_cython:
@@ -466,11 +475,11 @@ class Word2Vec:
         For each positive example, the caller should generate negative examples using the noise distribution.
         
         Parameters
-        -----------
+        ----------
         sentences: List or iterator of sentences (lists of words)
         
-        Returns:
-        --------
+        Returns
+        -------
         Generator yielding (input_idx, output_idx) tuples for positive examples
         """
         # Process sentences one by one
@@ -539,11 +548,11 @@ class Word2Vec:
         For each positive example, the caller should generate negative examples using the noise distribution.
         
         Parameters
-        -----------
+        ----------
         sentences: List or iterator of sentences (lists of words)
         
-        Returns:
-        --------
+        Returns
+        -------
         Generator yielding (input_indices, output_idx) tuples for positive examples
         """
         # Process sentences one by one
@@ -610,13 +619,13 @@ class Word2Vec:
         Train the model on a single Skip-gram example using pure Python implementation.
         
         Parameters
-        -----------
+        ----------
         input_idx: Index of the input word (center word)
         output_idx: Index of the output word (context word)
         learning_rate: Current learning rate
         
-        Returns:
-        --------
+        Returns
+        -------
         Loss for this training example
         """
         # Get input and output vectors
@@ -698,13 +707,13 @@ class Word2Vec:
         Train the model on a single CBOW example using pure Python implementation.
         
         Parameters
-        -----------
+        ----------
         input_indices: List of indices for input context words
         output_idx: Index of the output word (center word)
         learning_rate: Current learning rate
         
-        Returns:
-        --------
+        Returns
+        -------
         Loss for this training example
         """
         # Get input vectors (context word vectors)
@@ -808,14 +817,14 @@ class Word2Vec:
         Train the model on a batch of samples in a fully vectorized manner using pure Python.
         
         Parameters
-        -----------
+        ----------
         samples: List of training samples:
                 - for Skip-gram: list of (input_idx, output_idx) tuples
                 - for CBOW: list of (input_indices, output_idx) tuples
         learning_rate: Current learning rate
         
-        Returns:
-        --------
+        Returns
+        -------
         Total loss for the batch
         """
         batch_size = len(samples)
@@ -1037,13 +1046,13 @@ class Word2Vec:
         Train the model on a single Skip-gram example, using either Cython or Python implementation.
         
         Parameters
-        -----------
+        ----------
         input_idx: Index of the input word (center word)
         output_idx: Index of the output word (context word)
         learning_rate: Current learning rate
         
-        Returns:
-        --------
+        Returns
+        -------
         Loss for this training example
         """
         if self.use_cython:
@@ -1063,13 +1072,13 @@ class Word2Vec:
         Train a single CBOW example with negative sampling.
         
         Parameters
-        -----------
+        ----------
         input_indices: List of context word indices
         output_idx: Index of center word
         learning_rate: Current learning rate
         
-        Returns:
-        --------
+        Returns
+        -------
         Loss for this training example
         """
         if self.use_cython:     
@@ -1092,11 +1101,11 @@ class Word2Vec:
         Generate training examples based on the model type (Skip-gram or CBOW).
         
         Parameters
-        -----------
+        ----------
         sentences: List or iterator of tokenized sentences
         
-        Returns:
-        --------
+        Returns
+        -------
         Generator yielding training examples
         """
         if self.sg:
@@ -1109,12 +1118,12 @@ class Word2Vec:
         Train on a single example based on the model type (Skip-gram or CBOW).
         
         Parameters
-        -----------
+        ----------
         example: Training example tuple
         learning_rate: Current learning rate
         
-        Returns:
-        --------
+        Returns
+        -------
         Loss for this training example
         """
         if self.sg:
@@ -1129,14 +1138,14 @@ class Word2Vec:
         Train the model on a batch of samples, using either Cython or Python implementation.
         
         Parameters
-        -----------
+        ----------
         samples: List of training samples:
                 - for Skip-gram: list of (input_idx, output_idx) tuples
                 - for CBOW: list of (input_indices, output_idx) tuples
         learning_rate: Current learning rate
         
-        Returns:
-        --------
+        Returns
+        -------
         Total loss for the batch
         """
         if self.use_cython:
@@ -1182,7 +1191,7 @@ class Word2Vec:
         Train word2vec model on given sentences.
         
         Parameters
-        -----------
+        ----------
         sentences: List or iterator of tokenized sentences (lists of words)
         epochs: Number of training iterations over the corpus
         alpha: Initial learning rate
@@ -1201,8 +1210,8 @@ class Word2Vec:
             If an integer, logs progress every `verbose` batches (when batched) or every
             `verbose * 1000` examples (when not batched).
             
-        Returns:
-        --------
+        Returns
+        -------
         Final loss value if calculate_loss is True, None otherwise
         """
         self.epochs = epochs
@@ -1334,8 +1343,8 @@ class Word2Vec:
         """
         Train for one epoch. Unified implementation for both Skip-gram and CBOW.
         
-        Returns:
-        --------
+        Returns
+        -------
         Tuple of (epoch_loss, examples_processed, batch_count, total_examples_processed, current_alpha)
         """
         epoch_loss = 0.0
@@ -1503,12 +1512,12 @@ class Word2Vec:
         Get the vector for a word.
         
         Parameters
-        -----------
+        ----------
         word: Input word
         normalize: If True, return the normalized vector (unit length)
         
-        Returns:
-        --------
+        Returns
+        -------
         Word vector
         """
         if word in self.vocab:
@@ -1526,11 +1535,11 @@ class Word2Vec:
         Dictionary-like access to word vectors.
         
         Parameters
-        -----------
+        ----------
         word: Input word
         
-        Returns:
-        --------
+        Returns
+        -------
         Word vector or raises KeyError if word is not in vocabulary
         """
         
@@ -1541,11 +1550,11 @@ class Word2Vec:
         Check if a word is in the vocabulary using the 'in' operator.
         
         Parameters
-        -----------
+        ----------
         word: Word to check
         
-        Returns:
-        --------
+        Returns
+        -------
         True if the word is in the vocabulary, False otherwise
         """
         return word in self.vocab
@@ -1555,12 +1564,12 @@ class Word2Vec:
         Find the topn most similar words to the given word.
         
         Parameters
-        -----------
+        ----------
         word: Input word
         topn: Number of similar words to return
         
-        Returns:
-        --------
+        Returns
+        -------
         List of (word, similarity) tuples
         """
         if word not in self.vocab:
@@ -1585,15 +1594,15 @@ class Word2Vec:
         Calculate cosine similarity between two words.
         
         Parameters
-        -----------
+        ----------
         word1: First word
         word2: Second word
         
-        Returns:
-        --------
+        Returns
+        -------
         Cosine similarity between the two words (float between -1 and 1)
         
-        Raises:
+        Raises
         -------
         KeyError: If either word is not in the vocabulary
         """
@@ -1613,11 +1622,11 @@ class Word2Vec:
         Save the model to a file.
         
         Parameters
-        -----------
+        ----------
         path: Path to save the model
         
-        Returns:
-        --------
+        Returns
+        -------
         None
         """
         model_data = {
@@ -1648,11 +1657,11 @@ class Word2Vec:
         Load a model from a file.
         
         Parameters
-        -----------
+        ----------
         path: Path to load the model from
         
-        Returns:
-        --------
+        Returns
+        -------
         Loaded Word2Vec model
         """
         model_data = np.load(path, allow_pickle=True).item()
@@ -1792,39 +1801,37 @@ class TempRefWord2Vec(Word2Vec):
     The class takes multiple corpora corresponding to different time periods and automatically
     creates temporal references for specified target words.
     
-    Usage:
-    ------
-    1. Initialize with corpora from different time periods, labels for the periods,
-       and target words to track for semantic change
-    2. The model will process, balance, and combine the corpora
-    3. Call train() without arguments to train on the preprocessed data
-    4. Access semantic change through most_similar() or by directly analyzing the word vectors
-       of temporal variants (e.g., "bread_1800" vs "bread_1900")
+    Args:
+        corpora (List[List[List[str]]]): List of corpora, each corpus is a list of sentences 
+            for a time period.
+        labels (List[str]): Labels for each corpus (e.g., time periods like "1800s", "1900s").
+        targets (List[str]): List of target words to trace semantic change.
+        balance (bool): Whether to balance the corpora to equal sizes (default: True).
+        **kwargs: Arguments passed to Word2Vec parent class (vector_size, window, sg, etc.).
     
-    Example
-    -------
-    ```python
-    # Corpora from different time periods
-    corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
-    corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
-    
-    # Initialize model
-    model = TempRefWord2Vec(
-        corpora=[corpus_1800s, corpus_1900s],
-        labels=["1800s", "1900s"],
-        targets=["bread", "food", "money"],
-        vector_size=100,
-        window=5,
-        sg=0  # Use CBOW
-    )
-    
-    # Train (uses preprocessed internal corpus)
-    model.train(epochs=5)
-    
-    # Analyze semantic change
-    model.most_similar("bread_1800")  # Words similar to "bread" in the 1800s
-    model.most_similar("bread_1900")  # Words similar to "bread" in the 1900s
-    ```
+    Example:
+        >>> from qhchina.analytics.word2vec import TempRefWord2Vec
+        >>> 
+        >>> # Corpora from different time periods
+        >>> corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
+        >>> corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
+        >>> 
+        >>> # Initialize model (Note: only sg=1 is supported)
+        >>> model = TempRefWord2Vec(
+        ...     corpora=[corpus_1800s, corpus_1900s],
+        ...     labels=["1800s", "1900s"],
+        ...     targets=["bread", "food", "money"],
+        ...     vector_size=100,
+        ...     window=5,
+        ...     sg=1  # Skip-gram required
+        ... )
+        >>> 
+        >>> # Train (uses preprocessed internal corpus)
+        >>> model.train(epochs=5)
+        >>> 
+        >>> # Analyze semantic change
+        >>> model.most_similar("bread_1800s")  # Words similar to "bread" in the 1800s
+        >>> model.most_similar("bread_1900s")  # Words similar to "bread" in the 1900s
     """
     
     def __init__(
@@ -1835,16 +1842,6 @@ class TempRefWord2Vec(Word2Vec):
         balance: bool = True,            # Whether to balance the corpora
         **kwargs                         # Parameters passed to Word2Vec parent class
     ):
-        """
-        Initialize TempRefWord2Vec with multiple corpora and target words to track.
-        
-        Parameters
-        -----------
-        corpora: List of corpora, each corpus is a list of sentences for a time period
-        labels: Labels for each corpus (e.g., time periods like "1800s", "1900s")
-        targets: List of target words to trace semantic change
-        **kwargs: Arguments passed to Word2Vec parent class (vector_size, window, etc.)
-        """
         # Check that corpora and labels have the same length
         if len(corpora) != len(labels):
             raise ValueError(f"Number of corpora ({len(corpora)}) must match number of labels ({len(labels)})")
@@ -1935,7 +1932,7 @@ class TempRefWord2Vec(Word2Vec):
         Explicitly adds base words to the vocabulary even if they don't appear in the corpus.
         
         Parameters
-        -----------
+        ----------
         sentences: List of tokenized sentences
         """
         
@@ -2011,11 +2008,11 @@ class TempRefWord2Vec(Word2Vec):
         examples by converting any temporal variant context words to their base form.
         
         Parameters
-        -----------
+        ----------
         sentences: List of sentences (lists of words)
         
-        Returns:
-        --------
+        Returns
+        -------
         Generator yielding (input_idx, output_idx) tuples for positive examples
         """
         # Call the parent implementation to get basic examples
@@ -2050,11 +2047,11 @@ class TempRefWord2Vec(Word2Vec):
         examples by converting any temporal variant context words to their base form.
         
         Parameters
-        -----------
+        ----------
         sentences: List of sentences (lists of words)
         
-        Returns:
-        --------
+        Returns
+        -------
         Generator yielding (input_indices, output_idx) tuples for positive examples
         """
         # Call the parent implementation to get basic examples
@@ -2089,13 +2086,13 @@ class TempRefWord2Vec(Word2Vec):
         data has the proper temporal references.
         
         Parameters
-        -----------
+        ----------
         sentences: Ignored in TempRefWord2Vec, will use self.combined_corpus instead
         **kwargs: All additional arguments are passed to the parent's train method
                  (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.)
         
-        Returns:
-        --------
+        Returns
+        -------
         Final loss value if calculate_loss is True in kwargs, None otherwise
         """
         if sentences is not None:
@@ -2110,15 +2107,15 @@ class TempRefWord2Vec(Word2Vec):
         Calculate semantic change by comparing cosine similarities across time periods.
         
         Parameters
-        -----------
+        ----------
         target_word: Target word to analyze (must be one of the targets specified during initialization)
         labels: Time period labels (optional, defaults to labels from model initialization)
         
-        Returns:
-        --------
+        Returns
+        -------
         Dict mapping transition names to lists of (word, change) tuples, sorted by change score (descending)
         
-        Example:
+        Example
         --------
         >>> changes = model.calculate_semantic_change("人民")
         >>> for transition, word_changes in changes.items():
@@ -2182,8 +2179,8 @@ class TempRefWord2Vec(Word2Vec):
         """
         Get the list of target words available for semantic change analysis.
         
-        Returns:
-        --------
+        Returns
+        -------
         List of target words that were specified during model initialization
         """
         return self.targets.copy()
@@ -2192,8 +2189,8 @@ class TempRefWord2Vec(Word2Vec):
         """
         Get the list of time period labels used in the model.
         
-        Returns:
-        --------
+        Returns
+        -------
         List of time period labels that were specified during model initialization
         """
         return self.labels.copy()
@@ -2203,17 +2200,17 @@ class TempRefWord2Vec(Word2Vec):
         Get vocabulary counts for a specific period or all periods.
         
         Parameters
-        -----------
+        ----------
         period : str, optional
             The period label to get vocab counts for. If None, returns all periods.
             
-        Returns:
-        --------
+        Returns
+        -------
         Union[Dict[str, Counter], Counter]
             If period is None: dictionary mapping period labels to Counter objects
             If period is specified: Counter object for that specific period
             
-        Raises:
+        Raises
         -------
         ValueError
             If the specified period is not found in the model
@@ -2242,12 +2239,12 @@ class TempRefWord2Vec(Word2Vec):
         Note: The combined corpus is NOT saved to reduce file size.
         
         Parameters
-        -----------
+        ----------
         path : str
             Path to save the model file
             
-        Returns:
-        --------
+        Returns
+        -------
         None
         """
         # Get the base model data from parent class
@@ -2305,16 +2302,16 @@ class TempRefWord2Vec(Word2Vec):
         - Temporal word mappings
         
         Parameters
-        -----------
+        ----------
         path : str
             Path to load the model from
             
-        Returns:
-        --------
+        Returns
+        -------
         TempRefWord2Vec
             Loaded TempRefWord2Vec model with all temporal metadata restored
             
-        Raises:
+        Raises
         -------
         ValueError
             If the file doesn't contain TempRefWord2Vec data

@@ -129,9 +129,46 @@ Features:
 - Optional double precision for numerical stability
 - Optional Cython acceleration for significantly faster training
 
-Performance options:
-- Use double precision (use_double_precision=True) for better numerical stability (slightly slower)
-- Use Cython acceleration (use_cython=True) for much faster training (requires Cython extension)
+**Parameters:**
+- `vector_size` (int): Dimensionality of the word vectors (default: 100).
+- `window` (int): Maximum distance between the current and predicted word (default: 5).
+- `min_word_count` (int): Ignores all words with frequency lower than this (default: 5).
+- `negative` (int): Number of negative samples for negative sampling (default: 5).
+- `ns_exponent` (float): Exponent used to shape the negative sampling distribution (default: 0.75).
+- `cbow_mean` (bool): If True, use mean of context word vectors, else use sum (default: True).
+- `sg` (int): Training algorithm: 1 for skip-gram; 0 for CBOW (default: 0).
+- `seed` (int): Seed for random number generator (default: 1).
+- `alpha` (float): Initial learning rate (default: 0.025).
+- `min_alpha` (float): Minimum learning rate. If None, learning rate remains constant at alpha.
+- `sample` (float): Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
+- `shrink_windows` (bool): If True, the effective window size is uniformly sampled from [1, window] 
+  for each target word during training. If False, always use the full window (default: True).
+- `exp_table_size` (int): Size of sigmoid lookup table for precomputation (default: 1000).
+- `max_exp` (float): Range of values for sigmoid precomputation [-max_exp, max_exp] (default: 6.0).
+- `max_vocab_size` (int): Maximum vocabulary size to keep, keeping the most frequent words.
+  None means no limit (keep all words above min_word_count).
+- `use_double_precision` (bool): Whether to use float64 precision for better stability (default: False).
+- `use_cython` (bool): Whether to use Cython acceleration if available (default: True).
+- `gradient_clip` (float): Maximum absolute value for gradients when using Cython (default: 1.0).
+
+**Example:**
+```python
+>>> from qhchina.analytics.word2vec import Word2Vec
+>>> 
+>>> # Prepare corpus as list of tokenized sentences
+>>> sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
+>>> 
+>>> # Train model
+>>> model = Word2Vec(vector_size=100, window=5, min_word_count=1)
+>>> model.build_vocab(sentences)
+>>> model.train(sentences, epochs=5)
+>>> 
+>>> # Get word vector
+>>> vector = model.wv['喜欢']
+>>> 
+>>> # Find similar words
+>>> similar = model.wv.most_similar('喜欢', topn=5)
+```
 
 <h4 id="word2vec-build_vocab">Word2Vec.build_vocab()</h4>
 
@@ -141,12 +178,11 @@ build_vocab(sentences: Union[List[List[str]], Iterator[List[str]]])
 
 Build vocabulary from a list or iterator of sentences.
 
-Parameters
------------
-sentences: List or iterator of tokenized sentences (each sentence is a list of words)
+**Parameters:**
+- `sentences` (List or iterator of tokenized sentences (each sentence is a list of words)): 
 
 **Returns:**
-
+(None)
 
 <h4 id="word2vec-generate_cbow_examples">Word2Vec.generate_cbow_examples()</h4>
 
@@ -162,12 +198,11 @@ A CBOW example is a tuple (input_indices, output_idx) where:
 
 For each positive example, the caller should generate negative examples using the noise distribution.
 
-Parameters
------------
-sentences: List or iterator of sentences (lists of words)
+**Parameters:**
+- `sentences` (List or iterator of sentences (lists of words)): 
 
 **Returns:**
-
+(Generator yielding (input_indices, output_idx) tuples for positive examples)
 
 <h4 id="word2vec-generate_skipgram_examples">Word2Vec.generate_skipgram_examples()</h4>
 
@@ -183,12 +218,11 @@ A Skip-gram example is a tuple (input_idx, output_idx) where:
 
 For each positive example, the caller should generate negative examples using the noise distribution.
 
-Parameters
------------
-sentences: List or iterator of sentences (lists of words)
+**Parameters:**
+- `sentences` (List or iterator of sentences (lists of words)): 
 
 **Returns:**
-
+(Generator yielding (input_idx, output_idx) tuples for positive examples)
 
 <h4 id="word2vec-get_vector">Word2Vec.get_vector()</h4>
 
@@ -198,13 +232,12 @@ get_vector(word: str, normalize: bool = False)
 
 Get the vector for a word.
 
-Parameters
------------
-word: Input word
-normalize: If True, return the normalized vector (unit length)
+**Parameters:**
+- `word` (Input word): 
+- `normalize` (If True, return the normalized vector (unit length)): 
 
 **Returns:**
-
+(Word vector)
 
 <h4 id="word2vec-most_similar">Word2Vec.most_similar()</h4>
 
@@ -214,13 +247,12 @@ most_similar(word: str, topn: int = 10)
 
 Find the topn most similar words to the given word.
 
-Parameters
------------
-word: Input word
-topn: Number of similar words to return
+**Parameters:**
+- `word` (Input word): 
+- `topn` (Number of similar words to return): 
 
 **Returns:**
-
+(List of (word, similarity) tuples)
 
 <h4 id="word2vec-save">Word2Vec.save()</h4>
 
@@ -230,12 +262,11 @@ save(path: str)
 
 Save the model to a file.
 
-Parameters
------------
-path: Path to save the model
+**Parameters:**
+- `path` (Path to save the model): 
 
 **Returns:**
-
+(None)
 
 <h4 id="word2vec-similarity">Word2Vec.similarity()</h4>
 
@@ -245,18 +276,12 @@ similarity(word1: str, word2: str)
 
 Calculate cosine similarity between two words.
 
-Parameters
------------
-word1: First word
-word2: Second word
+**Parameters:**
+- `word1` (First word): 
+- `word2` (Second word): 
 
-Returns:
---------
-Cosine similarity between the two words (float between -1 and 1)
-
-Raises:
--------
-KeyError: If either word is not in the vocabulary
+**Returns:**
+(Cosine similarity between the two words (float between -1 and 1))
 
 <h4 id="word2vec-train">Word2Vec.train()</h4>
 
@@ -266,28 +291,24 @@ train(sentences: Union[List[List[str]], Iterator[List[str]]], epochs: int = 1, a
 
 Train word2vec model on given sentences.
 
-Parameters
------------
-sentences: List or iterator of tokenized sentences (lists of words)
-epochs: Number of training iterations over the corpus
-alpha: Initial learning rate
-min_alpha: Minimum allowed learning rate. When provided, enables learning rate decay
-    from `alpha` down to `min_alpha` over the course of training. By default, this
-    requires counting the total number of training examples upfront to calculate
-    the decay schedule (which can be slow). Use `total_examples` to skip counting.
-total_examples: Total number of training examples per epoch. When provided along
-    with `min_alpha`, skips the automatic counting step and uses this value for
-    learning rate decay scheduling. This is useful when you already know the
-    corpus size or want to control the decay rate independently of corpus size.
-batch_size: Batch size for training; if 0, no batching is used; default is 2000
-callbacks: List of callback functions to call after each epoch
-calculate_loss: Whether to calculate and return the final loss
-verbose: Controls logging frequency. If None, no batch-level logging in simple mode.
-    If an integer, logs progress every `verbose` batches (when batched) or every
-    `verbose * 1000` examples (when not batched).
+**Parameters:**
+- `sentences` (List or iterator of tokenized sentences (lists of words)): 
+- `epochs` (Number of training iterations over the corpus): 
+- `alpha` (Initial learning rate): 
+- `min_alpha` (Minimum allowed learning rate. When provided, enables learning rate decay): from `alpha` down to `min_alpha` over the course of training. By default, this
+  requires counting the total number of training examples upfront to calculate
+  the decay schedule (which can be slow). Use `total_examples` to skip counting.
+- `total_examples` (Total number of training examples per epoch. When provided along): with `min_alpha`, skips the automatic counting step and uses this value for
+  learning rate decay scheduling. This is useful when you already know the
+  corpus size or want to control the decay rate independently of corpus size.
+- `batch_size` (Batch size for training; if 0, no batching is used; default is 2000): 
+- `callbacks` (List of callback functions to call after each epoch): 
+- `calculate_loss` (Whether to calculate and return the final loss): 
+- `verbose` (Controls logging frequency. If None, no batch-level logging in simple mode.): If an integer, logs progress every `verbose` batches (when batched) or every
+  `verbose * 1000` examples (when not batched).
 
 **Returns:**
-
+(Final loss value if calculate_loss is True, None otherwise)
 
 <br>
 
@@ -312,39 +333,38 @@ as target words, but remain unchanged when used as context words.
 The class takes multiple corpora corresponding to different time periods and automatically
 creates temporal references for specified target words.
 
-Usage:
-------
-1. Initialize with corpora from different time periods, labels for the periods,
-   and target words to track for semantic change
-2. The model will process, balance, and combine the corpora
-3. Call train() without arguments to train on the preprocessed data
-4. Access semantic change through most_similar() or by directly analyzing the word vectors
-   of temporal variants (e.g., "bread_1800" vs "bread_1900")
+**Parameters:**
+- `corpora` (List[List[List[str]]]): List of corpora, each corpus is a list of sentences 
+  for a time period.
+- `labels` (List[str]): Labels for each corpus (e.g., time periods like "1800s", "1900s").
+- `targets` (List[str]): List of target words to trace semantic change.
+- `balance` (bool): Whether to balance the corpora to equal sizes (default: True).
+- `**kwargs`: Arguments passed to Word2Vec parent class (vector_size, window, sg, etc.).
 
 **Example:**
 ```python
-```python
-# Corpora from different time periods
-corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
-corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
-
-# Initialize model
-model = TempRefWord2Vec(
-    corpora=[corpus_1800s, corpus_1900s],
-    labels=["1800s", "1900s"],
-    targets=["bread", "food", "money"],
-    vector_size=100,
-    window=5,
-    sg=0  # Use CBOW
-)
-
-# Train (uses preprocessed internal corpus)
-model.train(epochs=5)
-
-# Analyze semantic change
-model.most_similar("bread_1800")  # Words similar to "bread" in the 1800s
-model.most_similar("bread_1900")  # Words similar to "bread" in the 1900s
-```
+>>> from qhchina.analytics.word2vec import TempRefWord2Vec
+>>> 
+>>> # Corpora from different time periods
+>>> corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
+>>> corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
+>>> 
+>>> # Initialize model (Note: only sg=1 is supported)
+>>> model = TempRefWord2Vec(
+...     corpora=[corpus_1800s, corpus_1900s],
+...     labels=["1800s", "1900s"],
+...     targets=["bread", "food", "money"],
+...     vector_size=100,
+...     window=5,
+...     sg=1  # Skip-gram required
+... )
+>>> 
+>>> # Train (uses preprocessed internal corpus)
+>>> model.train(epochs=5)
+>>> 
+>>> # Analyze semantic change
+>>> model.most_similar("bread_1800s")  # Words similar to "bread" in the 1800s
+>>> model.most_similar("bread_1900s")  # Words similar to "bread" in the 1900s
 ```
 
 <h4 id="temprefword2vec-build_vocab">TempRefWord2Vec.build_vocab()</h4>
@@ -357,9 +377,8 @@ Extends the parent build_vocab method to handle temporal word variants.
 
 Explicitly adds base words to the vocabulary even if they don't appear in the corpus.
 
-Parameters
------------
-sentences: List of tokenized sentences
+**Parameters:**
+- `sentences` (List of tokenized sentences): 
 
 <h4 id="temprefword2vec-calculate_semantic_change">TempRefWord2Vec.calculate_semantic_change()</h4>
 
@@ -369,17 +388,12 @@ calculate_semantic_change(target_word: str, labels: Optional[List[str]] = None)
 
 Calculate semantic change by comparing cosine similarities across time periods.
 
-Parameters
------------
-target_word: Target word to analyze (must be one of the targets specified during initialization)
-labels: Time period labels (optional, defaults to labels from model initialization)
+**Parameters:**
+- `target_word` (Target word to analyze (must be one of the targets specified during initialization)): 
+- `labels` (Time period labels (optional, defaults to labels from model initialization)): 
 
 **Returns:**
-
-
-**Example:**
-```python
-```
+(Dict mapping transition names to lists of (word, change) tuples, sorted by change score (descending))
 
 <h4 id="temprefword2vec-generate_cbow_examples">TempRefWord2Vec.generate_cbow_examples()</h4>
 
@@ -396,12 +410,11 @@ For CBOW, temporal referencing means:
 This implementation calls the parent's implementation and then modifies the yielded
 examples by converting any temporal variant context words to their base form.
 
-Parameters
------------
-sentences: List of sentences (lists of words)
+**Parameters:**
+- `sentences` (List of sentences (lists of words)): 
 
 **Returns:**
-
+(Generator yielding (input_indices, output_idx) tuples for positive examples)
 
 <h4 id="temprefword2vec-generate_skipgram_examples">TempRefWord2Vec.generate_skipgram_examples()</h4>
 
@@ -417,12 +430,11 @@ with their temporal variants, while context words (outputs) remain unchanged.
 This implementation calls the parent's implementation and then modifies the yielded
 examples by converting any temporal variant context words to their base form.
 
-Parameters
------------
-sentences: List of sentences (lists of words)
+**Parameters:**
+- `sentences` (List of sentences (lists of words)): 
 
 **Returns:**
-
+(Generator yielding (input_idx, output_idx) tuples for positive examples)
 
 <h4 id="temprefword2vec-get_available_targets">TempRefWord2Vec.get_available_targets()</h4>
 
@@ -433,7 +445,7 @@ get_available_targets()
 Get the list of target words available for semantic change analysis.
 
 **Returns:**
-
+(List of target words that were specified during model initialization)
 
 <h4 id="temprefword2vec-get_period_vocab_counts">TempRefWord2Vec.get_period_vocab_counts()</h4>
 
@@ -443,21 +455,12 @@ get_period_vocab_counts(period: Optional[str] = None)
 
 Get vocabulary counts for a specific period or all periods.
 
-Parameters
------------
-period : str, optional
-    The period label to get vocab counts for. If None, returns all periods.
-    
-Returns:
---------
-Union[Dict[str, Counter], Counter]
-    If period is None: dictionary mapping period labels to Counter objects
-    If period is specified: Counter object for that specific period
-    
-Raises:
--------
-ValueError
-    If the specified period is not found in the model
+**Parameters:**
+- `period` (str): The period label to get vocab counts for. If None, returns all periods.
+
+**Returns:**
+(Union[Dict[str, Counter], Counter]) If period is None: dictionary mapping period labels to Counter objects
+If period is specified: Counter object for that specific period
 
 <h4 id="temprefword2vec-get_time_labels">TempRefWord2Vec.get_time_labels()</h4>
 
@@ -468,7 +471,7 @@ get_time_labels()
 Get the list of time period labels used in the model.
 
 **Returns:**
-
+(List of time period labels that were specified during model initialization)
 
 <h4 id="temprefword2vec-save">TempRefWord2Vec.save()</h4>
 
@@ -486,13 +489,11 @@ This overrides the parent save method to also save:
 
 Note: The combined corpus is NOT saved to reduce file size.
 
-Parameters
------------
-path : str
-    Path to save the model file
+**Parameters:**
+- `path` (str): Path to save the model file
 
 **Returns:**
-
+(None)
 
 <h4 id="temprefword2vec-train">TempRefWord2Vec.train()</h4>
 
@@ -506,14 +507,12 @@ Unlike the parent Word2Vec class, TempRefWord2Vec always uses its internal combi
 that was created and preprocessed during initialization. This ensures the training
 data has the proper temporal references.
 
-Parameters
------------
-sentences: Ignored in TempRefWord2Vec, will use self.combined_corpus instead
-**kwargs: All additional arguments are passed to the parent's train method
-         (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.)
+**Parameters:**
+- `sentences` (Ignored in TempRefWord2Vec, will use self.combined_corpus instead): 
+- `**kwargs` (All additional arguments are passed to the parent's train method): (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.)
 
 **Returns:**
-
+(Final loss value if calculate_loss is True in kwargs, None otherwise)
 
 <br>
 
