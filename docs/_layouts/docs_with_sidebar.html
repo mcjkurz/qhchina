@@ -30,6 +30,14 @@
       <main class="docs-main">
         <div class="docs-container">
           <aside class="docs-sidebar">
+            <div class="docs-search">
+              <input type="text"
+                     id="docs-search-input"
+                     class="docs-search-input"
+                     placeholder="Search functions..."
+                     autocomplete="off">
+              <div id="docs-search-results" class="docs-search-results"></div>
+            </div>
             <nav class="docs-nav">
               <h3>Package Documentation</h3>
               <ul>
@@ -79,6 +87,7 @@
         </div>
       </footer>
     </div>
+    <script src="{{ '/assets/js/search.js' | relative_url }}"></script>
   </body>
 </html>
 
