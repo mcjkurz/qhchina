@@ -542,6 +542,11 @@ aside.docs-sidebar {
 
 /* Responsive docs layout */
 @media (max-width: 768px) {
+  // Offset scroll position for anchor links to account for sticky header
+  .docs-content [id] {
+    scroll-margin-top: 100px;
+  }
+  
   .docs-container {
     width: 90%;
     flex-direction: column !important;
