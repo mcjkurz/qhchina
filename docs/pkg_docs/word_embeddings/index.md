@@ -584,36 +584,21 @@ project_2d(
 )
 ```
 
-Project high-dimensional vectors into 2D and visualize them.
+Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
-Supports PCA, t-SNE, and UMAP for dimensionality reduction. Useful for
-visualizing word embeddings or document vectors.
-
-**Parameters:**
-- `vectors`: Vectors to project. Can be:
-  - List of numpy arrays
-  - Dict mapping labels to vectors
-  - 2D numpy array (n_samples, n_features)
-- `labels` (list): Optional labels for each vector.
-- `method` (str): Projection method - 'pca', 'tsne', or 'umap' (default: 'pca').
-- `title` (str): Plot title.
-- `color`: Single color string or list of colors for each point.
-- `figsize` (tuple): Figure size as (width, height) (default: (8, 8)).
-- `fontsize` (int): Font size for labels (default: 12).
-- `perplexity` (float): t-SNE perplexity parameter (required for 'tsne').
-- `filename` (str): Path to save the figure (optional).
-- `adjust_text_labels` (bool): Use adjustText to prevent label overlap (default: False).
-- `n_neighbors` (int): UMAP n_neighbors parameter (default: 15).
-- `min_dist` (float): UMAP min_dist parameter (default: 0.1).
-
-**Example:**
-```python
->>> from qhchina.analytics.vectors import project_2d
->>> # Visualize word embeddings
->>> words = ['男', '女', '国王', '王后']
->>> vectors = {word: model[word] for word in words}
->>> project_2d(vectors, method='pca', title='Word Embeddings')
-```
+Parameters:
+vectors (list of vectors or dict {label: vector}): Vectors to project.
+labels (list of str, optional): List of labels for the vectors. Defaults to None.
+method (str, optional): Method to use for projection ('pca', 'tsne', or 'umap'). Defaults to 'pca'.
+title (str, optional): Title of the plot. Defaults to None.
+color (list of str or str, optional): List of colors for the vectors or a single color. Defaults to None.
+figsize (tuple, optional): Figure size as (width, height). Defaults to (8, 8).
+fontsize (int, optional): Font size for labels. Defaults to 12.
+perplexity (float, optional): Perplexity parameter for t-SNE. Required if method is 'tsne'.
+filename (str, optional): Path to save the figure. Defaults to None.
+adjust_text_labels (bool, optional): Whether to adjust text labels to avoid overlap. Defaults to False.
+n_neighbors (int, optional): Number of neighbors for UMAP. Defaults to 15.
+min_dist (float, optional): Minimum distance between points for UMAP. Defaults to 0.1.
 
 <br>
 
