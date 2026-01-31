@@ -91,7 +91,44 @@ LDAGibbsSampler(
 )
 ```
 
-Latent Dirichlet Allocation with Gibbs sampling implementation. 
+Latent Dirichlet Allocation with Gibbs sampling implementation.
+
+**Parameters:**
+- `n_topics`: Number of topics.
+- `alpha`: Dirichlet prior for document-topic distributions (can be float or array 
+  of floats, where each float is the alpha for a different topic). If None, 
+  uses the heuristic 50/n_topics from Griffiths and Steyvers (2004).
+- `beta`: Dirichlet prior for topic-word distributions (float). If None, uses the 
+  heuristic 1/n_topics from Griffiths and Steyvers (2004).
+- `iterations`: Number of Gibbs sampling iterations, excluding burnin.
+- `burnin`: Number of initial iterations to run before hyperparameters estimation 
+  (default 0).
+- `random_state`: Random seed for reproducibility.
+- `log_interval`: Calculate perplexity and print results every log_interval iterations.
+- `min_word_count`: Minimum count of word to be included in vocabulary.
+- `max_vocab_size`: Maximum vocabulary size to keep.
+- `min_word_length`: Minimum length of word to be included in vocabulary.
+- `stopwords`: Set of words to exclude from vocabulary.
+- `use_cython`: Whether to use Cython acceleration if available (default: True).
+- `estimate_alpha`: Frequency for estimating alpha (0 = no estimation; default 1 = 
+  after every iteration, 2 = after every 2 iterations, etc.).
+- `min_doc_length`: Minimum document length (tokens) to trigger a warning during 
+  preprocessing (default: 24).
+
+**Example:**
+```python
+>>> from qhchina.analytics.topicmodels import LDAGibbsSampler
+>>> 
+>>> # Prepare corpus as list of tokenized documents
+>>> documents = [['word1', 'word2', ...], ['word3', 'word4', ...], ...]
+>>> 
+>>> # Create and fit model
+>>> lda = LDAGibbsSampler(n_topics=10, iterations=100)
+>>> lda.fit(documents)
+>>> 
+>>> # Get topics
+>>> topics = lda.get_topics(n_words=10)
+```
 
 <h4 id="ldagibbssampler-coherence">LDAGibbsSampler.coherence()</h4>
 
