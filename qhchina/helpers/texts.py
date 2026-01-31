@@ -17,7 +17,7 @@ def detect_encoding(filename, num_bytes=10000):
     """
     Detects the encoding of a file.
     
-    Parameters:
+    Parameters
     filename (str): The path to the file.
     num_bytes (int): Number of bytes to read for detection. Default is 10000.
                      Larger values may be more accurate but slower.
@@ -59,7 +59,7 @@ def load_text(filename, encoding="utf-8"):
     """
     Loads text from a file.
 
-    Parameters:
+    Parameters
     filename (str): The filename to load text from.
     encoding (str): The encoding of the file. Default is "utf-8".
                     Use "auto" to automatically detect the encoding.
@@ -80,7 +80,7 @@ def load_texts(filenames, encoding="utf-8"):
     """
     Loads text from multiple files.
 
-    Parameters:
+    Parameters
     filenames (list): A list of filenames to load text from.
     encoding (str): The encoding of the files. Default is "utf-8".
                     Use "auto" to automatically detect encoding for each file.
@@ -170,7 +170,7 @@ def split_into_chunks(sequence, chunk_size, overlap=0.0):
     """
     Splits text or a list of tokens into chunks with optional overlap between consecutive chunks.
     
-    Parameters:
+    Parameters
     sequence (str or list): The text string or list of tokens to be split.
     chunk_size (int): The size of each chunk (characters for text, items for lists).
     overlap (float): The fraction of overlap between consecutive chunks (0.0 to 1.0).

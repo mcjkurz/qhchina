@@ -1770,7 +1770,7 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
     """
     Compare two corpora to identify statistically significant differences in word usage.
     
-    Parameters:
+    Parameters
       corpusA: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
       corpusB: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
       method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' for the chi-square test.

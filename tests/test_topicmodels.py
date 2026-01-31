@@ -203,7 +203,7 @@ class TestLDAReproducibility:
         assert np.array_equal(lda1.n_wt, lda2.n_wt)
 
 
-class TestLDAParameters:
+class TestLD Parameters
     """Tests for LDA hyperparameters."""
     
     def test_custom_alpha_beta(self, sample_documents):

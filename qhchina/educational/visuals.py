@@ -13,7 +13,7 @@ def show_vectors(vectors, labels=None, draw_arrows=True, draw_axes=True, colors=
     """
     Visualizes vectors in 2D using matplotlib.
 
-    Parameters:
+    Parameters
     vectors (list of tuples): List of vectors to visualize.
     labels (list of str, optional): List of labels for the vectors. Defaults to None.
     draw_arrows (bool, optional): Whether to draw arrows from the origin to the vectors. Defaults to True.

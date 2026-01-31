@@ -35,7 +35,7 @@ def project_2d(
     """
     Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
-    Parameters:
+    Parameters
     vectors (list of vectors or dict {label: vector}): Vectors to project.
     labels (list of str, optional): List of labels for the vectors. Defaults to None.
     method (str, optional): Method to use for projection ('pca', 'tsne', or 'umap'). Defaults to 'pca'.
@@ -124,7 +124,7 @@ def get_bias_direction(
     compute the direction vector for measuring bias by taking the mean of 
     differences between positive and negative anchor pairs.
     
-    Parameters:
+    Parameters
     anchors: A tuple (pos_vector, neg_vector) or list of such tuples
             Each vector in the pairs should be a numpy array
     
@@ -154,7 +154,7 @@ def calculate_bias(
     """
     Calculate bias scores for target words along an axis defined by anchor pairs.
     
-    Parameters:
+    Parameters
     anchors: tuple or list of tuples, e.g. ("man", "woman") or [("king", "queen"), ("man", "woman")]
     targets: list of words to calculate bias for
     word_vectors: keyed vectors (e.g. from word2vec_model.wv)
@@ -353,7 +353,7 @@ def most_similar(
     """
     Find the most similar vectors to a target vector using the specified similarity metric.
     
-    Parameters:
+    Parameters
     target_vector (numpy.ndarray): The reference vector to compare against
     vectors (list or numpy.ndarray): List of vectors to compare with the target
     labels (list, optional): Labels corresponding to the vectors. If provided, returns (label, score) pairs

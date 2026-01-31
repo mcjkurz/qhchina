@@ -141,13 +141,12 @@ build_vocab(sentences: Union[List[List[str]], Iterator[List[str]]])
 
 Build vocabulary from a list or iterator of sentences.
 
-Parameters:
+Parameters
 -----------
 sentences: List or iterator of tokenized sentences (each sentence is a list of words)
 
-Returns:
---------
-None
+**Returns:**
+
 
 <h4 id="word2vec-generate_cbow_examples">Word2Vec.generate_cbow_examples()</h4>
 
@@ -163,13 +162,12 @@ A CBOW example is a tuple (input_indices, output_idx) where:
 
 For each positive example, the caller should generate negative examples using the noise distribution.
 
-Parameters:
+Parameters
 -----------
 sentences: List or iterator of sentences (lists of words)
 
-Returns:
---------
-Generator yielding (input_indices, output_idx) tuples for positive examples
+**Returns:**
+
 
 <h4 id="word2vec-generate_skipgram_examples">Word2Vec.generate_skipgram_examples()</h4>
 
@@ -185,13 +183,12 @@ A Skip-gram example is a tuple (input_idx, output_idx) where:
 
 For each positive example, the caller should generate negative examples using the noise distribution.
 
-Parameters:
+Parameters
 -----------
 sentences: List or iterator of sentences (lists of words)
 
-Returns:
---------
-Generator yielding (input_idx, output_idx) tuples for positive examples
+**Returns:**
+
 
 <h4 id="word2vec-get_vector">Word2Vec.get_vector()</h4>
 
@@ -201,14 +198,13 @@ get_vector(word: str, normalize: bool = False)
 
 Get the vector for a word.
 
-Parameters:
+Parameters
 -----------
 word: Input word
 normalize: If True, return the normalized vector (unit length)
 
-Returns:
---------
-Word vector
+**Returns:**
+
 
 <h4 id="word2vec-most_similar">Word2Vec.most_similar()</h4>
 
@@ -218,14 +214,13 @@ most_similar(word: str, topn: int = 10)
 
 Find the topn most similar words to the given word.
 
-Parameters:
+Parameters
 -----------
 word: Input word
 topn: Number of similar words to return
 
-Returns:
---------
-List of (word, similarity) tuples
+**Returns:**
+
 
 <h4 id="word2vec-save">Word2Vec.save()</h4>
 
@@ -235,13 +230,12 @@ save(path: str)
 
 Save the model to a file.
 
-Parameters:
+Parameters
 -----------
 path: Path to save the model
 
-Returns:
---------
-None
+**Returns:**
+
 
 <h4 id="word2vec-similarity">Word2Vec.similarity()</h4>
 
@@ -251,7 +245,7 @@ similarity(word1: str, word2: str)
 
 Calculate cosine similarity between two words.
 
-Parameters:
+Parameters
 -----------
 word1: First word
 word2: Second word
@@ -272,7 +266,7 @@ train(sentences: Union[List[List[str]], Iterator[List[str]]], epochs: int = 1, a
 
 Train word2vec model on given sentences.
 
-Parameters:
+Parameters
 -----------
 sentences: List or iterator of tokenized sentences (lists of words)
 epochs: Number of training iterations over the corpus
@@ -291,10 +285,9 @@ calculate_loss: Whether to calculate and return the final loss
 verbose: Controls logging frequency. If None, no batch-level logging in simple mode.
     If an integer, logs progress every `verbose` batches (when batched) or every
     `verbose * 1000` examples (when not batched).
-    
-Returns:
---------
-Final loss value if calculate_loss is True, None otherwise
+
+**Returns:**
+
 
 <br>
 
@@ -364,7 +357,7 @@ Extends the parent build_vocab method to handle temporal word variants.
 
 Explicitly adds base words to the vocabulary even if they don't appear in the corpus.
 
-Parameters:
+Parameters
 -----------
 sentences: List of tokenized sentences
 
@@ -376,22 +369,17 @@ calculate_semantic_change(target_word: str, labels: Optional[List[str]] = None)
 
 Calculate semantic change by comparing cosine similarities across time periods.
 
-Parameters:
+Parameters
 -----------
 target_word: Target word to analyze (must be one of the targets specified during initialization)
 labels: Time period labels (optional, defaults to labels from model initialization)
 
-Returns:
---------
-Dict mapping transition names to lists of (word, change) tuples, sorted by change score (descending)
+**Returns:**
 
-Example:
---------
->>> changes = model.calculate_semantic_change("人民")
->>> for transition, word_changes in changes.items():
->>>     print(f"\n{transition}:")
->>>     print("Words moved towards:", word_changes[:5])  # Top 5 increases
->>>     print("Words moved away:", word_changes[-5:])   # Top 5 decreases
+
+**Example:**
+```python
+```
 
 <h4 id="temprefword2vec-generate_cbow_examples">TempRefWord2Vec.generate_cbow_examples()</h4>
 
@@ -408,13 +396,12 @@ For CBOW, temporal referencing means:
 This implementation calls the parent's implementation and then modifies the yielded
 examples by converting any temporal variant context words to their base form.
 
-Parameters:
+Parameters
 -----------
 sentences: List of sentences (lists of words)
 
-Returns:
---------
-Generator yielding (input_indices, output_idx) tuples for positive examples
+**Returns:**
+
 
 <h4 id="temprefword2vec-generate_skipgram_examples">TempRefWord2Vec.generate_skipgram_examples()</h4>
 
@@ -430,13 +417,12 @@ with their temporal variants, while context words (outputs) remain unchanged.
 This implementation calls the parent's implementation and then modifies the yielded
 examples by converting any temporal variant context words to their base form.
 
-Parameters:
+Parameters
 -----------
 sentences: List of sentences (lists of words)
 
-Returns:
---------
-Generator yielding (input_idx, output_idx) tuples for positive examples
+**Returns:**
+
 
 <h4 id="temprefword2vec-get_available_targets">TempRefWord2Vec.get_available_targets()</h4>
 
@@ -457,7 +443,7 @@ get_period_vocab_counts(period: Optional[str] = None)
 
 Get vocabulary counts for a specific period or all periods.
 
-Parameters:
+Parameters
 -----------
 period : str, optional
     The period label to get vocab counts for. If None, returns all periods.
@@ -500,14 +486,13 @@ This overrides the parent save method to also save:
 
 Note: The combined corpus is NOT saved to reduce file size.
 
-Parameters:
+Parameters
 -----------
 path : str
     Path to save the model file
-    
-Returns:
---------
-None
+
+**Returns:**
+
 
 <h4 id="temprefword2vec-train">TempRefWord2Vec.train()</h4>
 
@@ -521,15 +506,14 @@ Unlike the parent Word2Vec class, TempRefWord2Vec always uses its internal combi
 that was created and preprocessed during initialization. This ensures the training
 data has the proper temporal references.
 
-Parameters:
+Parameters
 -----------
 sentences: Ignored in TempRefWord2Vec, will use self.combined_corpus instead
 **kwargs: All additional arguments are passed to the parent's train method
          (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.)
 
-Returns:
---------
-Final loss value if calculate_loss is True in kwargs, None otherwise
+**Returns:**
+
 
 <br>
 
@@ -602,7 +586,7 @@ project_2d(
 
 Projects high-dimensional vectors into 2D using PCA, t-SNE, or UMAP and visualizes them.
 
-Parameters:
+Parameters
 vectors (list of vectors or dict {label: vector}): Vectors to project.
 labels (list of str, optional): List of labels for the vectors. Defaults to None.
 method (str, optional): Method to use for projection ('pca', 'tsne', or 'umap'). Defaults to 'pca'.
@@ -631,12 +615,12 @@ Given either a single tuple (pos_anchor, neg_anchor) or a list of tuples,
 compute the direction vector for measuring bias by taking the mean of 
 differences between positive and negative anchor pairs.
 
-Parameters:
+Parameters
 anchors: A tuple (pos_vector, neg_vector) or list of such tuples
         Each vector in the pairs should be a numpy array
 
-Returns:
-numpy array representing the bias direction vector (unnormalized)
+**Returns:**
+
 
 <br>
 
@@ -652,13 +636,13 @@ calculate_bias(
 
 Calculate bias scores for target words along an axis defined by anchor pairs.
 
-Parameters:
+Parameters
 anchors: tuple or list of tuples, e.g. ("man", "woman") or [("king", "queen"), ("man", "woman")]
 targets: list of words to calculate bias for
 word_vectors: keyed vectors (e.g. from word2vec_model.wv)
 
-Returns:
-numpy array of bias scores (dot products) for each target word
+**Returns:**
+
 
 <br>
 
@@ -753,16 +737,15 @@ most_similar(
 
 Find the most similar vectors to a target vector using the specified similarity metric.
 
-Parameters:
+Parameters
 target_vector (numpy.ndarray): The reference vector to compare against
 vectors (list or numpy.ndarray): List of vectors to compare with the target
 labels (list, optional): Labels corresponding to the vectors. If provided, returns (label, score) pairs
 metric (str or callable, optional): Similarity metric to use. Can be 'cosine' or a callable that takes two vectors
 top_n (int, optional): Number of top results to return. If None, returns all results
 
-Returns:
-If labels provided: List of (label, score) tuples sorted by similarity score in descending order
-If no labels: List of (index, score) tuples sorted by similarity score in descending order
+**Returns:**
+
 
 <br>
 

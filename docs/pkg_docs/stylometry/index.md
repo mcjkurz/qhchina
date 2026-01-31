@@ -462,19 +462,19 @@ compare_corpora(
 
 Compare two corpora to identify statistically significant differences in word usage.
 
-**Parameters:**
-- `corpusA`: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
-- `corpusB`: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
-- `method` (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' for the chi-square test.
-  All tests use two-sided alternatives.
-- `filters` (dict): Dictionary of filters to apply to results:
-  - 'min_count': int or tuple - Minimum count threshold(s) for a word to be included 
-    (can be a single int for both corpora or tuple (min_countA, min_countB)).
-    Default is 0, which includes words that appear in either corpus, even if absent in one.
-  - 'max_p': float - Maximum p-value threshold for statistical significance
-  - 'stopwords': list - Words to exclude from results
-  - 'min_word_length': int - Minimum character length for words
-- `as_dataframe` (bool): Whether to return a pandas DataFrame.
+Parameters
+  corpusA: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
+  corpusB: Either a flat list of tokens or a list of sentences (each sentence being a list of tokens)
+  method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' for the chi-square test.
+                All tests use two-sided alternatives.
+  filters (dict, optional): Dictionary of filters to apply to results:
+      - 'min_count': int or tuple - Minimum count threshold(s) for a word to be included 
+        (can be a single int for both corpora or tuple (min_countA, min_countB)).
+        Default is 0, which includes words that appear in either corpus, even if absent in one.
+      - 'max_p': float - Maximum p-value threshold for statistical significance
+      - 'stopwords': list - Words to exclude from results
+      - 'min_word_length': int - Minimum character length for words
+  as_dataframe (bool): Whether to return a pandas DataFrame.
 
 **Returns:**
 If as_dataframe is True:
