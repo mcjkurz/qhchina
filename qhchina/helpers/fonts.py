@@ -51,30 +51,15 @@ def set_font(font='Noto Sans CJK TC') -> None:
     """
     Set the matplotlib font for Chinese text rendering.
     
-    Configures matplotlib to use a Chinese-compatible font for plots
-    and visualizations. This is required for proper display of Chinese
-    characters in matplotlib figures.
-    
     Args:
-        font (str): Font specification. Can be:
-            - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
-            - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
-            - Path to a font file: '/path/to/font.otf' or '/path/to/font.ttf'
+        font: Font name, alias, or path to font file. Can be:
+              - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
+              - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
+              - Path to font file: '/path/to/font.otf' or '/path/to/font.ttf'
     
     Raises:
         FileNotFoundError: If a font file path is provided but doesn't exist.
         ValueError: If the font cannot be loaded or set.
-    
-    Example:
-        >>> import matplotlib.pyplot as plt
-        >>> from qhchina.helpers import set_font
-        >>> 
-        >>> set_font('sans')  # Use sans-serif font for Chinese
-        >>> plt.title("中文标题")
-        >>> plt.show()
-        >>> 
-        >>> # Or use serif font
-        >>> set_font('serif-sc')
     """
     global _fonts_loaded
     
@@ -130,37 +115,27 @@ def set_font(font='Noto Sans CJK TC') -> None:
 
 def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> list[dict] | None:
     """
-    Load bundled CJK fonts into matplotlib.
+    Load CJK fonts into matplotlib and optionally set a default font.
     
-    Copies the package's CJK fonts to matplotlib's font directory and registers
-    them for use. This function is thread-safe and idempotent.
+    This function is thread-safe and can be called from multiple threads simultaneously.
     
     Args:
-        target_font (str): Font to set as default after loading. Options:
-            - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
-            - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
-            - None: Load fonts but don't set a default
-        verbose (bool): If True, print loading details and return font info.
+        target_font: Font name or alias to set as default. Can be:
+                     - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
+                     - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
+                     - None: Load fonts but don't set a default
+        verbose: If True, print detailed loading information and return font info
     
     Returns:
-        list[dict] | None: When verbose=True, returns list of font info dicts:
-            - 'font_name': Full font name (e.g., 'Noto Sans CJK TC')
-            - 'aliases': List of aliases (e.g., ['sans', 'sans-tc'])
-            - 'path': Absolute path to the font file
-            When verbose=False, returns None.
+        list[dict] | None: Only when verbose=True, returns a list of dictionaries,
+                           each containing:
+                           - 'font_name': Full font name (e.g., 'Noto Sans CJK TC')
+                           - 'aliases': List of aliases for the font (e.g., ['sans', 'sans-tc'])
+                           - 'path': Absolute path to the font file
+                           When verbose=False, returns None.
     
     Raises:
         OSError: If fonts cannot be copied to matplotlib directory.
-    
-    Example:
-        >>> from qhchina.helpers import load_fonts
-        >>> # Load fonts and set sans-serif as default
-        >>> load_fonts('sans')
-        >>> 
-        >>> # Get info about available fonts
-        >>> fonts = load_fonts(target_font=None, verbose=True)
-        >>> for f in fonts:
-        ...     print(f"{f['font_name']}: {f['aliases']}")
     """
     global _fonts_loaded
     
@@ -224,29 +199,19 @@ def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> 
 
 def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
     """
-    Get the file path to a CJK font for external libraries.
-    
-    Returns the path to a font file that can be used with libraries
-    that require explicit font paths (e.g., WordCloud, PIL).
+    Get the file path for a CJK font (for use with WordCloud, etc.).
     
     Args:
-        font (str): Font name or alias. Options:
-            - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
-            - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
+        font: Font name or alias. Can be:
+              - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
+              - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
     
     Returns:
-        str: Absolute path to the font file.
-    
-    Raises:
-        ValueError: If the font name is not recognized.
+        str: Absolute path to the font file
     
     Example:
-        >>> from qhchina.helpers import get_font_path
-        >>> from wordcloud import WordCloud
-        >>> 
-        >>> font_path = get_font_path('sans')
-        >>> wc = WordCloud(font_path=font_path, width=800, height=400)
-        >>> wc.generate("这是一个词云示例")
+        >>> font_path = qhchina.get_font_path()
+        >>> wc = WordCloud(font_path=font_path, ...)
     """
     # Resolve alias to font name
     resolved_font = FONT_ALIASES.get(font, font)
@@ -260,19 +225,13 @@ def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
 
 def current_font() -> Optional[str]:
     """
-    Get the name of the currently configured matplotlib font.
+    Get the currently configured font name.
     
     Returns:
-        str | None: The current font name, or None if no font is configured.
+        The current font name, or None if no font is configured.
     
     Raises:
         RuntimeError: If there's an error accessing font configuration.
-    
-    Example:
-        >>> from qhchina.helpers import set_font, current_font
-        >>> set_font('serif-tc')
-        >>> print(current_font())
-        'Noto Serif TC'
     """
     try:
         # Check serif first if family is serif
@@ -288,17 +247,8 @@ def current_font() -> Optional[str]:
 
 def list_available_fonts() -> dict:
     """
-    List all CJK fonts bundled with the package.
-    
-    Returns:
-        dict: Mapping of font file names to their internal font names.
-            Example: {'NotoSansTCSC-Regular.otf': 'Noto Sans CJK TC'}
-    
-    Example:
-        >>> from qhchina.helpers import list_available_fonts
-        >>> fonts = list_available_fonts()
-        >>> for filename, fontname in fonts.items():
-        ...     print(f"{filename} -> {fontname}")
+    List all available CJK fonts bundled with the package.
+    Returns a dictionary mapping font file names to their internal font names.
     """
     font_info = {}
     cjk_fonts = [file for file in Path(f'{CJK_FONT_PATH}').glob('*.otf') if not file.name.startswith(".")]
@@ -316,16 +266,7 @@ def list_available_fonts() -> dict:
 
 def list_font_aliases() -> dict:
     """
-    List all available font aliases.
-    
-    Returns:
-        dict: Mapping of short aliases to full font names.
-            Example: {'sans': 'Noto Sans CJK TC', 'serif-tc': 'Noto Serif TC'}
-    
-    Example:
-        >>> from qhchina.helpers import list_font_aliases
-        >>> aliases = list_font_aliases()
-        >>> print(aliases)
-        {'sans': 'Noto Sans CJK TC', 'sans-tc': 'Noto Sans CJK TC', ...}
+    List all available font aliases for convenient access.
+    Returns a dictionary mapping aliases to their full font names.
     """
     return FONT_ALIASES.copy()

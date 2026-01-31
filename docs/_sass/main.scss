@@ -501,6 +501,25 @@ aside.docs-sidebar {
   max-width: 100% !important;
   order: 2 !important;
   width: auto !important;
+  
+  // API function/class documentation styling
+  h3[id] {
+    margin-top: calc(2.5 * var(--spacing-unit));
+    padding-top: calc(1.5 * var(--spacing-unit));
+    border-top: 1px solid var(--border-color);
+    
+    &:first-of-type {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+  }
+  
+  h4[id] {
+    margin-top: calc(2 * var(--spacing-unit));
+    padding-top: calc(1 * var(--spacing-unit));
+    border-top: 1px dashed var(--border-color);
+  }
 }
 
 /* Responsive docs layout */
@@ -584,7 +603,7 @@ aside.docs-sidebar {
 }
 
 .docs-search-input {
-  width: 90%;
+  width: 80%;
   padding: calc(0.5 * var(--spacing-unit)) calc(0.75 * var(--spacing-unit));
   border: 1px solid var(--border-color);
   border-radius: 4px;

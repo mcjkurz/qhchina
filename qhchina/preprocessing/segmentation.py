@@ -193,45 +193,7 @@ class SegmentationWrapper:
 
 
 class SpacySegmenter(SegmentationWrapper):
-    """
-    Segmentation wrapper for spaCy Chinese models.
-    
-    Uses spaCy NLP library with Chinese language models for tokenization.
-    Supports custom user dictionaries and POS-based filtering.
-    
-    Args:
-        model_name (str): spaCy model name. Options include:
-            - 'zh_core_web_sm': Small model (~50MB), fastest but less accurate
-            - 'zh_core_web_md': Medium model (~90MB), balanced
-            - 'zh_core_web_lg': Large model (~560MB), most accurate (default)
-        disable (list): Pipeline components to disable for better performance.
-            Default: ["ner", "lemmatizer"]. Set to [] to enable all components.
-        batch_size (int): Batch size for processing multiple texts (default: 200)
-        user_dict (list or str): Custom user dictionary for domain-specific terms.
-            Can be a list of words or path to a dictionary file (one word per line).
-        strategy (str): Text processing strategy - 'whole', 'line', 'sentence', or 'chunk'
-        chunk_size (int): Size of chunks when using 'chunk' strategy (default: 512)
-        filters (dict): Filters to apply during segmentation:
-            - min_word_length: Minimum token length (default: 1)
-            - stopwords: Set of stopwords to exclude
-            - excluded_pos: Set of POS tags to exclude (e.g., {'PUNCT', 'SPACE'})
-        sentence_end_pattern (str): Regex pattern for sentence endings
-    
-    Installation:
-        pip install spacy
-        python -m spacy download zh_core_web_sm  # or zh_core_web_md, zh_core_web_lg
-    
-    Example:
-        >>> from qhchina.preprocessing import create_segmenter
-        >>> segmenter = create_segmenter(
-        ...     backend="spacy",
-        ...     model_name="zh_core_web_sm",
-        ...     user_dict=["深度学习", "自然语言处理"]
-        ... )
-        >>> tokens = segmenter.segment("深度学习正在改变世界")
-        >>> print(tokens)
-        ['深度学习', '正在', '改变', '世界']
-    """
+    """Segmentation wrapper for spaCy models."""
     
     def __init__(self, model_name: str = "zh_core_web_lg", 
                  disable: Optional[List[str]] = None,
@@ -241,6 +203,21 @@ class SpacySegmenter(SegmentationWrapper):
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
+        """Initialize the spaCy segmenter.
+        
+        Args:
+            model_name: Name of the spaCy model to use
+            disable: List of pipeline components to disable for better performance; default setting is ["ner", "lemmatizer"]
+            batch_size: Batch size for processing multiple texts
+            user_dict: Custom user dictionary - either a list of words or path to a dictionary file
+            strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+            chunk_size: Size of chunks when using 'chunk' strategy
+            filters: Dictionary of filters to apply during segmentation
+                - min_word_length: Minimum length of tokens to include (default 1)
+                - excluded_pos: Set of POS tags to exclude from token outputs
+                - stopwords: Set of stopwords to exclude
+            sentence_end_pattern: Regular expression pattern for sentence endings
+        """
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters, 
                          sentence_end_pattern=sentence_end_pattern)
         self.model_name = model_name
@@ -338,43 +315,7 @@ class SpacySegmenter(SegmentationWrapper):
 
 
 class JiebaSegmenter(SegmentationWrapper):
-    """
-    Segmentation wrapper for Jieba Chinese text segmentation.
-    
-    Uses the Jieba library for fast, dictionary-based Chinese word segmentation.
-    Jieba is lightweight and fast, making it suitable for large-scale processing.
-    
-    Args:
-        user_dict_path (str): Path to a custom user dictionary file.
-            The file should contain one word per line, optionally with frequency and POS tag:
-            "深度学习 5 n" or just "深度学习"
-        pos_tagging (bool): Enable POS tagging during segmentation (default: False).
-            When enabled, allows filtering by POS tags using the 'excluded_pos' filter.
-        strategy (str): Text processing strategy - 'whole', 'line', 'sentence', or 'chunk'
-        chunk_size (int): Size of chunks when using 'chunk' strategy (default: 512)
-        filters (dict): Filters to apply during segmentation:
-            - min_word_length: Minimum token length (default: 1)
-            - stopwords: Set of stopwords to exclude
-            - excluded_pos: Set of POS tags to exclude (requires pos_tagging=True)
-        sentence_end_pattern (str): Regex pattern for sentence endings
-    
-    Installation:
-        pip install jieba
-    
-    Example:
-        >>> from qhchina.preprocessing import create_segmenter
-        >>> segmenter = create_segmenter(backend="jieba", pos_tagging=True)
-        >>> tokens = segmenter.segment("我爱北京天安门")
-        >>> print(tokens)
-        ['我', '爱', '北京', '天安门']
-        
-        >>> # With POS filtering
-        >>> segmenter = create_segmenter(
-        ...     backend="jieba",
-        ...     pos_tagging=True,
-        ...     filters={"excluded_pos": {"x", "w"}}  # Exclude punctuation
-        ... )
-    """
+    """Segmentation wrapper for Jieba Chinese text segmentation."""
     
     def __init__(self, 
                  user_dict_path: str = None,
@@ -383,6 +324,19 @@ class JiebaSegmenter(SegmentationWrapper):
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
+        """Initialize the Jieba segmenter.
+        
+        Args:
+            user_dict_path: Path to a user dictionary file for Jieba
+            pos_tagging: Whether to include POS tagging in segmentation
+            strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+            chunk_size: Size of chunks when using 'chunk' strategy
+            filters: Dictionary of filters to apply during segmentation
+                - min_word_length: Minimum length of tokens to include (default 1)
+                - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
+                - stopwords: Set of stopwords to exclude
+            sentence_end_pattern: Regular expression pattern for sentence endings
+        """
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
                          sentence_end_pattern=sentence_end_pattern)
         self.pos_tagging = pos_tagging
@@ -453,47 +407,7 @@ class JiebaSegmenter(SegmentationWrapper):
 
 
 class BertSegmenter(SegmentationWrapper):
-    """
-    Segmentation wrapper for BERT-based Chinese word segmentation.
-    
-    Uses BERT or other transformer models fine-tuned for Chinese word segmentation
-    as a sequence labeling task. Supports various tagging schemes (BE, BME, BMES).
-    
-    Args:
-        model_name (str): HuggingFace model name or local path to a fine-tuned model.
-            Must be a model trained for token classification with the specified tagging scheme.
-        model: Pre-initialized model instance (alternative to model_name)
-        tokenizer: Pre-initialized tokenizer instance (alternative to model_name)
-        tagging_scheme (str or list): Tagging scheme for word boundary prediction:
-            - 'be': 2-tag scheme (Beginning, End)
-            - 'bme': 3-tag scheme (Beginning, Middle, End)
-            - 'bmes': 4-tag scheme (Beginning, Middle, End, Single)
-            - Or provide a custom list like ["B", "I", "O"]
-        batch_size (int): Batch size for processing (default: 32)
-        device (str): Device to use - 'cpu', 'cuda', or 'cuda:0' (auto-detected if None)
-        remove_special_tokens (bool): Remove [CLS] and [SEP] from output (default: True)
-        max_sequence_length (int): Maximum sequence length for BERT (default: 512)
-        strategy (str): Text processing strategy - 'whole', 'line', 'sentence', or 'chunk'
-        chunk_size (int): Size of chunks when using 'chunk' strategy (default: 512)
-        filters (dict): Filters to apply during segmentation:
-            - min_word_length: Minimum token length (default: 1)
-            - stopwords: Set of stopwords to exclude
-        sentence_end_pattern (str): Regex pattern for sentence endings
-    
-    Installation:
-        pip install transformers torch
-    
-    Example:
-        >>> from qhchina.preprocessing import create_segmenter
-        >>> # Using a pre-trained Chinese word segmentation model
-        >>> segmenter = create_segmenter(
-        ...     backend="bert",
-        ...     model_name="bert-base-chinese-cws",
-        ...     tagging_scheme="bmes",
-        ...     device="cuda"
-        ... )
-        >>> tokens = segmenter.segment("自然语言处理是人工智能的重要领域")
-    """
+    """Segmentation wrapper for BERT-based Chinese word segmentation."""
     
     # Predefined tagging schemes
     TAGGING_SCHEMES = {
@@ -797,48 +711,7 @@ class BertSegmenter(SegmentationWrapper):
 
 
 class LLMSegmenter(SegmentationWrapper):
-    """
-    Segmentation wrapper using Large Language Model APIs.
-    
-    Uses LLM APIs (OpenAI, Azure OpenAI, or compatible endpoints) for Chinese word
-    segmentation via prompting. Useful when high-quality segmentation is needed
-    and API costs are acceptable.
-    
-    Args:
-        api_key (str): API key for the LLM service (required)
-        model (str): Model name to use, e.g., 'gpt-3.5-turbo', 'gpt-4' (required)
-        endpoint (str): API endpoint URL (required). Examples:
-            - OpenAI: "https://api.openai.com/v1"
-            - Azure: "https://your-resource.openai.azure.com/openai/deployments/your-deployment"
-        prompt (str): Custom prompt template with {text} placeholder.
-            If None, uses a default Chinese segmentation prompt.
-        system_message (str): Optional system message for the API call
-        temperature (float): Sampling temperature (default: 1). Lower values = more deterministic.
-        max_tokens (int): Maximum tokens in the response (default: 2048)
-        retry_patience (int): Number of retry attempts on API failure (default: 1)
-        timeout (float): Timeout in seconds for API calls (default: 60.0)
-        strategy (str): Text processing strategy - 'whole', 'line', 'sentence', or 'chunk'
-        chunk_size (int): Size of chunks when using 'chunk' strategy (default: 512)
-        filters (dict): Filters to apply during segmentation:
-            - min_word_length: Minimum token length (default: 1)
-            - stopwords: Set of stopwords to exclude
-        sentence_end_pattern (str): Regex pattern for sentence endings
-    
-    Installation:
-        pip install openai
-    
-    Example:
-        >>> from qhchina.preprocessing import create_segmenter
-        >>> import os
-        >>> segmenter = create_segmenter(
-        ...     backend="llm",
-        ...     api_key=os.environ["OPENAI_API_KEY"],
-        ...     model="gpt-3.5-turbo",
-        ...     endpoint="https://api.openai.com/v1",
-        ...     temperature=0.1  # Lower for more consistent output
-        ... )
-        >>> tokens = segmenter.segment("量子计算将改变世界")
-    """
+    """Segmentation wrapper using Language Model APIs like OpenAI."""
     
     DEFAULT_PROMPT = """
     请将以下中文文本分词。请用JSON格式回答。
@@ -1043,80 +916,27 @@ class LLMSegmenter(SegmentationWrapper):
 # Factory function to create appropriate segmenter based on the backend
 def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size: int = 512, 
                   sentence_end_pattern: str = r"([。！？\.!?……]+)", **kwargs) -> SegmentationWrapper:
-    """
-    Factory function to create a segmenter based on the specified backend.
-    
-    This is the recommended way to create segmenters, as it provides a unified
-    interface for all supported backends.
+    """Create a segmenter based on the specified backend.
     
     Args:
-        backend (str): The segmentation backend to use:
-            - 'spacy': spaCy with Chinese models (recommended for accuracy)
-            - 'jieba': Jieba (fast, dictionary-based)
-            - 'bert': BERT-based neural segmentation
-            - 'llm': Large Language Model API-based segmentation
-        strategy (str): How to process the input text:
-            - 'whole': Process entire text at once, return flat list of tokens
-            - 'line': Split by newlines, return list of token lists
-            - 'sentence': Split by sentence boundaries, return list of token lists
-            - 'chunk': Split into fixed-size chunks, return list of token lists
-        chunk_size (int): Size of chunks when using 'chunk' strategy (default: 512)
-        sentence_end_pattern (str): Regex for sentence boundaries (default: Chinese/English punctuation)
-        **kwargs: Backend-specific arguments:
-        
-            Common filters (all backends):
-                - filters (dict): Filtering options
-                    - min_word_length: Minimum token length (default: 1)
-                    - stopwords: Set/list of stopwords to exclude
-                    - excluded_pos: Set of POS tags to exclude
-            
-            SpaCy backend:
-                - model_name: 'zh_core_web_sm', 'zh_core_web_md', or 'zh_core_web_lg'
-                - disable: Pipeline components to disable (default: ["ner", "lemmatizer"])
-                - batch_size: Processing batch size (default: 200)
-                - user_dict: Custom dictionary (list of words or file path)
-            
-            Jieba backend:
-                - user_dict_path: Path to custom dictionary file
-                - pos_tagging: Enable POS tagging (default: False)
-            
-            BERT backend:
-                - model_name: HuggingFace model name or path
-                - tagging_scheme: 'be', 'bme', 'bmes', or custom list
-                - batch_size: Processing batch size (default: 32)
-                - device: 'cpu' or 'cuda' (auto-detected if None)
-            
-            LLM backend:
-                - api_key: API key (required)
-                - model: Model name like 'gpt-3.5-turbo' (required)
-                - endpoint: API endpoint URL (required)
-                - temperature: Sampling temperature (default: 1)
-                - retry_patience: Retry attempts (default: 1)
-                - timeout: API timeout in seconds (default: 60.0)
+        backend: The segmentation backend to use ('spacy', 'jieba', 'bert', 'llm', etc.)
+        strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+        chunk_size: Size of chunks when using 'chunk' strategy
+        sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
+        **kwargs: Additional arguments to pass to the segmenter constructor
+            - filters: Dictionary of filters to apply during segmentation
+                - min_word_length: Minimum length of tokens to include (default 1)
+                - stopwords: Set of stopwords to exclude
+                - excluded_pos: Set of POS tags to exclude (for backends that support POS tagging)
+            - retry_patience: (LLM backend only) Number of retry attempts for API calls (default 1)
+            - timeout: (LLM backend only) Timeout in seconds for API calls (default 60.0)
+            - Other backend-specific arguments
         
     Returns:
-        SegmentationWrapper: An instance of SpacySegmenter, JiebaSegmenter,
-            BertSegmenter, or LLMSegmenter based on the backend.
+        An instance of a SegmentationWrapper subclass
         
     Raises:
         ValueError: If the specified backend is not supported
-    
-    Example:
-        >>> from qhchina.preprocessing import create_segmenter
-        >>> from qhchina.helpers import load_stopwords
-        >>> 
-        >>> # Basic usage with spaCy
-        >>> segmenter = create_segmenter(backend="spacy")
-        >>> tokens = segmenter.segment("深度学习正在改变世界")
-        >>> 
-        >>> # With sentence splitting and stopword filtering
-        >>> stopwords = load_stopwords("zh_sim")
-        >>> segmenter = create_segmenter(
-        ...     backend="jieba",
-        ...     strategy="sentence",
-        ...     filters={"stopwords": stopwords, "min_word_length": 2}
-        ... )
-        >>> sentences = segmenter.segment("第一句话。第二句话。")
     """
     # Add strategy and chunk_size to kwargs
     kwargs['strategy'] = strategy
