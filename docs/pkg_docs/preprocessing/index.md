@@ -5,12 +5,24 @@ permalink: /pkg_docs/preprocessing/
 functions:
   - name: SegmentationWrapper
     anchor: segmentationwrapper
+  - name: SegmentationWrapper.close()
+    anchor: segmentationwrapper-close
+  - name: SegmentationWrapper.reset_user_dict()
+    anchor: segmentationwrapper-reset_user_dict
   - name: SegmentationWrapper.segment()
     anchor: segmentationwrapper-segment
   - name: SpacySegmenter
     anchor: spacysegmenter
+  - name: SpacySegmenter.reset_user_dict()
+    anchor: spacysegmenter-reset_user_dict
+  - name: PKUSegmenter
+    anchor: pkusegmenter
+  - name: PKUSegmenter.reset_user_dict()
+    anchor: pkusegmenter-reset_user_dict
   - name: JiebaSegmenter
     anchor: jiebasegmenter
+  - name: JiebaSegmenter.reset_user_dict()
+    anchor: jiebasegmenter-reset_user_dict
   - name: BertSegmenter
     anchor: bertsegmenter
   - name: LLMSegmenter
@@ -46,6 +58,7 @@ SegmentationWrapper(
     strategy: str = 'whole',
     chunk_size: int = 512,
     filters: Dict[str, Any] = None,
+    user_dict: Union[str, List[Union[str, Tuple]], NoneType] = None,
     sentence_end_pattern: str = '([。！？\\.!?……]+)'
 )
 ```
@@ -60,8 +73,31 @@ Base segmentation wrapper class that can be extended for different segmentation 
   - stopwords: List or set of stopwords to exclude (converted to set internally)
   - min_word_length: Minimum length of tokens to include (default 1)
   - excluded_pos: List or set of POS tags to exclude (converted to set internally)
+- `user_dict`: Custom user dictionary for segmentation. Can be:
+  - str: Path to a dictionary file
+  - List[str]: List of words
+  - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
 - `sentence_end_pattern`: Regular expression pattern for sentence endings (default: 
   Chinese and English punctuation).
+
+<h4 id="segmentationwrapper-close">SegmentationWrapper.close()</h4>
+
+```python
+close()
+```
+
+Clean up resources. Call this when done with the segmenter.
+
+<h4 id="segmentationwrapper-reset_user_dict">SegmentationWrapper.reset_user_dict()</h4>
+
+```python
+reset_user_dict()
+```
+
+Reset the user dictionary to default state.
+
+This clears any custom words that were added via user_dict.
+Subclasses should override this method to implement backend-specific reset logic.
 
 <h4 id="segmentationwrapper-segment">SegmentationWrapper.segment()</h4>
 
@@ -85,10 +121,10 @@ contains tokens for a line, sentence, or chunk respectively
 
 ```python
 SpacySegmenter(
-    model_name: str = 'zh_core_web_lg',
+    model_name: str = 'zh_core_web_sm',
     disable: Optional[List[str]] = None,
     batch_size: int = 200,
-    user_dict: Union[List[str], str] = None,
+    user_dict: Union[str, List[Union[str, Tuple]], NoneType] = None,
     strategy: str = 'whole',
     chunk_size: int = 512,
     filters: Dict[str, Any] = None,
@@ -98,12 +134,15 @@ SpacySegmenter(
 
 Segmentation wrapper for spaCy models.
 
+Note: spaCy Chinese models use spacy-pkuseg, a fork of pkuseg trained on the OntoNotes
+corpus and co-trained with downstream statistical components (POS tagging, NER, parsing).
+
 **Parameters:**
 - `model_name`: Name of the spaCy model to use.
 - `disable`: List of pipeline components to disable for better performance; 
   For common applications, use ["ner", "lemmatizer"]. Default is None.
 - `batch_size`: Batch size for processing multiple texts.
-- `user_dict`: Custom user dictionary - either a list of words or path to a 
+- `user_dict`: Custom user dictionary - either a list of words/tuples or path to a 
   dictionary file.
 - `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
 - `chunk_size`: Size of chunks when using 'chunk' strategy.
@@ -113,13 +152,83 @@ Segmentation wrapper for spaCy models.
   - stopwords: Set of stopwords to exclude
 - `sentence_end_pattern`: Regular expression pattern for sentence endings.
 
+<h4 id="spacysegmenter-reset_user_dict">SpacySegmenter.reset_user_dict()</h4>
+
+```python
+reset_user_dict()
+```
+
+Reset the spaCy tokenizer's user dictionary.
+
+This clears any custom words that were added via pkuseg_update_user_dict.
+Note: This resets to an empty user dictionary, not the original state if one was loaded.
+
+<br>
+
+<h3 id="pkusegmenter">PKUSegmenter</h3>
+
+```python
+PKUSegmenter(
+    model_name: str = 'default',
+    user_dict: Union[str, List[Union[str, Tuple]], NoneType] = None,
+    pos_tagging: bool = False,
+    strategy: str = 'whole',
+    chunk_size: int = 512,
+    filters: Dict[str, Any] = None,
+    sentence_end_pattern: str = '([。！？\\.!?……]+)'
+)
+```
+
+Segmentation wrapper for PKUSeg Chinese text segmentation.
+
+PKUSeg is a toolkit for multi-domain Chinese word segmentation developed by
+Peking University. It uses the original pkuseg package with its own pre-trained
+models (different from spacy-pkuseg, which is trained on OntoNotes).
+
+Note: PKUSeg does not support dynamic user dictionary updates. The user dictionary
+is loaded at initialization time. To change the dictionary, call reset_user_dict()
+which will reinitialize the segmenter.
+
+**Parameters:**
+- `model_name`: Name of the model to use. Options:
+  - 'default': General domain model (default)
+  - 'news': News domain
+  - 'web': Web domain  
+  - 'medicine': Medical domain
+  - 'tourism': Tourism domain
+  - Or a path to a custom model directory
+- `user_dict`: Custom user dictionary. Can be:
+  - str: Path to a dictionary file (one word per line)
+  - List[str]: List of words
+  - List[Tuple]: List of tuples (only first element/word is used)
+- `pos_tagging`: Whether to include POS tagging in segmentation.
+- `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+- `chunk_size`: Size of chunks when using 'chunk' strategy.
+- `filters`: Dictionary of filters to apply during segmentation:
+  - min_word_length: Minimum length of tokens to include (default 1)
+  - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
+  - stopwords: Set of stopwords to exclude
+- `sentence_end_pattern`: Regular expression pattern for sentence endings.
+
+<h4 id="pkusegmenter-reset_user_dict">PKUSegmenter.reset_user_dict()</h4>
+
+```python
+reset_user_dict()
+```
+
+Reset the user dictionary by reinitializing PKUSeg without a user dict.
+
+Note: PKUSeg doesn't support dynamic dictionary updates, so we reinitialize
+the entire segmenter. This is different from Jieba where we can reset the
+global state.
+
 <br>
 
 <h3 id="jiebasegmenter">JiebaSegmenter</h3>
 
 ```python
 JiebaSegmenter(
-    user_dict_path: str = None,
+    user_dict: Union[str, List[Union[str, Tuple]], NoneType] = None,
     pos_tagging: bool = False,
     strategy: str = 'whole',
     chunk_size: int = 512,
@@ -131,7 +240,10 @@ JiebaSegmenter(
 Segmentation wrapper for Jieba Chinese text segmentation.
 
 **Parameters:**
-- `user_dict_path`: Path to a user dictionary file for Jieba.
+- `user_dict`: Custom user dictionary for Jieba. Can be:
+  - str: Path to a dictionary file
+  - List[str]: List of words
+  - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
 - `pos_tagging`: Whether to include POS tagging in segmentation.
 - `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
 - `chunk_size`: Size of chunks when using 'chunk' strategy.
@@ -140,6 +252,17 @@ Segmentation wrapper for Jieba Chinese text segmentation.
   - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
   - stopwords: Set of stopwords to exclude
 - `sentence_end_pattern`: Regular expression pattern for sentence endings.
+
+<h4 id="jiebasegmenter-reset_user_dict">JiebaSegmenter.reset_user_dict()</h4>
+
+```python
+reset_user_dict()
+```
+
+Reset Jieba's dictionary to default state.
+
+This reinitializes Jieba, clearing any custom words that were added.
+Note: Jieba uses a global state, so this affects all JiebaSegmenter instances.
 
 <br>
 
@@ -155,6 +278,7 @@ BertSegmenter(
     device: Optional[str] = None,
     remove_special_tokens: bool = True,
     max_sequence_length: int = 512,
+    user_dict: Union[str, List[Union[str, Tuple]], NoneType] = None,
     strategy: str = 'whole',
     chunk_size: int = 512,
     filters: Dict[str, Any] = None,
@@ -178,6 +302,8 @@ Segmentation wrapper for BERT-based Chinese word segmentation.
   Default is True, which works for BERT-based models.
 - `max_sequence_length`: Maximum sequence length for BERT models (default 512). If 
   the text is longer than this, it will be split into chunks.
+- `user_dict`: Custom user dictionary (not supported for BERT segmenter, will be ignored
+  with a warning).
 - `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
 - `chunk_size`: Size of chunks when using 'chunk' strategy.
 - `filters`: Dictionary of filters to apply during segmentation:
@@ -201,6 +327,7 @@ LLMSegmenter(
     max_tokens: int = 2048,
     retry_patience: int = 1,
     timeout: float = 60.0,
+    user_dict: Union[str, List[Union[str, Tuple]], NoneType] = None,
     strategy: str = 'whole',
     chunk_size: int = 512,
     filters: Dict[str, Any] = None,
@@ -221,6 +348,8 @@ Segmentation wrapper using Language Model APIs like OpenAI.
 - `retry_patience`: Number of retries for API calls (default 1, meaning 1 retry = 
   2 total attempts).
 - `timeout`: Timeout in seconds for API calls (default 60.0). Set to None for no timeout.
+- `user_dict`: Custom user dictionary (not supported for LLM segmenter, will be ignored
+  with a warning).
 - `strategy`: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
 - `chunk_size`: Size of chunks when using 'chunk' strategy.
 - `filters`: Dictionary of filters to apply during segmentation:
@@ -246,11 +375,16 @@ create_segmenter(
 Create a segmenter based on the specified backend.
 
 **Parameters:**
-- `backend`: The segmentation backend to use ('spacy', 'jieba', 'bert', 'llm', etc.)
+- `backend`: The segmentation backend to use ('spacy', 'pkuseg', 'jieba', 'bert', 'llm')
 - `strategy`: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
 - `chunk_size`: Size of chunks when using 'chunk' strategy
 - `sentence_end_pattern`: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
 - `**kwargs`: Additional arguments to pass to the segmenter constructor
+  - user_dict: Custom user dictionary. Can be:
+      - str: Path to a dictionary file
+      - List[str]: List of words
+      - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
+      Note: Not supported for 'bert' and 'llm' backends (will log a warning)
   - filters: Dictionary of filters to apply during segmentation
       - min_word_length: Minimum length of tokens to include (default 1)
       - stopwords: Set of stopwords to exclude

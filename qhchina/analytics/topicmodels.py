@@ -46,8 +46,6 @@ class LDAGibbsSampler:
         use_cython: Whether to use Cython acceleration if available (default: True).
         estimate_alpha: Frequency for estimating alpha (0 = no estimation; default 1 = 
             after every iteration, 2 = after every 2 iterations, etc.).
-        min_doc_length: Minimum document length (tokens) to trigger a warning during 
-            preprocessing (default: 24).
     
     Example:
         from qhchina.analytics.topicmodels import LDAGibbsSampler
@@ -77,8 +75,7 @@ class LDAGibbsSampler:
         min_word_length: int = 1,
         stopwords: Optional[set] = None,
         use_cython: bool = True,
-        estimate_alpha: int = 1,
-        min_doc_length: int = 24
+        estimate_alpha: int = 1
     ):
         # Validate parameters
         if not isinstance(n_topics, int) or n_topics <= 0:
@@ -106,8 +103,6 @@ class LDAGibbsSampler:
             raise ValueError(f"max_vocab_size must be a positive integer or None, got {max_vocab_size}")
         if not isinstance(estimate_alpha, int) or estimate_alpha < 0:
             raise ValueError(f"estimate_alpha must be a non-negative integer, got {estimate_alpha}")
-        if not isinstance(min_doc_length, int) or min_doc_length < 1:
-            raise ValueError(f"min_doc_length must be a positive integer, got {min_doc_length}")
         
         self.n_topics = n_topics
         # Use Griffiths and Steyvers (2004) heuristic if alpha is None
@@ -171,8 +166,8 @@ class LDAGibbsSampler:
         self.theta = None  # Document-topic distributions
         self.phi = None    # Topic-word distributions
         
-        # Minimum document length threshold for warnings
-        self.min_doc_length = min_doc_length
+        # Internal minimum document length threshold for warnings
+        self._min_doc_length = 24
     
     def _attempt_cython_import(self) -> bool:
         """
@@ -229,18 +224,36 @@ class LDAGibbsSampler:
         
         docs_as_ids = []
         short_doc_count = 0
+        empty_doc_indices = []
+        
         for i, doc in enumerate(documents):
             doc_ids = [word_to_id[word] for word in doc if word in word_to_id]
-            if doc_ids:
+            if not doc_ids:
+                empty_doc_indices.append(i)
+            else:
                 docs_as_ids.append(doc_ids)
                 # Warn about short documents after filtering
-                if len(doc_ids) < self.min_doc_length:
+                if len(doc_ids) < self._min_doc_length:
                     short_doc_count += 1
+        
+        # Raise error if any documents became empty after filtering
+        if empty_doc_indices:
+            indices_preview = empty_doc_indices[:10]
+            indices_str = ", ".join(str(i) for i in indices_preview)
+            if len(empty_doc_indices) > 10:
+                indices_str += f", ... ({len(empty_doc_indices) - 10} more)"
+            raise ValueError(
+                f"{len(empty_doc_indices)} document(s) have no tokens after vocabulary filtering "
+                f"(indices: {indices_str}). This can happen when documents contain only words that are "
+                f"filtered out by min_word_count={self.min_word_count}, min_word_length={self.min_word_length}, "
+                f"stopwords, or max_vocab_size={self.max_vocab_size}. Please adjust these parameters or "
+                f"pre-filter your corpus to remove problematic documents."
+            )
         
         # Issue a single warning for all short documents
         if short_doc_count > 0:
             warnings.warn(
-                f"{short_doc_count} document(s) have fewer than {self.min_doc_length} tokens after filtering. "
+                f"{short_doc_count} document(s) have fewer than {self._min_doc_length} tokens after filtering. "
                 f"This may affect topic model quality, but training will continue.",
                 UserWarning
             )
@@ -778,8 +791,7 @@ class LDAGibbsSampler:
             'estimate_alpha': self.estimate_alpha,
             'burnin': self.burnin,
             'random_state': self.random_state,
-            'iterations': self.iterations,
-            'min_doc_length': self.min_doc_length
+            'iterations': self.iterations
         }
         
         np.save(filepath, model_data)
@@ -815,8 +827,7 @@ class LDAGibbsSampler:
             use_cython=use_cython,
             estimate_alpha=estimate_alpha,
             burnin=burnin,
-            random_state=random_state,
-            min_doc_length=model_data.get('min_doc_length', 24)
+            random_state=random_state
         )
         
         model.vocabulary = model_data['vocabulary']

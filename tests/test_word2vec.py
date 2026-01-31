@@ -237,6 +237,339 @@ class TestWord2VecTraining:
             assert vec.shape == (vector_size,)
 
 
+# =============================================================================
+# Boundary Value Tests
+# =============================================================================
+
+class TestWord2VecBoundaryValues:
+    """Tests for Word2Vec with boundary parameter values."""
+    
+    def test_window_size_one(self, larger_documents):
+        """Test Word2Vec with window=1."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=1,
+            min_word_count=2,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        assert len(model.vocab) > 0
+    
+    def test_vector_size_one(self, larger_documents):
+        """Test Word2Vec with vector_size=1."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=1,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        for word in model.vocab:
+            vec = model.get_vector(word)
+            assert vec.shape == (1,)
+    
+    def test_negative_one(self, larger_documents):
+        """Test Word2Vec with negative=1 (single negative sample)."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=2,
+            negative=1,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        assert len(model.vocab) > 0
+    
+    def test_min_word_count_one(self, sample_documents):
+        """Test Word2Vec with min_word_count=1 (keep all words)."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            seed=42,
+            use_cython=False
+        )
+        model.train(sample_documents, epochs=1)
+        
+        # Should keep more words than with higher threshold
+        assert len(model.vocab) > 0
+    
+    def test_single_epoch(self, larger_documents):
+        """Test Word2Vec with epochs=1."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        assert len(model.vocab) > 0
+    
+    def test_max_vocab_size(self, larger_documents):
+        """Test Word2Vec with max_vocab_size."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            max_vocab_size=20,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        assert len(model.vocab) <= 20
+    
+    def test_sample_disabled(self, larger_documents):
+        """Test Word2Vec with sample=0 (subsampling disabled)."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=2,
+            sample=0,  # Disable subsampling
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        assert len(model.vocab) > 0
+    
+    def test_shrink_windows_disabled(self, larger_documents):
+        """Test Word2Vec with shrink_windows=False."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=3,
+            min_word_count=2,
+            shrink_windows=False,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        assert len(model.vocab) > 0
+
+
+# =============================================================================
+# Edge Cases
+# =============================================================================
+
+class TestWord2VecEdgeCases:
+    """Tests for Word2Vec edge cases."""
+    
+    def test_empty_sentences_raises_error(self):
+        """Test that empty sentences raises ValueError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(min_word_count=1, use_cython=False)
+        
+        with pytest.raises(ValueError, match="cannot be empty"):
+            model.train([], epochs=1)
+    
+    def test_all_empty_sentences(self):
+        """Test handling of all empty sentences."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(min_word_count=1, use_cython=False)
+        
+        with pytest.raises(ValueError, match="contains no words"):
+            model.train([[], [], []], epochs=1)
+    
+    def test_all_words_filtered(self):
+        """Test when all words are below min_word_count."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(min_word_count=10, use_cython=False)
+        # Each word appears only once
+        sentences = [["a", "b", "c"], ["d", "e", "f"]]
+        
+        model.train(sentences, epochs=1)
+        
+        # Vocabulary should be empty (all filtered)
+        assert len(model.vocab) == 0
+    
+    def test_get_vector_oov(self, larger_documents):
+        """Test that OOV words raise KeyError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            min_word_count=2,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        with pytest.raises(KeyError):
+            model.get_vector("nonexistent_word_xyz_123")
+    
+    def test_getitem_oov(self, larger_documents):
+        """Test that [] access for OOV words raises KeyError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            min_word_count=2,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        with pytest.raises(KeyError):
+            _ = model["nonexistent_word_xyz_123"]
+    
+    def test_similarity_oov(self, larger_documents):
+        """Test similarity with OOV word raises KeyError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            min_word_count=2,
+            seed=42,
+            use_cython=False
+        )
+        model.train(larger_documents, epochs=1)
+        
+        vocab_words = list(model.vocab.keys())
+        if len(vocab_words) > 0:
+            with pytest.raises(KeyError):
+                model.similarity(vocab_words[0], "nonexistent_word_xyz_123")
+    
+    def test_single_sentence_corpus(self):
+        """Test training on a single sentence."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            seed=42,
+            use_cython=False
+        )
+        
+        # Single sentence with repeated words
+        sentences = [["a", "b", "a", "b", "a", "c", "b", "c"]]
+        model.train(sentences, epochs=2)
+        
+        assert len(model.vocab) > 0
+    
+    def test_very_short_sentences(self):
+        """Test training on very short sentences."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            seed=42,
+            use_cython=False
+        )
+        
+        # Very short sentences
+        sentences = [["a"], ["b"], ["a", "b"], ["c"]]
+        model.train(sentences, epochs=2)
+        
+        # Should handle gracefully
+        assert isinstance(model.vocab, dict)
+
+
+# =============================================================================
+# Training Mode Tests
+# =============================================================================
+
+class TestWord2VecTrainingModes:
+    """Tests for different training modes (Skip-gram vs CBOW)."""
+    
+    def test_skipgram_vs_cbow_different_results(self, larger_documents):
+        """Test that Skip-gram and CBOW produce different vectors."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model_sg = Word2Vec(
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            sg=1,  # Skip-gram
+            seed=42,
+            use_cython=False
+        )
+        model_sg.train(larger_documents, epochs=3)
+        
+        model_cbow = Word2Vec(
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            sg=0,  # CBOW
+            seed=42,
+            use_cython=False
+        )
+        model_cbow.train(larger_documents, epochs=3)
+        
+        # Both should have vocabulary
+        assert len(model_sg.vocab) > 0
+        assert len(model_cbow.vocab) > 0
+        
+        # Find a common word
+        common_words = set(model_sg.vocab.keys()) & set(model_cbow.vocab.keys())
+        if len(common_words) > 0:
+            word = list(common_words)[0]
+            vec_sg = model_sg.get_vector(word)
+            vec_cbow = model_cbow.get_vector(word)
+            
+            # Vectors should be different (different training algorithms)
+            assert not np.allclose(vec_sg, vec_cbow)
+    
+    def test_cbow_mean_vs_sum(self, larger_documents):
+        """Test CBOW with mean vs sum aggregation."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model_mean = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=2,
+            sg=0,
+            cbow_mean=True,
+            seed=42,
+            use_cython=False
+        )
+        model_mean.train(larger_documents, epochs=2)
+        
+        model_sum = Word2Vec(
+            vector_size=10,
+            window=2,
+            min_word_count=2,
+            sg=0,
+            cbow_mean=False,
+            seed=42,
+            use_cython=False
+        )
+        model_sum.train(larger_documents, epochs=2)
+        
+        assert len(model_mean.vocab) > 0
+        assert len(model_sum.vocab) > 0
+
+
 class TestTempRefWord2Vec:
     """Tests for TempRefWord2Vec temporal semantic change analysis."""
     

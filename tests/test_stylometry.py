@@ -166,6 +166,29 @@ class TestStylometryNgrams:
 class TestStandaloneFunctions:
     """Tests for standalone stylometry functions."""
     
+    def test_extract_mfw(self):
+        """Test extracting most frequent words."""
+        from collections import Counter
+        from qhchina.analytics.stylometry import extract_mfw
+        
+        counts = Counter(['的', '是', '了', '的', '我', '的', '他', '是'])
+        mfw = extract_mfw(counts, n=3)
+        
+        assert isinstance(mfw, list)
+        assert len(mfw) == 3
+        assert mfw[0] == '的'  # Most frequent
+    
+    def test_extract_mfw_less_than_n(self):
+        """Test extract_mfw when corpus has fewer unique words than n."""
+        from collections import Counter
+        from qhchina.analytics.stylometry import extract_mfw
+        
+        counts = Counter(['a', 'a', 'b'])
+        mfw = extract_mfw(counts, n=10)
+        
+        # Should return all available words (2)
+        assert len(mfw) == 2
+    
     def test_burrows_delta(self):
         """Test Burrows' Delta function."""
         from qhchina.analytics.stylometry import burrows_delta
@@ -393,3 +416,368 @@ class TestStylometryEdgeCases:
         # Empty corpora should raise error
         with pytest.raises(ValueError, match="empty"):
             compare_corpora([], [], as_dataframe=True)
+
+
+# =============================================================================
+# Prediction Tests
+# =============================================================================
+
+class TestStylometryPrediction:
+    """Tests for Stylometry prediction methods."""
+    
+    @pytest.fixture
+    def fitted_stylo(self, stylometry_corpus_dict):
+        from qhchina.analytics.stylometry import Stylometry
+        stylo = Stylometry(n_features=20, distance='cosine')
+        stylo.fit_transform(stylometry_corpus_dict)
+        return stylo
+    
+    def test_predict_returns_results(self, fitted_stylo):
+        """Test that predict returns valid results."""
+        test_text = list("这是一段测试文本用于预测作者身份归属")
+        results = fitted_stylo.predict(test_text, k=2)
+        
+        assert isinstance(results, list)
+        assert len(results) == 2
+        
+        for author, score in results:
+            assert author in fitted_stylo.authors
+            assert isinstance(score, float)
+    
+    def test_predict_k_one(self, fitted_stylo):
+        """Test predict with k=1."""
+        test_text = list("测试预测功能")
+        results = fitted_stylo.predict(test_text, k=1)
+        
+        assert len(results) == 1
+    
+    def test_predict_author_convenience(self, fitted_stylo):
+        """Test predict_author convenience method."""
+        test_text = list("这是一段测试文本")
+        author = fitted_stylo.predict_author(test_text)
+        
+        assert isinstance(author, str)
+        assert author in fitted_stylo.authors
+    
+    def test_predict_confidence(self, fitted_stylo):
+        """Test predict_confidence returns normalized scores."""
+        test_text = list("这是一段测试文本用于置信度测试")
+        results = fitted_stylo.predict_confidence(test_text, k=2)
+        
+        assert isinstance(results, list)
+        # Confidence scores should be between 0 and 1
+        for author, conf in results:
+            assert 0 <= conf <= 1
+    
+    def test_predict_invalid_k(self, fitted_stylo):
+        """Test that invalid k raises ValueError."""
+        test_text = list("测试")
+        
+        with pytest.raises(ValueError, match="k must be a positive integer"):
+            fitted_stylo.predict(test_text, k=0)
+        
+        with pytest.raises(ValueError, match="k must be a positive integer"):
+            fitted_stylo.predict(test_text, k=-1)
+
+
+class TestStylometryPredictionSVM:
+    """Tests for SVM classifier in Stylometry."""
+    
+    @pytest.fixture
+    def fitted_stylo_svm(self, stylometry_corpus_dict):
+        from qhchina.analytics.stylometry import Stylometry
+        stylo = Stylometry(n_features=20, classifier='svm')
+        stylo.fit_transform(stylometry_corpus_dict)
+        return stylo
+    
+    def test_predict_svm(self, fitted_stylo_svm):
+        """Test SVM prediction."""
+        test_text = list("这是一段测试文本用于SVM预测")
+        results = fitted_stylo_svm.predict(test_text, k=2, classifier='svm')
+        
+        assert isinstance(results, list)
+        assert len(results) == 2
+        
+        # SVM returns probabilities
+        for author, prob in results:
+            assert author in fitted_stylo_svm.authors
+            assert 0 <= prob <= 1
+
+
+class TestStylometryBootstrap:
+    """Tests for bootstrap prediction."""
+    
+    @pytest.fixture
+    def fitted_stylo(self, stylometry_corpus_dict):
+        from qhchina.analytics.stylometry import Stylometry
+        stylo = Stylometry(n_features=20, distance='cosine')
+        stylo.fit_transform(stylometry_corpus_dict)
+        return stylo
+    
+    def test_bootstrap_predict_basic(self, fitted_stylo):
+        """Test basic bootstrap prediction."""
+        test_text = list("这是一段测试文本用于引导预测分析")
+        results = fitted_stylo.bootstrap_predict(test_text, n_iter=10, seed=42)
+        
+        assert 'prediction' in results
+        assert 'confidence' in results
+        assert 'distribution' in results
+        assert 'distances' in results
+        assert 'n_iterations' in results
+        
+        assert results['prediction'] in fitted_stylo.authors
+        assert 0 <= results['confidence'] <= 1
+        assert results['n_iterations'] == 10
+    
+    def test_bootstrap_predict_reproducibility(self, fitted_stylo):
+        """Test that bootstrap with same seed gives same results."""
+        test_text = list("测试引导法可重复性")
+        
+        results1 = fitted_stylo.bootstrap_predict(test_text, n_iter=10, seed=42)
+        results2 = fitted_stylo.bootstrap_predict(test_text, n_iter=10, seed=42)
+        
+        assert results1['prediction'] == results2['prediction']
+        assert results1['confidence'] == results2['confidence']
+
+
+# =============================================================================
+# Visualization Tests
+# =============================================================================
+
+class TestStylometryVisualization:
+    """Tests for Stylometry visualization methods."""
+    
+    @pytest.fixture
+    def fitted_stylo(self, stylometry_corpus_dict):
+        from qhchina.analytics.stylometry import Stylometry
+        stylo = Stylometry(n_features=20, distance='cosine')
+        stylo.fit_transform(stylometry_corpus_dict)
+        return stylo
+    
+    def test_plot_pca(self, fitted_stylo):
+        """Test PCA visualization."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        # Should not raise
+        fitted_stylo.plot(method='pca', show=False)
+        plt.close('all')
+    
+    def test_plot_tsne(self, fitted_stylo):
+        """Test t-SNE visualization."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        # Should not raise
+        fitted_stylo.plot(method='tsne', show=False)
+        plt.close('all')
+    
+    def test_plot_mds(self, fitted_stylo):
+        """Test MDS visualization."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        # Should not raise
+        fitted_stylo.plot(method='mds', show=False)
+        plt.close('all')
+    
+    def test_plot_invalid_method(self, fitted_stylo):
+        """Test that invalid plot method raises ValueError."""
+        with pytest.raises(ValueError, match="method must be"):
+            fitted_stylo.plot(method='invalid')
+    
+    def test_plot_author_level(self, fitted_stylo):
+        """Test visualization at author level."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        fitted_stylo.plot(method='pca', level='author', show=False)
+        plt.close('all')
+    
+    def test_plot_save_to_file(self, fitted_stylo, tmp_path):
+        """Test saving plot to file."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        filepath = tmp_path / "stylometry_plot.png"
+        fitted_stylo.plot(method='pca', filename=str(filepath), show=False)
+        plt.close('all')
+        
+        assert filepath.exists()
+    
+    def test_dendrogram_basic(self, fitted_stylo):
+        """Test basic dendrogram visualization."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        # Should not raise
+        fitted_stylo.dendrogram(show=False)
+        plt.close('all')
+    
+    def test_dendrogram_author_level(self, fitted_stylo):
+        """Test dendrogram at author level."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        fitted_stylo.dendrogram(level='author', show=False)
+        plt.close('all')
+    
+    def test_dendrogram_different_methods(self, fitted_stylo):
+        """Test dendrogram with different linkage methods."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        for method in ['single', 'complete', 'average', 'ward']:
+            fitted_stylo.dendrogram(method=method, show=False)
+            plt.close('all')
+    
+    def test_dendrogram_invalid_method(self, fitted_stylo):
+        """Test that invalid dendrogram method raises ValueError."""
+        with pytest.raises(ValueError, match="method must be one of"):
+            fitted_stylo.dendrogram(method='invalid')
+    
+    def test_dendrogram_save_to_file(self, fitted_stylo, tmp_path):
+        """Test saving dendrogram to file."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        filepath = tmp_path / "dendrogram.png"
+        fitted_stylo.dendrogram(filename=str(filepath), show=False)
+        plt.close('all')
+        
+        assert filepath.exists()
+
+
+# =============================================================================
+# Boundary Value Tests
+# =============================================================================
+
+class TestStylometryBoundaryValues:
+    """Tests for Stylometry with boundary parameter values."""
+    
+    def test_n_features_one(self, stylometry_corpus_dict):
+        """Test with n_features=1."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        stylo = Stylometry(n_features=1)
+        stylo.fit_transform(stylometry_corpus_dict)
+        
+        assert len(stylo.features) == 1
+    
+    def test_ngram_range_bigrams_only(self, stylometry_corpus_dict):
+        """Test with bigrams only (2, 2)."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        stylo = Stylometry(n_features=20, ngram_range=(2, 2))
+        stylo.fit_transform(stylometry_corpus_dict)
+        
+        # All features should be bigrams (contain space)
+        for feature in stylo.features:
+            assert ' ' in feature
+    
+    def test_ngram_range_trigrams(self, stylometry_corpus_dict):
+        """Test with trigrams (3, 3)."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        stylo = Stylometry(n_features=20, ngram_range=(3, 3))
+        stylo.fit_transform(stylometry_corpus_dict)
+        
+        # Features should exist (may be fewer due to small corpus)
+        assert len(stylo.features) >= 1
+    
+    def test_two_documents_minimum(self):
+        """Test with exactly 2 documents (minimum required)."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        corpus = {
+            "author_a": [list("第一篇文档内容测试")],
+            "author_b": [list("第二篇文档内容测试")]
+        }
+        
+        stylo = Stylometry(n_features=10)
+        stylo.fit_transform(corpus)
+        
+        assert len(stylo.document_ids) == 2
+    
+    def test_cull_threshold(self, stylometry_corpus_dict):
+        """Test with culling enabled."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        stylo = Stylometry(n_features=20, cull=0.5)
+        stylo.fit_transform(stylometry_corpus_dict)
+        
+        # Should still have some features
+        assert len(stylo.features) > 0
+    
+    def test_chunk_size(self, stylometry_corpus_dict):
+        """Test with chunk_size specified."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        # Use small chunk size
+        stylo = Stylometry(n_features=10, chunk_size=10)
+        stylo.fit_transform(stylometry_corpus_dict)
+        
+        # Should have more documents after chunking
+        assert len(stylo.document_ids) > 0
+
+
+class TestStylometryValidation:
+    """Tests for Stylometry parameter validation."""
+    
+    def test_invalid_n_features_zero(self):
+        """Test that n_features=0 raises ValueError."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        with pytest.raises(ValueError, match="n_features must be at least 1"):
+            Stylometry(n_features=0)
+    
+    def test_invalid_n_features_negative(self):
+        """Test that negative n_features raises ValueError."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        with pytest.raises(ValueError, match="n_features must be at least 1"):
+            Stylometry(n_features=-1)
+    
+    def test_invalid_ngram_range(self):
+        """Test that invalid ngram_range raises error."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        with pytest.raises((ValueError, TypeError)):
+            Stylometry(ngram_range=(2, 1))  # min > max
+    
+    def test_invalid_transform(self):
+        """Test that invalid transform raises ValueError."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        with pytest.raises(ValueError, match="transform must be one of"):
+            Stylometry(transform='invalid')
+    
+    def test_invalid_distance(self):
+        """Test that invalid distance raises ValueError."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        with pytest.raises(ValueError, match="distance must be one of"):
+            Stylometry(distance='invalid')
+    
+    def test_invalid_classifier(self):
+        """Test that invalid classifier raises ValueError."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        with pytest.raises(ValueError, match="classifier must be one of"):
+            Stylometry(classifier='invalid')
+    
+    def test_invalid_mode(self):
+        """Test that invalid mode raises ValueError."""
+        from qhchina.analytics.stylometry import Stylometry
+        
+        with pytest.raises(ValueError, match="mode must be one of"):
+            Stylometry(mode='invalid')

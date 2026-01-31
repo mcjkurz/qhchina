@@ -6,9 +6,9 @@ This script scans docs/pkg_docs/*/index.md for files with 'import_from' in their
 front matter, then generates API documentation from the specified Python modules.
 
 Usage:
-    python scripts/generate_api_docs.py           # Generate all docs
-    python scripts/generate_api_docs.py --check   # Check if docs are up-to-date (for CI)
-    python scripts/generate_api_docs.py --module preprocessing  # Generate for one module
+    python make_docs.py           # Generate all docs
+    python make_docs.py --check   # Check if docs are up-to-date (for CI)
+    python make_docs.py --module preprocessing  # Generate for one module
 
 Front matter fields:
     import_from: Python module path(s) to document (required for auto-generation)
@@ -36,8 +36,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# Add parent directory to path so we can import qhchina
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add current directory to path so we can import qhchina
+sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     import yaml
@@ -533,7 +533,7 @@ def main():
                        help="List available modules")
     args = parser.parse_args()
     
-    root_path = Path(__file__).parent.parent
+    root_path = Path(__file__).parent
     docs_path = root_path / 'docs'
     
     # Discover all doc files with import_from in front matter
@@ -567,7 +567,7 @@ def main():
         any_changed = any_changed or changed
     
     if args.check and any_changed:
-        print("\nDocumentation is out of date! Run: python scripts/generate_api_docs.py")
+        print("\nDocumentation is out of date! Run: python make_docs.py")
         sys.exit(1)
     elif args.check:
         print("\nDocumentation is up-to-date.")

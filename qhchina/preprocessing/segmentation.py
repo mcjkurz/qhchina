@@ -1,5 +1,7 @@
 import logging
-from typing import List, Dict, Any, Union, Optional, Set
+import os
+import tempfile
+from typing import List, Dict, Any, Union, Optional, Set, Tuple
 from tqdm.auto import tqdm
 import importlib
 import importlib.util
@@ -14,6 +16,7 @@ logger = logging.getLogger("qhchina.preprocessing.segmentation")
 __all__ = [
     'SegmentationWrapper',
     'SpacySegmenter',
+    'PKUSegmenter',
     'JiebaSegmenter',
     'BertSegmenter',
     'LLMSegmenter',
@@ -33,6 +36,10 @@ class SegmentationWrapper:
             - stopwords: List or set of stopwords to exclude (converted to set internally)
             - min_word_length: Minimum length of tokens to include (default 1)
             - excluded_pos: List or set of POS tags to exclude (converted to set internally)
+        user_dict: Custom user dictionary for segmentation. Can be:
+            - str: Path to a dictionary file
+            - List[str]: List of words
+            - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
         sentence_end_pattern: Regular expression pattern for sentence endings (default: 
             Chinese and English punctuation).
     """
@@ -40,7 +47,8 @@ class SegmentationWrapper:
     # Valid filter keys
     VALID_FILTER_KEYS = {'stopwords', 'min_word_length', 'excluded_pos'}
     
-    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: Dict[str, Any] = None, 
+    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: Dict[str, Any] = None,
+                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         if strategy is None:
             raise ValueError("strategy cannot be None")
@@ -50,6 +58,8 @@ class SegmentationWrapper:
         
         self.chunk_size = chunk_size
         self.filters = filters or {}
+        self.user_dict = user_dict
+        self._temp_dict_path = None  # Track temporary file for cleanup
         
         # Validate filter keys
         self._validate_filters()
@@ -74,6 +84,128 @@ class SegmentationWrapper:
                 f"Invalid filter key(s): {invalid_keys}. "
                 f"Valid filter keys are: {self.VALID_FILTER_KEYS}"
             )
+    
+    def _get_user_dict_as_list(self) -> Optional[List[Union[str, Tuple]]]:
+        """Get the user dictionary as a list of words/tuples.
+        
+        Returns:
+            List of words or tuples if user_dict is provided, None otherwise.
+            If user_dict is a file path, reads and parses the file.
+        """
+        if self.user_dict is None:
+            return None
+        
+        if isinstance(self.user_dict, list):
+            return self.user_dict
+        
+        # user_dict is a file path - read and parse it
+        if isinstance(self.user_dict, str):
+            words = []
+            try:
+                with open(self.user_dict, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = line.split()
+                        if len(parts) == 1:
+                            words.append(parts[0])
+                        else:
+                            # Convert to tuple: (word, freq, pos) or (word, freq)
+                            words.append(tuple(parts))
+                return words
+            except Exception as e:
+                logger.error(f"Failed to read user dictionary from file: {str(e)}")
+                return None
+        
+        return None
+    
+    def _get_user_dict_path(self, default_freq: Optional[int] = None) -> Optional[str]:
+        """Get the user dictionary as a file path.
+        
+        If user_dict is already a path, returns it directly.
+        If user_dict is a list, creates a temporary file and returns its path.
+        
+        Args:
+            default_freq: Default frequency to use for words without frequency.
+                         If None, no frequency is added (just word per line).
+                         For Jieba, a reasonable value is around 100000 to ensure
+                         custom words are preferred over their component parts.
+        
+        Returns:
+            Path to the user dictionary file, or None if no user_dict is provided.
+        """
+        if self.user_dict is None:
+            return None
+        
+        # If it's already a file path, return it directly
+        if isinstance(self.user_dict, str):
+            return self.user_dict
+        
+        # If it's a list, create a temporary file
+        if isinstance(self.user_dict, list):
+            try:
+                # Create a temporary file that won't be auto-deleted
+                fd, temp_path = tempfile.mkstemp(suffix='.txt', prefix='user_dict_')
+                self._temp_dict_path = temp_path
+                
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    for item in self.user_dict:
+                        if isinstance(item, str):
+                            # Add default frequency if specified
+                            if default_freq is not None:
+                                f.write(f"{item} {default_freq}\n")
+                            else:
+                                f.write(f"{item}\n")
+                        elif isinstance(item, tuple):
+                            # Write tuple as space-separated: word freq pos
+                            f.write(" ".join(str(x) for x in item) + "\n")
+                
+                logger.debug(f"Created temporary user dictionary at {temp_path}")
+                return temp_path
+            except Exception as e:
+                logger.error(f"Failed to create temporary user dictionary: {str(e)}")
+                return None
+        
+        return None
+    
+    def _cleanup_temp_files(self):
+        """Clean up any temporary files created for user dictionary."""
+        temp_path = getattr(self, '_temp_dict_path', None)
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                logger.debug(f"Cleaned up temporary user dictionary at {temp_path}")
+                self._temp_dict_path = None
+            except Exception as e:
+                logger.warning(f"Failed to clean up temporary file {temp_path}: {str(e)}")
+    
+    def close(self):
+        """Clean up resources. Call this when done with the segmenter."""
+        self._cleanup_temp_files()
+    
+    def reset_user_dict(self):
+        """Reset the user dictionary to default state.
+        
+        This clears any custom words that were added via user_dict.
+        Subclasses should override this method to implement backend-specific reset logic.
+        """
+        self._cleanup_temp_files()
+        self.user_dict = None
+        logger.info("User dictionary has been reset")
+    
+    def __del__(self):
+        """Destructor to clean up temporary files."""
+        self._cleanup_temp_files()
+    
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - clean up resources."""
+        self.close()
+        return False
     
     def segment(self, text: str) -> Union[List[str], List[List[str]]]:
         """Segment text into tokens based on the selected strategy.
@@ -203,12 +335,15 @@ class SpacySegmenter(SegmentationWrapper):
     """
     Segmentation wrapper for spaCy models.
     
+    Note: spaCy Chinese models use spacy-pkuseg, a fork of pkuseg trained on the OntoNotes
+    corpus and co-trained with downstream statistical components (POS tagging, NER, parsing).
+    
     Args:
         model_name: Name of the spaCy model to use.
         disable: List of pipeline components to disable for better performance; 
             For common applications, use ["ner", "lemmatizer"]. Default is None.
         batch_size: Batch size for processing multiple texts.
-        user_dict: Custom user dictionary - either a list of words or path to a 
+        user_dict: Custom user dictionary - either a list of words/tuples or path to a 
             dictionary file.
         strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
         chunk_size: Size of chunks when using 'chunk' strategy.
@@ -219,20 +354,19 @@ class SpacySegmenter(SegmentationWrapper):
         sentence_end_pattern: Regular expression pattern for sentence endings.
     """
     
-    def __init__(self, model_name: str = "zh_core_web_lg", 
+    def __init__(self, model_name: str = "zh_core_web_sm", 
                  disable: Optional[List[str]] = None,
                  batch_size: int = 200,
-                 user_dict: Union[List[str], str] = None,
+                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
                  strategy: str = "whole", 
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters, 
-                         sentence_end_pattern=sentence_end_pattern)
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
+                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
         self.model_name = model_name
         self.disable = disable or []
         self.batch_size = batch_size
-        self.user_dict = user_dict
         
         # Try to load the model, download if needed
         try:
@@ -270,23 +404,41 @@ class SpacySegmenter(SegmentationWrapper):
         # Check if the model supports pkuseg user dictionary update
         if hasattr(self.nlp.tokenizer, 'pkuseg_update_user_dict'):
             try:
-                # If user_dict is a file path
-                if isinstance(self.user_dict, str):
-                    try:
-                        with open(self.user_dict, 'r', encoding='utf-8') as f:
-                            words = [line.strip() for line in f if line.strip()]
-                        self.nlp.tokenizer.pkuseg_update_user_dict(words)
-                        logger.info(f"Loaded user dictionary from file: {self.user_dict}")
-                    except Exception as e:
-                        logger.error(f"Failed to load user dictionary from file: {str(e)}")
-                # If user_dict is a list of words
-                elif isinstance(self.user_dict, list):
-                    self.nlp.tokenizer.pkuseg_update_user_dict(self.user_dict)
-                    logger.info(f"Updated user dictionary with {len(self.user_dict)} words")
-                else:
-                    logger.warning(f"Unsupported user_dict type: {type(self.user_dict)}. Expected str or list.")
+                # Get user dict as a list (handles both file paths and lists)
+                words_list = self._get_user_dict_as_list()
+                if words_list:
+                    # Extract just the words (first element if tuple, or the string itself)
+                    words = []
+                    for item in words_list:
+                        if isinstance(item, str):
+                            words.append(item)
+                        elif isinstance(item, tuple) and len(item) > 0:
+                            words.append(item[0])  # First element is the word
+                    
+                    self.nlp.tokenizer.pkuseg_update_user_dict(words)
+                    logger.info(f"Updated user dictionary with {len(words)} words")
             except Exception as e:
                 logger.error(f"Failed to update user dictionary: {str(e)}")
+        else:
+            logger.warning("This spaCy model's tokenizer does not support pkuseg_update_user_dict")
+    
+    def reset_user_dict(self):
+        """Reset the spaCy tokenizer's user dictionary.
+        
+        This clears any custom words that were added via pkuseg_update_user_dict.
+        Note: This resets to an empty user dictionary, not the original state if one was loaded.
+        """
+        # Clean up temp files first
+        self._cleanup_temp_files()
+        self.user_dict = None
+        
+        # Reset pkuseg user dictionary if supported
+        if hasattr(self.nlp.tokenizer, 'pkuseg_update_user_dict'):
+            try:
+                self.nlp.tokenizer.pkuseg_update_user_dict([], reset=True)
+                logger.info("spaCy pkuseg user dictionary has been reset")
+            except Exception as e:
+                logger.error(f"Failed to reset spaCy user dictionary: {str(e)}")
         else:
             logger.warning("This spaCy model's tokenizer does not support pkuseg_update_user_dict")
     
@@ -327,12 +479,30 @@ class SpacySegmenter(SegmentationWrapper):
         return results
 
 
-class JiebaSegmenter(SegmentationWrapper):
+class PKUSegmenter(SegmentationWrapper):
     """
-    Segmentation wrapper for Jieba Chinese text segmentation.
+    Segmentation wrapper for PKUSeg Chinese text segmentation.
+    
+    PKUSeg is a toolkit for multi-domain Chinese word segmentation developed by
+    Peking University. It uses the original pkuseg package with its own pre-trained
+    models (different from spacy-pkuseg, which is trained on OntoNotes).
+    
+    Note: PKUSeg does not support dynamic user dictionary updates. The user dictionary
+    is loaded at initialization time. To change the dictionary, call reset_user_dict()
+    which will reinitialize the segmenter.
     
     Args:
-        user_dict_path: Path to a user dictionary file for Jieba.
+        model_name: Name of the model to use. Options:
+            - 'default': General domain model (default)
+            - 'news': News domain
+            - 'web': Web domain  
+            - 'medicine': Medical domain
+            - 'tourism': Tourism domain
+            - Or a path to a custom model directory
+        user_dict: Custom user dictionary. Can be:
+            - str: Path to a dictionary file (one word per line)
+            - List[str]: List of words
+            - List[Tuple]: List of tuples (only first element/word is used)
         pos_tagging: Whether to include POS tagging in segmentation.
         strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
         chunk_size: Size of chunks when using 'chunk' strategy.
@@ -344,14 +514,148 @@ class JiebaSegmenter(SegmentationWrapper):
     """
     
     def __init__(self, 
-                 user_dict_path: str = None,
+                 model_name: str = 'default',
+                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
                  pos_tagging: bool = False,
                  strategy: str = "whole",
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         sentence_end_pattern=sentence_end_pattern)
+                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
+        self.model_name = model_name
+        self.pos_tagging = pos_tagging
+        
+        # Try to import pkuseg
+        try:
+            import pkuseg
+        except ImportError:
+            raise ImportError("pkuseg is not installed. Please install it with 'pip install pkuseg'")
+        
+        self.pkuseg_module = pkuseg
+        
+        # Initialize the segmenter
+        self._init_segmenter()
+    
+    def _init_segmenter(self):
+        """Initialize or reinitialize the PKUSeg segmenter."""
+        # Clean up any existing temp files before creating new ones
+        self._cleanup_temp_files()
+        
+        # Get user dict path if provided (this may create a temp file)
+        dict_path = self._get_user_dict_path() if self.user_dict else None
+        
+        # Build kwargs for pkuseg initialization
+        kwargs = {
+            'postag': self.pos_tagging
+        }
+        
+        # Add model_name (pkuseg uses 'default' internally for None)
+        if self.model_name and self.model_name != 'default':
+            kwargs['model_name'] = self.model_name
+        
+        # Add user_dict if provided
+        if dict_path:
+            kwargs['user_dict'] = dict_path
+            logger.info(f"Loading user dictionary from {dict_path}")
+        
+        logger.info(f"Initializing PKUSeg with model='{self.model_name}', postag={self.pos_tagging}")
+        try:
+            self.seg = self.pkuseg_module.pkuseg(**kwargs)
+            logger.info("PKUSeg initialized successfully")
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize PKUSeg: {str(e)}")
+    
+    def reset_user_dict(self):
+        """Reset the user dictionary by reinitializing PKUSeg without a user dict.
+        
+        Note: PKUSeg doesn't support dynamic dictionary updates, so we reinitialize
+        the entire segmenter. This is different from Jieba where we can reset the
+        global state.
+        """
+        # Clean up temp files
+        self._cleanup_temp_files()
+        
+        # Clear user_dict reference
+        self.user_dict = None
+        
+        # Reinitialize the segmenter without user dict
+        self._init_segmenter()
+        logger.info("PKUSeg user dictionary has been reset")
+    
+    def _filter_tokens(self, tokens) -> List[str]:
+        """Filter tokens based on filters."""
+        min_word_length = self.filters.get('min_word_length', 1)
+        stopwords = set(self.filters.get('stopwords', []))
+        
+        # If POS tagging is enabled and we have tokens as (word, tag) tuples
+        if self.pos_tagging:
+            excluded_pos = set(self.filters.get('excluded_pos', []))
+            return [word for word, tag in tokens 
+                    if len(word) >= min_word_length 
+                    and word not in stopwords
+                    and tag not in excluded_pos]
+        else:
+            return [token for token in tokens 
+                    if len(token) >= min_word_length 
+                    and token not in stopwords]
+    
+    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+        """Process all text units with PKUSeg and return results.
+        
+        Args:
+            texts: List of all text units to process
+            
+        Returns:
+            List of lists of tokens, one list per text unit
+        """
+        results = []
+        for text_to_process in tqdm(texts, desc="Segmenting with PKUSeg"):
+            # Skip empty text
+            if not text_to_process.strip():
+                results.append([])
+                continue
+            
+            # Segment the text
+            tokens = self.seg.cut(text_to_process)
+            
+            # Filter tokens
+            filtered_tokens = self._filter_tokens(tokens)
+            
+            # Add to results
+            results.append(filtered_tokens)
+        
+        return results
+
+
+class JiebaSegmenter(SegmentationWrapper):
+    """
+    Segmentation wrapper for Jieba Chinese text segmentation.
+    
+    Args:
+        user_dict: Custom user dictionary for Jieba. Can be:
+            - str: Path to a dictionary file
+            - List[str]: List of words
+            - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
+        pos_tagging: Whether to include POS tagging in segmentation.
+        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+        chunk_size: Size of chunks when using 'chunk' strategy.
+        filters: Dictionary of filters to apply during segmentation:
+            - min_word_length: Minimum length of tokens to include (default 1)
+            - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
+            - stopwords: Set of stopwords to exclude
+        sentence_end_pattern: Regular expression pattern for sentence endings.
+    """
+    
+    def __init__(self, 
+                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
+                 pos_tagging: bool = False,
+                 strategy: str = "whole",
+                 chunk_size: int = 512,
+                 filters: Dict[str, Any] = None,
+                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
+        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
+                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
         self.pos_tagging = pos_tagging
         
         # Try to import jieba
@@ -365,12 +669,81 @@ class JiebaSegmenter(SegmentationWrapper):
         self.pseg = pseg
         
         # Load user dictionary if provided
-        if user_dict_path:
-            try:
-                self.jieba.load_userdict(user_dict_path)
-                logger.info(f"Loaded user dictionary from {user_dict_path}")
-            except Exception as e:
-                logger.error(f"Failed to load user dictionary: {str(e)}")
+        if self.user_dict is not None:
+            self._load_user_dict()
+    
+    def _load_user_dict(self):
+        """Load user dictionary into Jieba."""
+        try:
+            # Get user dict as file path (creates temp file if needed)
+            # Use default_freq=100000 for words without explicit frequency
+            # This ensures custom words are preferred over their component parts
+            dict_path = self._get_user_dict_path(default_freq=100000)
+            if dict_path:
+                self.jieba.load_userdict(dict_path)
+                logger.info(f"Loaded user dictionary from {dict_path}")
+        except Exception as e:
+            logger.error(f"Failed to load user dictionary: {str(e)}")
+    
+    def reset_user_dict(self):
+        """Reset Jieba's dictionary to default state.
+        
+        This reinitializes Jieba, clearing any custom words that were added.
+        Note: Jieba uses a global state, so this affects all JiebaSegmenter instances.
+        """
+        # Clean up temp files first
+        self._cleanup_temp_files()
+        self.user_dict = None
+        
+        # Reset Jieba to default dictionary
+        try:
+            # Clear user word tag table
+            if hasattr(self.jieba, 'user_word_tag_tab'):
+                self.jieba.user_word_tag_tab.clear()
+            
+            # Remove the default cache file to force rebuild from default dictionary
+            # Jieba typically caches at tempdir/jieba.cache
+            default_cache = os.path.join(tempfile.gettempdir(), 'jieba.cache')
+            if os.path.exists(default_cache):
+                try:
+                    os.unlink(default_cache)
+                    logger.debug(f"Removed Jieba cache file: {default_cache}")
+                except Exception as e:
+                    logger.warning(f"Could not remove cache file: {e}")
+            
+            # Also check for any cache file in the current tokenizer
+            if hasattr(self.jieba, 'dt') and hasattr(self.jieba.dt, 'cache_file'):
+                cache_file = self.jieba.dt.cache_file
+                if cache_file and cache_file != default_cache and os.path.exists(cache_file):
+                    try:
+                        os.unlink(cache_file)
+                        logger.debug(f"Removed Jieba cache file: {cache_file}")
+                    except Exception as e:
+                        logger.warning(f"Could not remove cache file: {e}")
+            
+            # Create a fresh tokenizer to reset the frequency dictionary
+            self.jieba.dt = self.jieba.Tokenizer()
+            self.jieba.dt.initialize()
+            
+            # Reassign module-level function references to point to the new tokenizer
+            # (jieba.cut, jieba.cut_for_search, etc. are bound methods that still
+            # reference the old tokenizer after we replace jieba.dt)
+            self.jieba.cut = self.jieba.dt.cut
+            self.jieba.cut_for_search = self.jieba.dt.cut_for_search
+            self.jieba.tokenize = self.jieba.dt.tokenize
+            
+            # Also reassign dictionary management methods
+            self.jieba.load_userdict = self.jieba.dt.load_userdict
+            self.jieba.add_word = self.jieba.dt.add_word
+            self.jieba.del_word = self.jieba.dt.del_word
+            self.jieba.suggest_freq = self.jieba.dt.suggest_freq
+            
+            # Also update posseg's tokenizer reference (pseg.dt.tokenizer points to jieba.dt)
+            self.pseg.dt.tokenizer = self.jieba.dt
+            
+            logger.info("Jieba dictionary has been reset to default state")
+        except Exception as e:
+            logger.error(f"Failed to reset Jieba dictionary: {str(e)}")
     
     def _filter_tokens(self, tokens) -> List[str]:
         """Filter tokens based on filters."""
@@ -437,6 +810,8 @@ class BertSegmenter(SegmentationWrapper):
             Default is True, which works for BERT-based models.
         max_sequence_length: Maximum sequence length for BERT models (default 512). If 
             the text is longer than this, it will be split into chunks.
+        user_dict: Custom user dictionary (not supported for BERT segmenter, will be ignored
+            with a warning).
         strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
@@ -462,6 +837,7 @@ class BertSegmenter(SegmentationWrapper):
                  device: Optional[str] = None,
                  remove_special_tokens: bool = True,
                  max_sequence_length: int = 512,
+                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
                  strategy: str = "whole",
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
@@ -471,10 +847,14 @@ class BertSegmenter(SegmentationWrapper):
             chunk_size = max_sequence_length
         
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         sentence_end_pattern=sentence_end_pattern)
+                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
         self.batch_size = batch_size
         self.remove_special_tokens = remove_special_tokens
         self.max_sequence_length = max_sequence_length
+        
+        # Warn if user_dict is provided (not supported for BERT)
+        if self.user_dict is not None:
+            logger.warning("user_dict is not supported for BertSegmenter and will be ignored")
         
         # Validate that either model_name or both model and tokenizer are provided
         if model_name is None and (model is None or tokenizer is None):
@@ -741,6 +1121,8 @@ class LLMSegmenter(SegmentationWrapper):
         retry_patience: Number of retries for API calls (default 1, meaning 1 retry = 
             2 total attempts).
         timeout: Timeout in seconds for API calls (default 60.0). Set to None for no timeout.
+        user_dict: Custom user dictionary (not supported for LLM segmenter, will be ignored
+            with a warning).
         strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
@@ -771,12 +1153,18 @@ class LLMSegmenter(SegmentationWrapper):
                  max_tokens: int = 2048,
                  retry_patience: int = 1,
                  timeout: float = 60.0,
+                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
                  strategy: str = "whole",
                  chunk_size: int = 512,
                  filters: Dict[str, Any] = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         sentence_end_pattern=sentence_end_pattern)
+                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
+        
+        # Warn if user_dict is provided (not supported for LLM)
+        if self.user_dict is not None:
+            logger.warning("user_dict is not supported for LLMSegmenter and will be ignored")
+        
         self.api_key = api_key
         self.model = model
         self.endpoint = endpoint
@@ -936,11 +1324,16 @@ def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size
     """Create a segmenter based on the specified backend.
     
     Args:
-        backend: The segmentation backend to use ('spacy', 'jieba', 'bert', 'llm', etc.)
+        backend: The segmentation backend to use ('spacy', 'pkuseg', 'jieba', 'bert', 'llm')
         strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
         chunk_size: Size of chunks when using 'chunk' strategy
         sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
         **kwargs: Additional arguments to pass to the segmenter constructor
+            - user_dict: Custom user dictionary. Can be:
+                - str: Path to a dictionary file
+                - List[str]: List of words
+                - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
+                Note: Not supported for 'bert' and 'llm' backends (will log a warning)
             - filters: Dictionary of filters to apply during segmentation
                 - min_word_length: Minimum length of tokens to include (default 1)
                 - stopwords: Set of stopwords to exclude
@@ -962,6 +1355,8 @@ def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size
     
     if backend.lower() == "spacy":
         return SpacySegmenter(**kwargs)
+    elif backend.lower() == "pkuseg":
+        return PKUSegmenter(**kwargs)
     elif backend.lower() == "jieba":
         return JiebaSegmenter(**kwargs)
     elif backend.lower() == "bert":

@@ -182,6 +182,9 @@ Build vocabulary from a list or iterator of sentences.
 **Parameters:**
 - `sentences`: List or iterator of tokenized sentences (each sentence is a list of words).
 
+**Raises:**
+- `ValueError`: If sentences is empty or contains no words.
+
 <h4 id="word2vec-generate_cbow_examples">Word2Vec.generate_cbow_examples()</h4>
 
 ```python

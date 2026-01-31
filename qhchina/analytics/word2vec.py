@@ -303,11 +303,21 @@ class Word2Vec:
         
         Args:
             sentences: List or iterator of tokenized sentences (each sentence is a list of words).
+        
+        Raises:
+            ValueError: If sentences is empty or contains no words.
         """
+        # Validate input - O(1) check for lists
+        if isinstance(sentences, list) and not sentences:
+            raise ValueError("sentences cannot be empty")
         
         # Count word occurrences - works with both lists and iterators
         for sentence in sentences:
             self.word_counts.update(sentence)
+        
+        # Check if any words were found (catches empty iterators or all-empty sentences)
+        if not self.word_counts:
+            raise ValueError("sentences contains no words. Provide non-empty tokenized sentences.")
         
         # Filter words by min_word_count and create vocabulary
         retained_words = {word for word, count in self.word_counts.items() if count >= self.min_word_count}

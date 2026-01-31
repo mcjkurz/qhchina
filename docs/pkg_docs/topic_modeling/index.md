@@ -87,8 +87,7 @@ LDAGibbsSampler(
     min_word_length: int = 1,
     stopwords: Optional[set] = None,
     use_cython: bool = True,
-    estimate_alpha: int = 1,
-    min_doc_length: int = 24
+    estimate_alpha: int = 1
 )
 ```
 
@@ -113,8 +112,6 @@ Latent Dirichlet Allocation with Gibbs sampling implementation.
 - `use_cython`: Whether to use Cython acceleration if available (default: True).
 - `estimate_alpha`: Frequency for estimating alpha (0 = no estimation; default 1 = 
   after every iteration, 2 = after every 2 iterations, etc.).
-- `min_doc_length`: Minimum document length (tokens) to trigger a warning during 
-  preprocessing (default: 24).
 
 **Example:**
 ```python
