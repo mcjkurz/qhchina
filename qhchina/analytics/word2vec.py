@@ -27,6 +27,7 @@ Features:
 import logging
 import numpy as np
 from collections import defaultdict, Counter
+from itertools import chain
 from typing import List, Dict, Tuple, Set, Optional, Union, Iterator, Generator, Any, Callable
 import random
 import math
@@ -175,7 +176,7 @@ class Word2Vec:
         self.index2word = []  # index -> word
         self.word_counts = Counter()  # word -> count
         self.corpus_word_count = 0
-        self.discard_probs = {}  # For subsampling frequent words
+        self.discard_probs = None  # Numpy array for subsampling frequent words (indexed by word ID)
         
         # These will be initialized in _initialize_weights
         self.W = None  # Input word embeddings
@@ -311,9 +312,9 @@ class Word2Vec:
         if isinstance(sentences, list) and not sentences:
             raise ValueError("sentences cannot be empty")
         
-        # Count word occurrences - works with both lists and iterators
-        for sentence in sentences:
-            self.word_counts.update(sentence)
+        # Count word occurrences using chain.from_iterable for efficiency
+        # This flattens all sentences into a single word stream, reducing Python loop overhead
+        self.word_counts = Counter(chain.from_iterable(sentences))
         
         # Check if any words were found (catches empty iterators or all-empty sentences)
         if not self.word_counts:
@@ -353,20 +354,56 @@ class Word2Vec:
         normalized by the total corpus word count.
         
         A word will be discarded with probability $P(w_i)$.
-        """
         
-        self.discard_probs = {}
+        Creates a numpy array indexed by word ID for fast lookup during example generation.
+        """
+        self.discard_probs = np.zeros(len(self.vocab), dtype=np.float32)
         total_words = self.corpus_word_count
         
-        for word in self.vocab:
+        for word, idx in self.vocab.items():
             # Calculate normalized word frequency
             word_freq = self.word_counts[word] / total_words
             # Calculate probability of discarding the word
-            # Using the formula from the original word2vec paper
             discard_prob = 1.0 - np.sqrt(self.sample / word_freq)
             # Clamp the probability to [0, 1]
-            discard_prob = max(0, min(1, discard_prob))
-            self.discard_probs[word] = discard_prob
+            self.discard_probs[idx] = max(0.0, min(1.0, discard_prob))
+
+    def _estimate_example_count(self) -> int:
+        """
+        Estimate total training examples per epoch without iterating through data.
+        
+        Used for learning rate decay scheduling when min_alpha is provided.
+        The estimate accounts for subsampling and window effects.
+        
+        For Skip-gram: each retained word generates ~2*avg_window context pairs.
+        For CBOW: each retained word generates 1 example (with context as input).
+        
+        Returns:
+            Estimated number of training examples per epoch.
+        """
+        # Calculate effective word count after subsampling
+        if self.sample > 0 and self.discard_probs is not None:
+            # Expected retained words = sum of (count * keep_probability)
+            effective_words = sum(
+                self.word_counts[word] * (1.0 - self.discard_probs[idx])
+                for word, idx in self.vocab.items()
+            )
+        else:
+            effective_words = self.corpus_word_count
+        
+        # Average window size: if shrink_windows, uniform[1, window] has mean (window+1)/2
+        avg_window = (self.window + 1) / 2.0 if self.shrink_windows else self.window
+        
+        if self.sg:  # Skip-gram
+            # Each center word pairs with ~2*window context words (left + right)
+            # Apply 0.85 factor for: edge effects, OOV context words, context subsampling
+            estimated = int(effective_words * 2 * avg_window * 0.85)
+        else:  # CBOW
+            # Each center word generates 1 example (context words as input)
+            # Apply 0.90 factor for edge effects and empty context filtering
+            estimated = int(effective_words * 0.90)
+        
+        return max(1, estimated)
 
     def _initialize_vectors(self) -> None:
         """
@@ -503,8 +540,8 @@ class Word2Vec:
                 if center_idx == -1:
                     continue
                 
-                # Apply subsampling to center word
-                if self.sample > 0 and random_values[pos] < self.discard_probs[sentence[pos]]:
+                # Apply subsampling to center word (fast array lookup by word ID)
+                if self.sample > 0 and random_values[pos] < self.discard_probs[center_idx]:
                     continue
                     
                 # Determine window boundaries on the original sentence
@@ -524,8 +561,8 @@ class Word2Vec:
                     if context_idx == -1:
                         continue
                         
-                    # Apply subsampling to context word
-                    if self.sample > 0 and random_values[context_pos] < self.discard_probs[sentence[context_pos]]:
+                    # Apply subsampling to context word (fast array lookup by word ID)
+                    if self.sample > 0 and random_values[context_pos] < self.discard_probs[context_idx]:
                         continue
                     
                     # Both words passed filters, yield the example
@@ -574,8 +611,8 @@ class Word2Vec:
                 if center_idx == -1:
                     continue
                 
-                # Apply subsampling to center word
-                if self.sample > 0 and random_values[pos] < self.discard_probs[sentence[pos]]:
+                # Apply subsampling to center word (fast array lookup by word ID)
+                if self.sample > 0 and random_values[pos] < self.discard_probs[center_idx]:
                     continue
                     
                 # Determine window boundaries on the original sentence
@@ -596,8 +633,8 @@ class Word2Vec:
                     if context_idx == -1:
                         continue
                         
-                    # Apply subsampling to context word
-                    if self.sample > 0 and random_values[context_pos] < self.discard_probs[sentence[context_pos]]:
+                    # Apply subsampling to context word (fast array lookup by word ID)
+                    if self.sample > 0 and random_values[context_pos] < self.discard_probs[context_idx]:
                         continue
                     
                     # Word passed all filters, add to context
@@ -606,200 +643,6 @@ class Word2Vec:
                 # Only yield examples if we have at least one context word
                 if context_indices:
                     yield (context_indices, center_idx)
-
-    def _train_skipgram_example_python(self, input_idx: int, output_idx: int, learning_rate: float) -> float:
-        """
-        Train the model on a single Skip-gram example using pure Python implementation.
-        
-        Args:
-            input_idx: Index of the input word (center word).
-            output_idx: Index of the output word (context word).
-            learning_rate: Current learning rate.
-        
-        Returns:
-            Loss for this training example.
-        """
-        # Get input and output vectors
-        input_vector = self.W[input_idx]  # center word vector
-        output_vector = self.W_prime[output_idx]  # context word vector
-        
-        # Compute dot product
-        score = np.dot(input_vector, output_vector)
-        
-        # Apply sigmoid using the precomputed table
-        prediction = self._sigmoid(score)
-        
-        # Calculate gradient for positive example
-        gradient = prediction - 1.0  # gradient: sigmoid(x) - 1 (target)
-        
-        # Compute gradients
-        input_gradient = gradient * output_vector
-        output_gradient = gradient * input_vector
-        
-        # Loss for positive example: -log(sigmoid(score))
-        loss_pos = -self._log_sigmoid(score)
-        
-        # Sample negative examples
-        neg_indices = self._rng.choice(
-            self.vocab_size, 
-            size=self.negative, 
-            p=self.noise_distribution,
-            replace=True
-        )
-        
-        # Filter out the target word
-        neg_indices = neg_indices[neg_indices != output_idx]
-
-        # Vectorized training on negative examples
-        neg_output_vectors = self.W_prime[neg_indices]  # shape: (n_negative, vector_size)
-        
-        # Compute all negative scores at once
-        neg_scores = np.dot(neg_output_vectors, input_vector)  # shape: (n_negative,)
-        
-        # Apply sigmoid
-        neg_predictions = self._sigmoid(neg_scores)  # shape: (n_negative,)
-        
-        # Calculate gradients for all negative examples
-        neg_gradients = neg_predictions  # shape: (n_negative,)
-        neg_gradients_reshaped = neg_gradients.reshape(-1, 1)  # shape: (n_negative, 1)
-        
-        # Compute gradients for all negative output vectors
-        neg_output_gradients = neg_gradients_reshaped * input_vector  # shape: (n_negative, vector_size)
-        
-        # Accumulate gradient for input vector from all negative examples
-        neg_input_gradient = np.sum(neg_gradients_reshaped * neg_output_vectors, axis=0)
-        
-        # Combine input gradients and clip (matches Cython behavior)
-        total_input_gradient = self._clip_gradient(input_gradient + neg_input_gradient)
-        
-        # Apply input update
-        self.W[input_idx] -= learning_rate * total_input_gradient
-        
-        # Accumulate output gradients per unique index, then clip (matches Cython behavior)
-        # Handle positive output gradient
-        output_gradient = self._clip_gradient(output_gradient)
-        self.W_prime[output_idx] -= learning_rate * output_gradient
-        
-        # Handle negative output gradients - accumulate per unique index, then clip
-        unique_neg_indices = np.unique(neg_indices)
-        for idx in unique_neg_indices:
-            mask = neg_indices == idx
-            accumulated_grad = np.sum(neg_output_gradients[mask], axis=0)
-            clipped_grad = self._clip_gradient(accumulated_grad)
-            self.W_prime[idx] -= learning_rate * clipped_grad
-        
-        # Calculate loss for all negative examples
-        loss_neg = -np.sum(self._log_sigmoid(-neg_scores))
-        
-        return loss_pos + loss_neg
-
-    def _train_cbow_example_python(self, input_indices: List[int], output_idx: int, learning_rate: float) -> float:
-        """
-        Train the model on a single CBOW example using pure Python implementation.
-        
-        Args:
-            input_indices: List of indices for input context words.
-            output_idx: Index of the output word (center word).
-            learning_rate: Current learning rate.
-        
-        Returns:
-            Loss for this training example.
-        """
-        # Get input vectors (context word vectors)
-        input_vectors = self.W[input_indices]  # shape: (n_context, vector_size)
-        
-        # Combine context vectors: mean if cbow_mean=True, else sum
-        if self.cbow_mean and len(input_indices) > 1:
-            combined_input = np.mean(input_vectors, axis=0)  # average
-        else:
-            combined_input = np.sum(input_vectors, axis=0)  # sum
-            
-        # Get output vector (center word)
-        output_vector = self.W_prime[output_idx]
-        
-        # Compute dot product
-        score = np.dot(combined_input, output_vector)
-        
-        # Apply sigmoid using precomputed table
-        prediction = self._sigmoid(score)
-        
-        # Calculate gradient for positive example
-        gradient = prediction - 1.0  # gradient: sigmoid(x) - 1 (target)
-        
-        # Compute output gradient
-        output_gradient = gradient * combined_input
-        
-        # For inputs, distribute the gradient
-        input_gradient = gradient * output_vector
-        if self.cbow_mean and len(input_indices) > 1:
-            input_gradient = input_gradient / len(input_indices)  # normalize by context size
-        
-        # Loss for positive example
-        loss_pos = -self._log_sigmoid(score)
-        
-        # Sample negative examples
-        neg_indices = self._rng.choice(
-            self.vocab_size, 
-            size=self.negative, 
-            p=self.noise_distribution,
-            replace=True
-        )
-        
-        # Filter out the target word
-        neg_indices = neg_indices[neg_indices != output_idx]
-        
-        # Vectorized training on negative examples
-        neg_output_vectors = self.W_prime[neg_indices]  # shape: (n_negative, vector_size)
-        
-        # Compute all negative scores at once
-        neg_scores = np.dot(neg_output_vectors, combined_input)  # shape: (n_negative,)
-        
-        # Apply sigmoid
-        neg_predictions = self._sigmoid(neg_scores)  # shape: (n_negative,)
-        
-        # Calculate gradients for all negative examples
-        neg_gradients = neg_predictions  # shape: (n_negative,)
-        neg_gradients_reshaped = neg_gradients.reshape(-1, 1)  # shape: (n_negative, 1)
-        
-        # Compute gradients for all negative output vectors
-        neg_output_gradients = neg_gradients_reshaped * combined_input  # shape: (n_negative, vector_size)
-        
-        # Compute gradients for input vectors from negative examples
-        neg_input_gradient = np.sum(neg_gradients_reshaped * neg_output_vectors, axis=0)
-            
-        # Normalize if using mean
-        if self.cbow_mean and len(input_indices) > 1:
-            neg_input_gradient = neg_input_gradient / len(input_indices)
-        
-        # Combine input gradients and clip (matches Cython behavior)
-        total_input_gradient = self._clip_gradient(input_gradient + neg_input_gradient)
-        
-        # Clip positive output gradient and apply
-        output_gradient = self._clip_gradient(output_gradient)
-        self.W_prime[output_idx] -= learning_rate * output_gradient
-        
-        # Handle negative output gradients - accumulate per unique index, then clip (matches Cython behavior)
-        unique_neg_indices = np.unique(neg_indices)
-        for idx in unique_neg_indices:
-            mask = neg_indices == idx
-            accumulated_grad = np.sum(neg_output_gradients[mask], axis=0)
-            clipped_grad = self._clip_gradient(accumulated_grad)
-            self.W_prime[idx] -= learning_rate * clipped_grad
-        
-        # Update context word vectors - accumulate per unique index, then clip
-        input_indices_array = np.array(input_indices)
-        unique_input_indices = np.unique(input_indices_array)
-        for idx in unique_input_indices:
-            mask = input_indices_array == idx
-            count = np.sum(mask)
-            accumulated_grad = total_input_gradient * count
-            clipped_grad = self._clip_gradient(accumulated_grad)
-            self.W[idx] -= learning_rate * clipped_grad
-        
-        # Calculate loss for all negative examples
-        loss_neg = -np.sum(self._log_sigmoid(-neg_scores))
-        
-        return loss_pos + loss_neg
 
     def _train_batch_python(self, samples: List[Tuple], learning_rate: float) -> float:
         """
@@ -1027,57 +870,6 @@ class Word2Vec:
         
         return total_loss
 
-    def _train_skipgram_example(self, input_idx: int, output_idx: int, learning_rate: float) -> float:
-        """
-        Train the model on a single Skip-gram example, using either Cython or Python implementation.
-        
-        Args:
-            input_idx: Index of the input word (center word).
-            output_idx: Index of the output word (context word).
-            learning_rate: Current learning rate.
-        
-        Returns:
-            Loss for this training example.
-        """
-        if self.use_cython:
-            # Call the Cython single example implementation directly
-            return self.word2vec_c.train_skipgram_single(
-                self.W,
-                self.W_prime,
-                input_idx,
-                output_idx
-            )
-        else:
-            # Use the Python implementation
-            return self._train_skipgram_example_python(input_idx, output_idx, learning_rate)
-    
-    def _train_cbow_example(self, input_indices: List[int], output_idx: int, learning_rate: float) -> float:
-        """
-        Train a single CBOW example with negative sampling.
-        
-        Args:
-            input_indices: List of context word indices.
-            output_idx: Index of center word.
-            learning_rate: Current learning rate.
-        
-        Returns:
-            Loss for this training example.
-        """
-        if self.use_cython:     
-            # Convert input_indices to a numpy array for Cython
-            context_indices = np.array(input_indices, dtype=np.int32)
-            
-            # Call the Cython single example implementation
-            return self.word2vec_c.train_cbow_single(
-                self.W,
-                self.W_prime,
-                context_indices,
-                output_idx
-            )
-        else:
-            # Use the Python implementation
-            return self._train_cbow_example_python(input_indices, output_idx, learning_rate)
-
     def _generate_examples(self, sentences: Union[List[List[str]], Iterator[List[str]]]) -> Generator:
         """
         Generate training examples based on the model type (Skip-gram or CBOW).
@@ -1093,24 +885,6 @@ class Word2Vec:
         else:
             return self.generate_cbow_examples(sentences)
 
-    def _train_single_example(self, example: Tuple, learning_rate: float) -> float:
-        """
-        Train on a single example based on the model type (Skip-gram or CBOW).
-        
-        Args:
-            example: Training example tuple.
-            learning_rate: Current learning rate.
-        
-        Returns:
-            Loss for this training example.
-        """
-        if self.sg:
-            input_idx, output_idx = example
-            return self._train_skipgram_example(input_idx, output_idx, learning_rate)
-        else:
-            input_indices, output_idx = example
-            return self._train_cbow_example(input_indices, output_idx, learning_rate)
-    
     def _train_batch(self, samples: List[Tuple], learning_rate: float) -> float:
         """
         Train the model on a batch of samples, using either Cython or Python implementation.
@@ -1170,14 +944,11 @@ class Word2Vec:
             epochs: Number of training iterations over the corpus.
             alpha: Initial learning rate.
             min_alpha: Minimum allowed learning rate. When provided, enables learning rate 
-                decay from `alpha` down to `min_alpha` over the course of training. By 
-                default, this requires counting the total number of training examples 
-                upfront to calculate the decay schedule (which can be slow). Use 
-                `total_examples` to skip counting.
+                decay from `alpha` down to `min_alpha` over the course of training. The 
+                total example count is estimated mathematically for fast startup.
             total_examples: Total number of training examples per epoch. When provided 
-                along with `min_alpha`, skips the automatic counting step and uses this 
-                value for learning rate decay scheduling.
-            batch_size: Batch size for training; if 0, no batching is used. Default is 2000.
+                along with `min_alpha`, uses this exact value instead of estimating.
+            batch_size: Batch size for training. Must be > 0. Default is 2000.
             callbacks: List of callback functions to call after each epoch.
             calculate_loss: Whether to calculate and return the final loss.
             verbose: Controls logging frequency. If None, no batch-level logging in simple 
@@ -1188,6 +959,8 @@ class Word2Vec:
             Final loss value if calculate_loss is True, None otherwise.
         """
         self.epochs = epochs
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
         self.batch_size = batch_size
         if alpha:
             self.alpha = alpha
@@ -1202,9 +975,7 @@ class Word2Vec:
         decay_alpha = self.min_alpha is not None
 
         # Convert iterator to list if we need multiple epochs (for shuffling)
-        # or if we need to count examples for learning rate decay (and total_examples not provided)
-        needs_counting = decay_alpha and total_examples is None
-        if epochs > 1 or needs_counting:
+        if epochs > 1:
             if not isinstance(sentences, list):
                 logger.info("Converting iterator to list for multi-epoch training...")
                 sentences = list(sentences)
@@ -1215,7 +986,7 @@ class Word2Vec:
             self._initialize_vectors()
         if self.noise_distribution is None:
             self._prepare_noise_distribution()
-        if self.sample > 0 and not self.discard_probs:
+        if self.sample > 0 and self.discard_probs is None:
             self._calculate_discard_probs()
         
         if self.use_cython:
@@ -1227,21 +998,19 @@ class Word2Vec:
         total_example_count = 0
         recent_losses = []
         
-        # Count total examples if needed for learning rate decay
+        # Estimate total examples if needed for learning rate decay
         examples_per_epoch = None
         if decay_alpha:
             if total_examples is not None:
-                # User provided the count, skip counting
+                # User provided the count
                 examples_per_epoch = total_examples
                 total_example_count = total_examples * epochs
                 logger.info(f"Using provided total_examples={total_examples} for learning rate decay (alpha={self.alpha} -> min_alpha={self.min_alpha})")
             else:
-                # Count examples automatically
-                logger.info(f"Counting total examples for learning rate decay (alpha={self.alpha} -> min_alpha={self.min_alpha})...")
-                for _ in self._generate_examples(sentences):
-                    total_example_count += 1
-                examples_per_epoch = total_example_count
-                total_example_count *= epochs
+                # Estimate examples mathematically (fast, avoids full iteration)
+                examples_per_epoch = self._estimate_example_count()
+                total_example_count = examples_per_epoch * epochs
+                logger.info(f"Estimated ~{examples_per_epoch:,} examples/epoch for learning rate decay (alpha={self.alpha} -> min_alpha={self.min_alpha})")
 
         total_examples_processed = 0
         current_alpha = start_alpha = self.alpha
@@ -1330,8 +1099,7 @@ class Word2Vec:
             return time.strftime("%H:%M:%S")
         
         # Constants for progress reporting
-        LOSS_HISTORY_SIZE = 100 if batch_size > 0 else 1000
-        PROGRESS_UPDATE_INTERVAL = batch_size if batch_size > 0 else 10
+        LOSS_HISTORY_SIZE = 100
         
         # When we don't know the total, print periodic status updates instead of using tqdm
         use_simple_logging = not decay_alpha and examples_per_epoch is None
@@ -1352,57 +1120,16 @@ class Word2Vec:
             )
         
         # Batched training
-        if batch_size > 0:
-            batch_samples = []
+        batch_samples = []
+        
+        for example in self._generate_examples(sentences):
+            batch_samples.append(example)
+            examples_processed_in_epoch += 1
             
-            for example in self._generate_examples(sentences):
-                batch_samples.append(example)
-                examples_processed_in_epoch += 1
-                
-                if len(batch_samples) >= batch_size:
-                    batch_loss = self._train_batch(batch_samples, current_alpha)
-                    batch_count += 1
-                    total_examples_processed += batch_size
-                    
-                    if decay_alpha:
-                        decay_factor = 1 - (total_examples_processed / total_example_count)
-                        current_alpha = max(self.min_alpha, start_alpha * decay_factor)
-                        self._update_learning_rate(current_alpha)
-                    
-                    if calculate_loss:
-                        epoch_loss += batch_loss
-                        batch_avg_loss = batch_loss / len(batch_samples)
-                        recent_losses.append(batch_avg_loss)
-                        if len(recent_losses) > LOSS_HISTORY_SIZE:
-                            recent_losses.pop(0)
-                        
-                        recent_avg = sum(recent_losses) / len(recent_losses)
-                        
-                        if use_simple_logging:
-                            # Log every `verbose` batches for unknown total (if verbose is set)
-                            if verbose is not None and batch_count % verbose == 0:
-                                elapsed = time.time() - epoch_start_time
-                                ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
-                                if decay_alpha:
-                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
-                                else:
-                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
-                        else:
-                            if decay_alpha:
-                                postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
-                            else:
-                                postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
-                            progress_bar.set_postfix_str(postfix_str)
-                            progress_bar.update(batch_size)
-                    
-                    batch_samples = []
-            
-            # Handle remaining examples in final batch
-            if batch_samples:
-                remaining_batch_size = len(batch_samples)
+            if len(batch_samples) >= batch_size:
                 batch_loss = self._train_batch(batch_samples, current_alpha)
                 batch_count += 1
-                total_examples_processed += remaining_batch_size
+                total_examples_processed += batch_size
                 
                 if decay_alpha:
                     decay_factor = 1 - (total_examples_processed / total_example_count)
@@ -1411,59 +1138,56 @@ class Word2Vec:
                 
                 if calculate_loss:
                     epoch_loss += batch_loss
-                    
-                    if not use_simple_logging:
-                        if recent_losses:
-                            recent_avg = sum(recent_losses) / len(recent_losses)
-                            if decay_alpha:
-                                postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
-                            else:
-                                postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
-                            progress_bar.set_postfix_str(postfix_str)
-                        progress_bar.update(remaining_batch_size)
-        
-        # Non-batched training (individual examples)
-        else:
-            update_counter = 0
-            
-            for example in self._generate_examples(sentences):
-                loss = self._train_single_example(example, current_alpha)
-                total_examples_processed += 1
-                examples_processed_in_epoch += 1
-                update_counter += 1
-                
-                if decay_alpha:
-                    decay_factor = 1 - (total_examples_processed / total_example_count)
-                    current_alpha = max(self.min_alpha, start_alpha * decay_factor)
-                    self._update_learning_rate(current_alpha)
-                
-                if calculate_loss:
-                    epoch_loss += loss
-                    recent_losses.append(loss)
+                    batch_avg_loss = batch_loss / len(batch_samples)
+                    recent_losses.append(batch_avg_loss)
                     if len(recent_losses) > LOSS_HISTORY_SIZE:
                         recent_losses.pop(0)
                     
-                    if update_counter >= PROGRESS_UPDATE_INTERVAL:
-                        recent_avg = sum(recent_losses) / len(recent_losses)
-                        
-                        if use_simple_logging:
-                            # Log every `verbose * 1000` examples (if verbose is set)
-                            if verbose is not None and examples_processed_in_epoch % (verbose * 1000) == 0:
-                                elapsed = time.time() - epoch_start_time
-                                ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
-                                if decay_alpha:
-                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
-                                else:
-                                    print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | examples={examples_processed_in_epoch} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
-                        else:
+                    recent_avg = sum(recent_losses) / len(recent_losses)
+                    
+                    if use_simple_logging:
+                        # Log every `verbose` batches for unknown total (if verbose is set)
+                        if verbose is not None and batch_count % verbose == 0:
+                            elapsed = time.time() - epoch_start_time
+                            ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
                             if decay_alpha:
-                                postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, e={examples_processed_in_epoch}"
+                                print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
                             else:
-                                postfix_str = f"loss={recent_avg:.6f}, e={examples_processed_in_epoch}"
-                            progress_bar.set_postfix_str(postfix_str)
-                            progress_bar.update(PROGRESS_UPDATE_INTERVAL)
-                        
-                        update_counter = 0
+                                print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+                    else:
+                        if decay_alpha:
+                            postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
+                        else:
+                            postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
+                        progress_bar.set_postfix_str(postfix_str)
+                        progress_bar.update(batch_size)
+                
+                batch_samples = []
+        
+        # Handle remaining examples in final batch
+        if batch_samples:
+            remaining_batch_size = len(batch_samples)
+            batch_loss = self._train_batch(batch_samples, current_alpha)
+            batch_count += 1
+            total_examples_processed += remaining_batch_size
+            
+            if decay_alpha:
+                decay_factor = 1 - (total_examples_processed / total_example_count)
+                current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                self._update_learning_rate(current_alpha)
+            
+            if calculate_loss:
+                epoch_loss += batch_loss
+                
+                if not use_simple_logging:
+                    if recent_losses:
+                        recent_avg = sum(recent_losses) / len(recent_losses)
+                        if decay_alpha:
+                            postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
+                        else:
+                            postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
+                        progress_bar.set_postfix_str(postfix_str)
+                    progress_bar.update(remaining_batch_size)
         
         # Close progress bar
         if calculate_loss and not use_simple_logging:

@@ -1,11 +1,11 @@
 """
-Fast Word2Vec training operations implemented in Cython, inspired heavily by gensim.models.word2vec
-------------------------------------------------------
-This module provides optimized implementations of the core training
+Fast Word2Vec batch training operations implemented in Cython.
+
+This module provides optimized implementations of the core batch training
 operations for Word2Vec, including:
 
-1. Training Skip-gram examples with negative sampling
-2. Training CBOW examples with negative sampling
+1. Batch training Skip-gram examples with negative sampling
+2. Batch training CBOW examples with negative sampling
 3. Efficient sigmoid and vector operations
 
 These functions are designed to be called from the Python Word2Vec implementation
@@ -13,10 +13,10 @@ to accelerate the most computationally intensive parts of the training process.
 
 Key optimizations:
 - Alias method for O(1) negative sampling (vs. O(n) for linear search)
-- Reusable buffers to eliminate memory allocations in the training loop
-- BLAS operations for efficient vector math
+- BLAS operations for efficient vector math (via scipy.linalg.cython_blas)
 - Precomputed tables for fast sigmoid calculations
 - Xorshift128+ PRNG for fast random number generation
+- Per-batch array allocation using NumPy's optimized memory pool
 """
 
 # Compiler directives for maximum performance
@@ -78,17 +78,6 @@ cdef int VECTOR_SIZE  # Dimensionality of the word vectors
 # Alias method for efficient sampling
 cdef np.int32_t[:] alias
 cdef np.float32_t[:] prob
-
-# Reusable buffers to reduce memory allocations
-cdef np.ndarray _reusable_input_grad
-cdef np.ndarray _reusable_output_grads
-cdef np.ndarray _reusable_output_mask
-cdef np.ndarray _reusable_center_grad
-cdef np.ndarray _reusable_context_grads
-cdef np.ndarray _reusable_neg_grads
-cdef np.ndarray _reusable_context_mask
-cdef np.ndarray _reusable_neg_mask
-cdef np.ndarray _reusable_combined_input  # Add a new reusable buffer for combined input vector
 
 # Define Xorshift128+ state structure
 cdef struct xorshift128plus_state:
@@ -170,9 +159,6 @@ def init_globals(
     global NOISE_DISTRIBUTION_SIZE, NOISE_DISTRIBUTION_SUM
     global GRADIENT_CLIP, NEGATIVE, LEARNING_RATE, CBOW_MEAN, USING_DOUBLE_PRECISION
     global VECTOR_SIZE
-    global _reusable_input_grad, _reusable_output_grads, _reusable_output_mask
-    global _reusable_center_grad, _reusable_context_grads, _reusable_neg_grads
-    global _reusable_context_mask, _reusable_neg_mask
     
     # Set the precision based on the provided parameter instead of inferring from dtype
     USING_DOUBLE_PRECISION = use_double_precision
@@ -219,18 +205,6 @@ def init_globals(
 
     # Initialize alias method for sampling
     init_alias(np.asarray(noise_distribution, dtype=dtype))
-    
-    # Initialize reusable buffers for single example training functions
-    # Use the appropriate dtype for the reusable buffers
-    _reusable_input_grad = np.zeros(VECTOR_SIZE, dtype=dtype)
-    _reusable_output_grads = np.zeros((NOISE_DISTRIBUTION_SIZE, VECTOR_SIZE), dtype=dtype)
-    _reusable_output_mask = np.zeros(NOISE_DISTRIBUTION_SIZE, dtype=np.int8)
-    _reusable_center_grad = np.zeros(VECTOR_SIZE, dtype=dtype)
-    _reusable_context_grads = np.zeros((NOISE_DISTRIBUTION_SIZE, VECTOR_SIZE), dtype=dtype)
-    _reusable_neg_grads = np.zeros((NOISE_DISTRIBUTION_SIZE, VECTOR_SIZE), dtype=dtype)
-    _reusable_context_mask = np.zeros(NOISE_DISTRIBUTION_SIZE, dtype=np.int8)
-    _reusable_neg_mask = np.zeros(NOISE_DISTRIBUTION_SIZE, dtype=np.int8)
-    _reusable_combined_input = np.zeros(VECTOR_SIZE, dtype=dtype)  # Initialize the combined input buffer
 
 # Update learning rate from Python code
 def update_learning_rate(float new_learning_rate):
@@ -412,17 +386,6 @@ cdef inline real_t fast_log_sigmoid(real_t x) noexcept:
             idx = LOG_SIGMOID_TABLE_FLOAT64.shape[0] - 1
         return LOG_SIGMOID_TABLE_FLOAT64[idx]
 
-# Function to sample from a discrete probability distribution
-cdef inline int sample_from_distribution() noexcept:
-    """
-    Sample an index from the global noise distribution using the alias method.
-    
-    Returns:
-        Sampled index
-    """
-    # Use the alias method for O(1) sampling
-    return alias_sample()
-
 # Clip gradient norm to prevent explosion while preserving direction
 cdef inline void clip_gradient_norm(real_t* grad_vector, int size, real_t max_norm) noexcept:
     """
@@ -450,111 +413,6 @@ cdef inline void clip_gradient_norm(real_t* grad_vector, int size, real_t max_no
         # Scale down the entire gradient vector to have norm = max_norm
         scale = max_norm / norm
         our_scal(grad_vector, scale, size)
-
-# Single-example skipgram training function
-cdef real_t train_skipgram_single(
-    real_t[:, :] W,           # Input word embeddings
-    real_t[:, :] W_prime,     # Output word embeddings
-    ITYPE_t input_idx,        # Center word index
-    ITYPE_t output_idx        # Context word index
-) noexcept:
-    """
-    Train a single Skip-gram example with negative sampling.
-    
-    Args:
-        W: Input word vectors (vocabulary_size x vector_size)
-        W_prime: Output word vectors (vocabulary_size x vector_size)
-        input_idx: Index of center word
-        output_idx: Index of context word
-        
-    Returns:
-        Loss for this example
-    """
-    cdef int vector_size = W.shape[1]
-    cdef int vocab_size = W.shape[0]
-    cdef int j, k, neg_idx
-    cdef real_t score, prediction, gradient, neg_loss, loss = 0.0
-    cdef real_t pos_loss = 0.0
-    
-    # Use reusable buffers instead of allocating new memory
-    cdef real_t[:] input_grad = _reusable_input_grad
-    cdef real_t[:, :] output_grads = _reusable_output_grads
-    cdef np.int8_t[:] output_mask = _reusable_output_mask
-    
-    # Zero out the buffers with BLAS - only the portion we'll actually use
-    our_zero(&input_grad[0], vector_size)
-    
-    for j in range(vocab_size):
-        output_mask[j] = 0
-        for k in range(vector_size):
-            output_grads[j, k] = 0.0
-    
-    # === POSITIVE EXAMPLE ===
-    # Compute dot product
-    score = our_dot(&W[input_idx, 0], &W_prime[output_idx, 0], vector_size)
-    
-    # Apply sigmoid 
-    prediction = fast_sigmoid(score)
-    
-    # Compute gradient for positive example (target = 1)
-    gradient = prediction - 1.0
-    
-    # Accumulate gradients for positive example
-    our_axpy(&W_prime[output_idx, 0], &input_grad[0], gradient, vector_size)
-    
-    # Accumulate gradients for output vector
-    our_axpy(&W[input_idx, 0], &output_grads[output_idx, 0], gradient, vector_size)
-    output_mask[output_idx] = 1  # Mark this index for update
-    
-    # Compute positive loss
-    pos_loss = -fast_log_sigmoid(score)
-    loss -= fast_log_sigmoid(score)
-    
-    # === NEGATIVE EXAMPLES ===
-    for k in range(NEGATIVE):
-        # Sample from noise distribution using alias method (O(1) time)
-        neg_idx = sample_from_distribution()
-        
-        # Resample if we get the positive target
-        while neg_idx == output_idx:
-            neg_idx = sample_from_distribution()
-            
-        # Compute score
-        score = our_dot(&W[input_idx, 0], &W_prime[neg_idx, 0], vector_size)
-        
-        # Apply sigmoid
-        prediction = fast_sigmoid(score)
-        
-        # Compute gradient for negative example (target = 0)
-        gradient = prediction
-        
-        # Accumulate gradients for negative examples
-        our_axpy(&W_prime[neg_idx, 0], &input_grad[0], gradient, vector_size)
-        
-        # Accumulate gradients for negative output vector
-        our_axpy(&W[input_idx, 0], &output_grads[neg_idx, 0], gradient, vector_size)
-        output_mask[neg_idx] = 1  # Mark this index for update
-            
-        # Calculate negative loss
-        neg_loss = -fast_log_sigmoid(-score)
-        loss -= fast_log_sigmoid(-score)
-    
-    # Apply all accumulated gradients at the end
-    
-    # Clip accumulated gradients by norm before applying
-    clip_gradient_norm(&input_grad[0], vector_size, GRADIENT_CLIP)
-    
-    # Update input word vector
-    our_axpy(&input_grad[0], &W[input_idx, 0], -LEARNING_RATE, vector_size)
-    
-    # Update output word vectors (both positive and negative)
-    for j in range(vocab_size):
-        if output_mask[j] == 1:  # Only update vectors that were used
-            # Clip accumulated output gradients by norm before applying
-            clip_gradient_norm(&output_grads[j, 0], vector_size, GRADIENT_CLIP)
-            our_axpy(&output_grads[j, 0], &W_prime[j, 0], -LEARNING_RATE, vector_size)
-    
-    return loss
 
 # Batch training for skipgram model
 def train_skipgram_batch(
@@ -585,7 +443,7 @@ def train_skipgram_batch(
     cdef ITYPE_t in_idx, out_idx
     cdef real_t neg_lr = -LEARNING_RATE
     
-    # Pre-allocate arrays for each example's processing
+    # Allocate fresh arrays each batch (NumPy allocation is fast and well-optimized)
     cdef np.ndarray[real_t, ndim=1] input_grad = np.zeros(vector_size, dtype=W.base.dtype)
     cdef np.ndarray[real_t, ndim=1] pos_output_grad = np.zeros(vector_size, dtype=W.base.dtype)
     cdef np.ndarray[real_t, ndim=1] neg_output_grad = np.zeros(vector_size, dtype=W.base.dtype)
@@ -662,160 +520,6 @@ def train_skipgram_batch(
     
     return total_loss
 
-# Single-example CBOW training function
-cdef real_t train_cbow_single(
-    real_t[:, :] W,           # Input word embeddings
-    real_t[:, :] W_prime,     # Output word embeddings
-    ITYPE_t[:] context_indices,  # Context word indices
-    ITYPE_t center_idx        # Center word index
-) noexcept:
-    """
-    Train a single CBOW example with negative sampling.
-    
-    Args:
-        W: Input word vectors (vocabulary_size x vector_size)
-        W_prime: Output word vectors (vocabulary_size x vector_size)
-        context_indices: Indices of context words
-        center_idx: Index of center word
-        
-    Returns:
-        Loss for this example
-    """
-    cdef int vector_size = W.shape[1]
-    cdef int vocab_size = W.shape[0]
-    cdef int j, k, c, neg_idx
-    cdef int context_size = context_indices.shape[0]
-    cdef ITYPE_t ctx_idx
-    cdef real_t score, prediction, gradient, neg_loss, loss = 0.0
-    cdef real_t pos_loss = 0.0  # Track positive sample loss
-    cdef real_t scale_factor, input_gradient_scale
-    
-    # Return zero loss if no context words
-    if context_size == 0:
-        return 0.0
-    
-    # Use reusable buffers to avoid allocations
-    cdef real_t[:] center_grad = _reusable_center_grad  # For positive center word
-    cdef real_t[:, :] context_grads = _reusable_context_grads
-    cdef real_t[:, :] neg_grads = _reusable_neg_grads
-    cdef np.int8_t[:] context_mask = _reusable_context_mask
-    cdef np.int8_t[:] neg_mask = _reusable_neg_mask
-    cdef real_t[:] combined_input = _reusable_combined_input  # Use the global reusable buffer
-    
-    # Reset the buffers using BLAS
-    our_zero(&center_grad[0], vector_size)
-    our_zero(&combined_input[0], vector_size)
-        
-    for j in range(vocab_size):
-        context_mask[j] = 0
-        neg_mask[j] = 0
-        for k in range(vector_size):
-            context_grads[j, k] = 0.0
-            neg_grads[j, k] = 0.0
-    
-    # Combine context vectors using BLAS for efficiency
-    for c in range(context_size):
-        ctx_idx = context_indices[c]
-        # Add context vector to combined input using BLAS
-        our_axpy(&W[ctx_idx, 0], &combined_input[0], 1.0, vector_size)
-        # Mark context words for update
-        if ctx_idx < context_mask.shape[0]:
-            context_mask[ctx_idx] = 1
-            
-    # Apply mean if required - use BLAS for scaling
-    if CBOW_MEAN and context_size > 1:
-        scale_factor = 1.0 / context_size
-        our_scal(&combined_input[0], scale_factor, vector_size)
-    
-    # === POSITIVE EXAMPLE ===
-    # Compute dot product
-    score = our_dot(&combined_input[0], &W_prime[center_idx, 0], vector_size)
-    
-    # Apply sigmoid
-    prediction = fast_sigmoid(score)
-    
-    # Compute gradient for positive example (target = 1)
-    gradient = prediction - 1.0
-    
-    # Accumulate gradient for center word
-    our_axpy(&combined_input[0], &center_grad[0], gradient, vector_size)
-    
-    # Accumulate gradients for context words
-    for c in range(context_size):
-        ctx_idx = context_indices[c]
-        
-        # Compute gradient scale
-        input_gradient_scale = gradient
-        if CBOW_MEAN and context_size > 1:
-            input_gradient_scale /= context_size
-        
-        # Accumulate gradient for this context word
-        our_axpy(&W_prime[center_idx, 0], &context_grads[ctx_idx, 0], input_gradient_scale, vector_size)
-    
-    # Compute positive loss
-    pos_loss = -fast_log_sigmoid(score)
-    loss -= fast_log_sigmoid(score)
-    
-    # === NEGATIVE EXAMPLES ===
-    for k in range(NEGATIVE):
-        # Sample from noise distribution using the alias method (O(1) time)
-        neg_idx = sample_from_distribution()
-        
-        # Resample if we get the positive target
-        while neg_idx == center_idx:
-            neg_idx = sample_from_distribution()
-            
-        # Compute score
-        score = our_dot(&combined_input[0], &W_prime[neg_idx, 0], vector_size)
-        
-        # Apply sigmoid
-        prediction = fast_sigmoid(score)
-        
-        # Compute gradient for negative example (target = 0)
-        gradient = prediction
-        
-        # Accumulate gradient for negative word
-        our_axpy(&combined_input[0], &neg_grads[neg_idx, 0], gradient, vector_size)
-        neg_mask[neg_idx] = 1  # Mark for update
-        
-        # Accumulate gradients for context words
-        for c in range(context_size):
-            ctx_idx = context_indices[c]
-            
-            # Compute gradient scale
-            input_gradient_scale = gradient
-            if CBOW_MEAN and context_size > 1:
-                input_gradient_scale /= context_size
-            
-            # Accumulate gradient for this context word
-            our_axpy(&W_prime[neg_idx, 0], &context_grads[ctx_idx, 0], input_gradient_scale, vector_size)
-                
-        # Calculate negative loss
-        neg_loss = -fast_log_sigmoid(-score)
-        loss -= fast_log_sigmoid(-score)
-    
-    # Apply all accumulated gradients at the end
-    
-    # Clip accumulated gradients by norm before applying
-    clip_gradient_norm(&center_grad[0], vector_size, GRADIENT_CLIP)
-    
-    # Update center word vector
-    our_axpy(&center_grad[0], &W_prime[center_idx, 0], -LEARNING_RATE, vector_size)
-    
-    # Update negative sample vectors
-    for j in range(vocab_size):
-        if neg_mask[j] == 1: # Only update vectors that were used
-            clip_gradient_norm(&neg_grads[j, 0], vector_size, GRADIENT_CLIP)
-            our_axpy(&neg_grads[j, 0], &W_prime[j, 0], -LEARNING_RATE, vector_size)
-    
-    # Update context word vectors
-    for j in range(vocab_size):
-        if context_mask[j] == 1: # Only update context words
-            clip_gradient_norm(&context_grads[j, 0], vector_size, GRADIENT_CLIP)
-            our_axpy(&context_grads[j, 0], &W[j, 0], -LEARNING_RATE, vector_size)
-        
-    return loss
-
 # Batch training for CBOW model
 def train_cbow_batch(
     real_t[:, :] W,              # Input word embeddings
@@ -844,7 +548,7 @@ def train_cbow_batch(
     cdef real_t score, prediction, gradient, scale_factor, input_gradient_scale
     cdef real_t neg_lr = -LEARNING_RATE
     
-    # Pre-allocate buffers for processing one example at a time
+    # Allocate fresh arrays each batch (NumPy allocation is fast and well-optimized)
     cdef np.ndarray[real_t, ndim=1] combined_input = np.zeros(vector_size, dtype=W.base.dtype)
     cdef np.ndarray[real_t, ndim=1] context_grad = np.zeros(vector_size, dtype=W.base.dtype)
     cdef np.ndarray[real_t, ndim=1] center_grad = np.zeros(vector_size, dtype=W.base.dtype)

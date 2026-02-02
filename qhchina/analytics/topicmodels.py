@@ -467,17 +467,22 @@ class LDAGibbsSampler:
         doc_lengths = self.doc_lengths[:, np.newaxis]
         self.theta = (self.n_dt + self.alpha) / (doc_lengths + self.alpha_sum)
         
-        # Calculate phi with shape (vocab_size, n_topics), then transpose
-        phi = np.zeros((self.vocabulary_size, self.n_topics), dtype=np.float64)
+        # Vectorized phi computation
+        # Shape: (n_topics,) - one denominator per topic
+        denominators = self.n_t + self.vocabulary_size * self.beta
         
-        for k in range(self.n_topics):
-            if self.n_t[k] > 0:
-                denominator = self.n_t[k] + self.vocabulary_size * self.beta
-                phi[:, k] = (self.n_wt[:, k] + self.beta) / denominator
-            else:
-                phi[:, k] = 1.0 / self.vocabulary_size
-                
-        # Ensure phi is C-contiguous after transpose
+        # Broadcasting: (vocab_size, n_topics) / (n_topics,) -> (vocab_size, n_topics)
+        phi = (self.n_wt + self.beta) / denominators
+        
+        # Handle zero-count topics (rare edge case with small data)
+        # When n_t[k] == 0, denominator is vocab_size * beta, and
+        # phi[:, k] = beta / (vocab_size * beta) = 1/vocab_size
+        # This is mathematically correct, but we check explicitly for robustness
+        zero_topics = self.n_t == 0
+        if np.any(zero_topics):
+            phi[:, zero_topics] = 1.0 / self.vocabulary_size
+        
+        # Ensure phi is C-contiguous after transpose: (n_topics, vocab_size)
         self.phi = np.ascontiguousarray(phi.T)
         
     def fit(self, documents: List[List[str]]) -> None:
