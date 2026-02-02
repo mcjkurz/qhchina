@@ -442,11 +442,11 @@ def train_skipgram_batch(
     cdef real_t score, prediction, gradient
     cdef ITYPE_t in_idx, out_idx
     cdef real_t neg_lr = -LEARNING_RATE
+    # Variables for optimized gradient clipping
+    cdef real_t input_norm, grad_norm, clip_scale, effective_lr
     
     # Allocate fresh arrays each batch (NumPy allocation is fast and well-optimized)
     cdef np.ndarray[real_t, ndim=1] input_grad = np.zeros(vector_size, dtype=W.base.dtype)
-    cdef np.ndarray[real_t, ndim=1] pos_output_grad = np.zeros(vector_size, dtype=W.base.dtype)
-    cdef np.ndarray[real_t, ndim=1] neg_output_grad = np.zeros(vector_size, dtype=W.base.dtype)
     
     # Generate all negative samples at once for efficiency
     cdef np.ndarray[ITYPE_t, ndim=2] neg_indices = np.zeros((batch_size, NEGATIVE), dtype=np.int32)
@@ -458,9 +458,12 @@ def train_skipgram_batch(
         in_idx = input_indices[i]
         out_idx = output_indices[i]
         
-        # Reset gradient buffers using BLAS
+        # Reset gradient buffer using BLAS
         our_zero(&input_grad[0], vector_size)
-        our_zero(&pos_output_grad[0], vector_size)
+        
+        # Compute input vector norm once per example for efficient gradient clipping
+        # All negative samples use the same input vector, so we can reuse this
+        input_norm = sqrt(our_dot(&W[in_idx, 0], &W[in_idx, 0], vector_size))
         
         # === POSITIVE EXAMPLE ===
         # Compute dot product
@@ -475,8 +478,16 @@ def train_skipgram_batch(
         # Accumulate gradients for input vector
         our_axpy(&W_prime[out_idx, 0], &input_grad[0], gradient, vector_size)
         
-        # Accumulate gradient for positive output vector (clip before applying)
-        our_axpy(&W[in_idx, 0], &pos_output_grad[0], gradient, vector_size)
+        # Apply clipped gradient to positive output vector (unified scalar method)
+        # For positive: gradient = prediction - 1.0 ∈ [-1, 0], so |gradient| = -gradient
+        # grad_norm = |gradient| * input_norm = -gradient * input_norm
+        grad_norm = -gradient * input_norm
+        if grad_norm > GRADIENT_CLIP and grad_norm > 1e-12:
+            clip_scale = GRADIENT_CLIP / grad_norm
+            effective_lr = neg_lr * gradient * clip_scale
+        else:
+            effective_lr = neg_lr * gradient
+        our_axpy(&W[in_idx, 0], &W_prime[out_idx, 0], effective_lr, vector_size)
         
         # Compute loss for positive example
         total_loss -= fast_log_sigmoid(score)
@@ -501,18 +512,23 @@ def train_skipgram_batch(
             # Accumulate gradients for input vector
             our_axpy(&W_prime[neg_idx, 0], &input_grad[0], gradient, vector_size)
             
-            # Compute gradient for this negative sample, clip it, then apply
-            our_zero(&neg_output_grad[0], vector_size)
-            our_axpy(&W[in_idx, 0], &neg_output_grad[0], gradient, vector_size)
-            clip_gradient_norm(&neg_output_grad[0], vector_size, GRADIENT_CLIP)
-            our_axpy(&neg_output_grad[0], &W_prime[neg_idx, 0], neg_lr, vector_size)
+            # Optimized gradient clipping: compute clip scale directly from input_norm
+            # The gradient vector is gradient * W[in_idx], with norm = gradient * input_norm
+            # Instead of: zero buffer, copy, clip, apply (4 BLAS calls)
+            # We compute the effective learning rate and apply directly (1 BLAS call)
+            grad_norm = gradient * input_norm
+            if grad_norm > GRADIENT_CLIP and grad_norm > 1e-12:
+                # Scale down: effective_gradient = gradient * (GRADIENT_CLIP / grad_norm)
+                clip_scale = GRADIENT_CLIP / grad_norm
+                effective_lr = neg_lr * gradient * clip_scale
+            else:
+                effective_lr = neg_lr * gradient
+            
+            # Apply gradient directly to negative output vector (single BLAS call)
+            our_axpy(&W[in_idx, 0], &W_prime[neg_idx, 0], effective_lr, vector_size)
             
             # Compute loss for negative example
             total_loss -= fast_log_sigmoid(-score)
-        
-        # Clip and apply accumulated positive output gradient
-        clip_gradient_norm(&pos_output_grad[0], vector_size, GRADIENT_CLIP)
-        our_axpy(&pos_output_grad[0], &W_prime[out_idx, 0], neg_lr, vector_size)
         
         # Clip and apply accumulated input gradient
         clip_gradient_norm(&input_grad[0], vector_size, GRADIENT_CLIP)
@@ -554,12 +570,12 @@ def train_cbow_batch(
     cdef real_t total_loss = 0.0
     cdef real_t score, prediction, gradient, scale_factor, input_gradient_scale
     cdef real_t neg_lr = -LEARNING_RATE
+    # Variables for optimized gradient clipping
+    cdef real_t combined_input_norm, grad_norm, clip_scale, effective_lr
     
     # Allocate fresh arrays each batch (NumPy allocation is fast and well-optimized)
     cdef np.ndarray[real_t, ndim=1] combined_input = np.zeros(vector_size, dtype=W.base.dtype)
     cdef np.ndarray[real_t, ndim=1] context_grad = np.zeros(vector_size, dtype=W.base.dtype)
-    cdef np.ndarray[real_t, ndim=1] center_grad = np.zeros(vector_size, dtype=W.base.dtype)
-    cdef np.ndarray[real_t, ndim=1] neg_grad = np.zeros(vector_size, dtype=W.base.dtype)
     
     # Generate all negative samples at once for efficiency
     cdef np.ndarray[ITYPE_t, ndim=2] neg_indices = np.zeros((batch_size, NEGATIVE), dtype=np.int32)
@@ -590,9 +606,12 @@ def train_cbow_batch(
             scale_factor = 1.0 / context_size
             our_scal(&combined_input[0], scale_factor, vector_size)
         
+        # Compute combined_input norm once per example for efficient gradient clipping
+        # All negative samples use the same combined_input, so we can reuse this
+        combined_input_norm = sqrt(our_dot(&combined_input[0], &combined_input[0], vector_size))
+        
         # === POSITIVE EXAMPLE (center word) ===
-        # Reset gradient accumulators using BLAS
-        our_zero(&center_grad[0], vector_size)
+        # Reset context gradient accumulator using BLAS
         our_zero(&context_grad[0], vector_size)
         
         # Compute dot product
@@ -604,8 +623,16 @@ def train_cbow_batch(
         # Compute gradient for positive example (target = 1)
         gradient = prediction - 1.0
         
-        # Accumulate gradient for center word (positive)
-        our_axpy(&combined_input[0], &center_grad[0], gradient, vector_size)
+        # Apply clipped gradient to positive center word (unified scalar method)
+        # For positive: gradient = prediction - 1.0 ∈ [-1, 0], so |gradient| = -gradient
+        # grad_norm = |gradient| * combined_input_norm = -gradient * combined_input_norm
+        grad_norm = -gradient * combined_input_norm
+        if grad_norm > GRADIENT_CLIP and grad_norm > 1e-12:
+            clip_scale = GRADIENT_CLIP / grad_norm
+            effective_lr = neg_lr * gradient * clip_scale
+        else:
+            effective_lr = neg_lr * gradient
+        our_axpy(&combined_input[0], &W_prime[center_idx, 0], effective_lr, vector_size)
             
         # Compute context gradient scaling factor
         input_gradient_scale = gradient
@@ -635,13 +662,20 @@ def train_cbow_batch(
             # Compute gradient for negative example (target = 0)
             gradient = prediction
             
-            # Compute gradient for this negative sample and clip it
-            our_zero(&neg_grad[0], vector_size)
-            our_axpy(&combined_input[0], &neg_grad[0], gradient, vector_size)
-            clip_gradient_norm(&neg_grad[0], vector_size, GRADIENT_CLIP)
+            # Optimized gradient clipping: compute clip scale directly from combined_input_norm
+            # The gradient vector is gradient * combined_input, with norm = gradient * combined_input_norm
+            # Instead of: zero buffer, copy, clip, apply (4 BLAS calls)
+            # We compute the effective learning rate and apply directly (1 BLAS call)
+            grad_norm = gradient * combined_input_norm
+            if grad_norm > GRADIENT_CLIP and grad_norm > 1e-12:
+                # Scale down: effective_gradient = gradient * (GRADIENT_CLIP / grad_norm)
+                clip_scale = GRADIENT_CLIP / grad_norm
+                effective_lr = neg_lr * gradient * clip_scale
+            else:
+                effective_lr = neg_lr * gradient
             
-            # Apply clipped gradient to negative word vector
-            our_axpy(&neg_grad[0], &W_prime[neg_idx, 0], neg_lr, vector_size)
+            # Apply gradient directly to negative word vector (single BLAS call)
+            our_axpy(&combined_input[0], &W_prime[neg_idx, 0], effective_lr, vector_size)
             
             # Compute context gradient scaling factor
             input_gradient_scale = gradient
@@ -653,12 +687,6 @@ def train_cbow_batch(
             
             # Compute loss for negative example
             total_loss -= fast_log_sigmoid(-score)
-        
-        # After processing all positive and negative examples, update vectors with clipped gradients
-        
-        # Clip accumulated center gradient by norm before applying (positive center word)
-        clip_gradient_norm(&center_grad[0], vector_size, GRADIENT_CLIP)
-        our_axpy(&center_grad[0], &W_prime[center_idx, 0], neg_lr, vector_size)
         
         # Clip accumulated context gradients by norm before applying
         clip_gradient_norm(&context_grad[0], vector_size, GRADIENT_CLIP)
