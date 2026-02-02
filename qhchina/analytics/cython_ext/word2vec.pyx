@@ -520,20 +520,27 @@ def train_skipgram_batch(
     
     return total_loss
 
-# Batch training for CBOW model
+# Batch training for CBOW model using flat arrays (optimized, no Python list overhead)
 def train_cbow_batch(
     real_t[:, :] W,              # Input word embeddings
     real_t[:, :] W_prime,        # Output word vectors (vocabulary_size x vector_size)
-    list context_indices_list,    # List of lists of context word indices
+    ITYPE_t[:] context_flat,     # Flat array of all context indices
+    ITYPE_t[:] context_offsets,  # Start offset for each example's context
+    ITYPE_t[:] context_lengths,  # Length of context for each example
     ITYPE_t[:] center_indices    # Center word indices
 ):
     """
-    Train a batch of CBOW examples with negative sampling.
+    Train a batch of CBOW examples with negative sampling using flat arrays.
+    
+    This is the optimized interface that avoids Python list construction overhead.
+    Context indices are stored in a flat array with offsets and lengths for each example.
     
     Args:
         W: Input word vectors (vocabulary_size x vector_size)
         W_prime: Output word vectors (vocabulary_size x vector_size)
-        context_indices_list: List of lists of context word indices
+        context_flat: Flat array containing all context indices concatenated
+        context_offsets: Start offset in context_flat for each example
+        context_lengths: Number of context words for each example
         center_indices: Indices of center words
         
     Returns:
@@ -542,7 +549,7 @@ def train_cbow_batch(
     cdef int batch_size = center_indices.shape[0]
     cdef int vector_size = W.shape[1]
     cdef int vocab_size = W.shape[0]
-    cdef int i, j, k, c, neg_idx
+    cdef int i, j, k, neg_idx, offset, context_size
     cdef ITYPE_t center_idx, ctx_idx
     cdef real_t total_loss = 0.0
     cdef real_t score, prediction, gradient, scale_factor, input_gradient_scale
@@ -560,21 +567,21 @@ def train_cbow_batch(
     
     # Process each example (positive + its negative samples) one at a time
     for i in range(batch_size):
-        # Get current example's context indices and center word
-        context_indices = context_indices_list[i]
+        # Get current example's context info and center word
         center_idx = center_indices[i]
+        offset = context_offsets[i]
+        context_size = context_lengths[i]
         
         # Skip examples with no context
-        if not context_indices:
+        if context_size == 0:
             continue
             
         # Reset the combined input vector using BLAS
         our_zero(&combined_input[0], vector_size)
         
-        # Combine context vectors
-        context_size = len(context_indices)
+        # Combine context vectors from flat array
         for j in range(context_size):
-            ctx_idx = context_indices[j]
+            ctx_idx = context_flat[offset + j]
             # Add context vector to combined input using BLAS
             our_axpy(&W[ctx_idx, 0], &combined_input[0], 1.0, vector_size)
         
@@ -599,8 +606,6 @@ def train_cbow_batch(
         
         # Accumulate gradient for center word (positive)
         our_axpy(&combined_input[0], &center_grad[0], gradient, vector_size)
-            
-        # Calculate context word gradients for positive sample
             
         # Compute context gradient scaling factor
         input_gradient_scale = gradient
@@ -638,7 +643,6 @@ def train_cbow_batch(
             # Apply clipped gradient to negative word vector
             our_axpy(&neg_grad[0], &W_prime[neg_idx, 0], neg_lr, vector_size)
             
-            # Calculate context word gradients for negative sample
             # Compute context gradient scaling factor
             input_gradient_scale = gradient
             if CBOW_MEAN and context_size > 1:
@@ -659,7 +663,7 @@ def train_cbow_batch(
         # Clip accumulated context gradients by norm before applying
         clip_gradient_norm(&context_grad[0], vector_size, GRADIENT_CLIP)
         for j in range(context_size):
-            ctx_idx = context_indices[j]
+            ctx_idx = context_flat[offset + j]
             our_axpy(&context_grad[0], &W[ctx_idx, 0], neg_lr, vector_size)
     
     return total_loss
@@ -697,3 +701,764 @@ cdef void generate_negative_samples(
             
             # Store the negative sample
             neg_indices[i, j] = neg_idx 
+
+
+# =============================================================================
+# Fast Example Generation Functions
+# =============================================================================
+
+def generate_skipgram_examples(
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling
+):
+    """
+    Generate Skip-gram training examples from pre-indexed sentences.
+    
+    This function performs the heavy lifting of example generation in Cython,
+    including subsampling and dynamic window sizing.
+    
+    Args:
+        indexed_sentences: List of numpy int32 arrays, each containing word indices
+                          for a sentence (-1 for OOV words)
+        discard_probs: Array of discard probabilities indexed by word ID
+        window: Maximum context window size
+        shrink_windows: If True, randomly shrink window for each center word
+        use_subsampling: If True, apply subsampling based on discard_probs
+    
+    Returns:
+        Tuple of (input_indices, output_indices) as numpy int32 arrays
+    """
+    cdef int num_sentences = len(indexed_sentences)
+    cdef int sent_idx, pos, context_pos, sentence_len
+    cdef int center_idx, context_idx, dynamic_window, start, end
+    cdef np.ndarray[ITYPE_t, ndim=1] sentence
+    cdef double rand_val
+    
+    # First pass: estimate number of examples for pre-allocation
+    # Use a generous estimate: sum of (sentence_len * 2 * window)
+    cdef long estimated_examples = 0
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        estimated_examples += len(sentence) * 2 * window
+    
+    # Pre-allocate output arrays (we'll trim at the end)
+    cdef np.ndarray[ITYPE_t, ndim=1] input_indices = np.empty(estimated_examples, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] output_indices = np.empty(estimated_examples, dtype=np.int32)
+    cdef long example_count = 0
+    
+    # Process each sentence
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        sentence_len = len(sentence)
+        
+        if sentence_len == 0:
+            continue
+        
+        # Process each position in the sentence
+        for pos in range(sentence_len):
+            center_idx = sentence[pos]
+            
+            # Skip OOV words (marked as -1)
+            if center_idx < 0:
+                continue
+            
+            # Apply subsampling to center word
+            if use_subsampling:
+                rand_val = xorshift128plus_random()
+                if rand_val < discard_probs[center_idx]:
+                    continue
+            
+            # Determine window size
+            if shrink_windows:
+                dynamic_window = 1 + <int>(xorshift128plus_random() * window)
+            else:
+                dynamic_window = window
+            
+            # Calculate context boundaries
+            start = pos - dynamic_window
+            if start < 0:
+                start = 0
+            end = pos + dynamic_window + 1
+            if end > sentence_len:
+                end = sentence_len
+            
+            # Generate examples for each context position
+            for context_pos in range(start, end):
+                if context_pos == pos:
+                    continue
+                
+                context_idx = sentence[context_pos]
+                
+                # Skip OOV context words
+                if context_idx < 0:
+                    continue
+                
+                # Apply subsampling to context word
+                if use_subsampling:
+                    rand_val = xorshift128plus_random()
+                    if rand_val < discard_probs[context_idx]:
+                        continue
+                
+                # Store the example
+                input_indices[example_count] = center_idx
+                output_indices[example_count] = context_idx
+                example_count += 1
+    
+    # Trim arrays to actual size
+    return input_indices[:example_count].copy(), output_indices[:example_count].copy()
+
+
+def generate_cbow_examples(
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling
+):
+    """
+    Generate CBOW training examples from pre-indexed sentences.
+    
+    For CBOW, each example has variable-length context. We return:
+    - context_flat: Flat array of all context indices
+    - context_offsets: Start offset for each example's context in context_flat
+    - context_lengths: Length of context for each example
+    - center_indices: Center word index for each example
+    
+    Args:
+        indexed_sentences: List of numpy int32 arrays, each containing word indices
+                          for a sentence (-1 for OOV words)
+        discard_probs: Array of discard probabilities indexed by word ID
+        window: Maximum context window size
+        shrink_windows: If True, randomly shrink window for each center word
+        use_subsampling: If True, apply subsampling based on discard_probs
+    
+    Returns:
+        Tuple of (context_flat, context_offsets, context_lengths, center_indices)
+        all as numpy int32 arrays
+    """
+    cdef int num_sentences = len(indexed_sentences)
+    cdef int sent_idx, pos, context_pos, sentence_len, i
+    cdef int center_idx, context_idx, dynamic_window, start, end
+    cdef np.ndarray[ITYPE_t, ndim=1] sentence
+    cdef double rand_val
+    cdef int ctx_count
+    
+    # First pass: estimate sizes for pre-allocation
+    cdef long estimated_examples = 0
+    cdef long estimated_context = 0
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        sentence_len = len(sentence)
+        estimated_examples += sentence_len
+        estimated_context += sentence_len * 2 * window
+    
+    # Pre-allocate output arrays
+    cdef np.ndarray[ITYPE_t, ndim=1] context_flat = np.empty(estimated_context, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] context_offsets = np.empty(estimated_examples, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] context_lengths = np.empty(estimated_examples, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] center_indices = np.empty(estimated_examples, dtype=np.int32)
+    
+    cdef long example_count = 0
+    cdef long context_total = 0
+    
+    # Temporary buffer for context indices (max possible size = 2 * window)
+    cdef np.ndarray[ITYPE_t, ndim=1] context_buffer = np.empty(2 * window, dtype=np.int32)
+    
+    # Process each sentence
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        sentence_len = len(sentence)
+        
+        if sentence_len == 0:
+            continue
+        
+        # Process each position in the sentence
+        for pos in range(sentence_len):
+            center_idx = sentence[pos]
+            
+            # Skip OOV words
+            if center_idx < 0:
+                continue
+            
+            # Apply subsampling to center word
+            if use_subsampling:
+                rand_val = xorshift128plus_random()
+                if rand_val < discard_probs[center_idx]:
+                    continue
+            
+            # Determine window size
+            if shrink_windows:
+                dynamic_window = 1 + <int>(xorshift128plus_random() * window)
+            else:
+                dynamic_window = window
+            
+            # Calculate context boundaries
+            start = pos - dynamic_window
+            if start < 0:
+                start = 0
+            end = pos + dynamic_window + 1
+            if end > sentence_len:
+                end = sentence_len
+            
+            # Collect context indices
+            ctx_count = 0
+            for context_pos in range(start, end):
+                if context_pos == pos:
+                    continue
+                
+                context_idx = sentence[context_pos]
+                
+                # Skip OOV context words
+                if context_idx < 0:
+                    continue
+                
+                # Apply subsampling to context word
+                if use_subsampling:
+                    rand_val = xorshift128plus_random()
+                    if rand_val < discard_probs[context_idx]:
+                        continue
+                
+                context_buffer[ctx_count] = context_idx
+                ctx_count += 1
+            
+            # Only create example if we have at least one context word
+            if ctx_count > 0:
+                # Store example metadata
+                context_offsets[example_count] = context_total
+                context_lengths[example_count] = ctx_count
+                center_indices[example_count] = center_idx
+                
+                # Copy context indices to flat array
+                for i in range(ctx_count):
+                    context_flat[context_total + i] = context_buffer[i]
+                
+                context_total += ctx_count
+                example_count += 1
+    
+    # Trim arrays to actual size and return
+    return (
+        context_flat[:context_total].copy(),
+        context_offsets[:example_count].copy(),
+        context_lengths[:example_count].copy(),
+        center_indices[:example_count].copy()
+    )
+
+
+def train_skipgram_from_indexed(
+    real_t[:, :] W,
+    real_t[:, :] W_prime,
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling,
+    int batch_size
+):
+    """
+    Generate Skip-gram examples and train in batches, all in Cython.
+    
+    This combines example generation and training to minimize Python overhead.
+    
+    Args:
+        W: Input word vectors
+        W_prime: Output word vectors  
+        indexed_sentences: List of numpy int32 arrays with word indices
+        discard_probs: Subsampling discard probabilities
+        window: Maximum context window size
+        shrink_windows: Whether to use dynamic window sizing
+        use_subsampling: Whether to apply subsampling
+        batch_size: Number of examples per training batch
+    
+    Returns:
+        Tuple of (total_loss, total_examples)
+    """
+    # Generate all examples first
+    input_indices, output_indices = generate_skipgram_examples(
+        indexed_sentences, discard_probs, window, shrink_windows, use_subsampling
+    )
+    
+    cdef long total_examples = len(input_indices)
+    cdef real_t total_loss = 0.0
+    cdef long start_idx, end_idx
+    cdef int current_batch_size
+    
+    # Train in batches
+    start_idx = 0
+    while start_idx < total_examples:
+        end_idx = start_idx + batch_size
+        if end_idx > total_examples:
+            end_idx = total_examples
+        
+        current_batch_size = end_idx - start_idx
+        
+        # Extract batch
+        batch_input = input_indices[start_idx:end_idx]
+        batch_output = output_indices[start_idx:end_idx]
+        
+        # Train batch
+        total_loss += train_skipgram_batch(W, W_prime, batch_input, batch_output)
+        
+        start_idx = end_idx
+    
+    return total_loss, total_examples
+
+
+def train_cbow_from_indexed(
+    real_t[:, :] W,
+    real_t[:, :] W_prime,
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling,
+    int batch_size
+):
+    """
+    Generate CBOW examples and train in batches, all in Cython.
+    
+    Uses the optimized flat array interface to avoid Python list construction overhead.
+    
+    Args:
+        W: Input word vectors
+        W_prime: Output word vectors  
+        indexed_sentences: List of numpy int32 arrays with word indices
+        discard_probs: Subsampling discard probabilities
+        window: Maximum context window size
+        shrink_windows: Whether to use dynamic window sizing
+        use_subsampling: Whether to apply subsampling
+        batch_size: Number of examples per training batch
+    
+    Returns:
+        Tuple of (total_loss, total_examples)
+    """
+    # Generate all examples using flat array format
+    context_flat, context_offsets, context_lengths, center_indices = generate_cbow_examples(
+        indexed_sentences, discard_probs, window, shrink_windows, use_subsampling
+    )
+    
+    cdef long total_examples = len(center_indices)
+    cdef real_t total_loss = 0.0
+    cdef long start_idx, end_idx
+    cdef int current_batch_size
+    
+    # Train in batches using the optimized flat array interface
+    start_idx = 0
+    while start_idx < total_examples:
+        end_idx = start_idx + batch_size
+        if end_idx > total_examples:
+            end_idx = total_examples
+        
+        current_batch_size = end_idx - start_idx
+        
+        # Extract batch slices (no Python list construction needed)
+        batch_offsets = context_offsets[start_idx:end_idx]
+        batch_lengths = context_lengths[start_idx:end_idx]
+        batch_center = center_indices[start_idx:end_idx]
+        
+        # Train batch
+        total_loss += train_cbow_batch(
+            W, W_prime,
+            context_flat,  # Pass entire flat array (offsets handle indexing)
+            batch_offsets,
+            batch_lengths,
+            batch_center
+        )
+        
+        start_idx = end_idx
+    
+    return total_loss, total_examples
+
+
+# =============================================================================
+# Temporal Referencing Functions for TempRefWord2Vec
+# =============================================================================
+
+def generate_skipgram_examples_temporal(
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling,
+    ITYPE_t[:] temporal_index_map
+):
+    """
+    Generate Skip-gram training examples with temporal index mapping.
+    
+    For TempRefWord2Vec, context words (outputs) should use their base form.
+    The temporal_index_map converts temporal variant indices to base word indices.
+    Input (center) words keep their temporal variant form.
+    
+    Args:
+        indexed_sentences: List of numpy int32 arrays, each containing word indices
+        discard_probs: Array of discard probabilities indexed by word ID
+        window: Maximum context window size
+        shrink_windows: If True, randomly shrink window for each center word
+        use_subsampling: If True, apply subsampling based on discard_probs
+        temporal_index_map: Array mapping word indices to their base form indices.
+                           For non-temporal words, map[i] = i.
+                           For temporal variants, map[i] = base_word_index.
+    
+    Returns:
+        Tuple of (input_indices, output_indices) as numpy int32 arrays
+    """
+    cdef int num_sentences = len(indexed_sentences)
+    cdef int sent_idx, pos, context_pos, sentence_len
+    cdef int center_idx, context_idx, mapped_context_idx, dynamic_window, start, end
+    cdef np.ndarray[ITYPE_t, ndim=1] sentence
+    cdef double rand_val
+    
+    # First pass: estimate number of examples for pre-allocation
+    cdef long estimated_examples = 0
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        estimated_examples += len(sentence) * 2 * window
+    
+    # Pre-allocate output arrays
+    cdef np.ndarray[ITYPE_t, ndim=1] input_indices = np.empty(estimated_examples, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] output_indices = np.empty(estimated_examples, dtype=np.int32)
+    cdef long example_count = 0
+    
+    # Process each sentence
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        sentence_len = len(sentence)
+        
+        if sentence_len == 0:
+            continue
+        
+        # Process each position in the sentence
+        for pos in range(sentence_len):
+            center_idx = sentence[pos]
+            
+            # Skip OOV words (marked as -1)
+            if center_idx < 0:
+                continue
+            
+            # Apply subsampling to center word
+            if use_subsampling:
+                rand_val = xorshift128plus_random()
+                if rand_val < discard_probs[center_idx]:
+                    continue
+            
+            # Determine window size
+            if shrink_windows:
+                dynamic_window = 1 + <int>(xorshift128plus_random() * window)
+            else:
+                dynamic_window = window
+            
+            # Calculate context boundaries
+            start = pos - dynamic_window
+            if start < 0:
+                start = 0
+            end = pos + dynamic_window + 1
+            if end > sentence_len:
+                end = sentence_len
+            
+            # Generate examples for each context position
+            for context_pos in range(start, end):
+                if context_pos == pos:
+                    continue
+                
+                context_idx = sentence[context_pos]
+                
+                # Skip OOV context words
+                if context_idx < 0:
+                    continue
+                
+                # Apply subsampling to context word
+                if use_subsampling:
+                    rand_val = xorshift128plus_random()
+                    if rand_val < discard_probs[context_idx]:
+                        continue
+                
+                # Apply temporal mapping to context word (convert to base form)
+                mapped_context_idx = temporal_index_map[context_idx]
+                
+                # Skip if mapping results in invalid index
+                if mapped_context_idx < 0:
+                    continue
+                
+                # Store the example (center word unchanged, context mapped to base)
+                input_indices[example_count] = center_idx
+                output_indices[example_count] = mapped_context_idx
+                example_count += 1
+    
+    # Trim arrays to actual size
+    return input_indices[:example_count].copy(), output_indices[:example_count].copy()
+
+
+def generate_cbow_examples_temporal(
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling,
+    ITYPE_t[:] temporal_index_map
+):
+    """
+    Generate CBOW training examples with temporal index mapping.
+    
+    For TempRefWord2Vec CBOW, context words (inputs) should use their base form.
+    The temporal_index_map converts temporal variant indices to base word indices.
+    Center (output) words keep their temporal variant form.
+    
+    Args:
+        indexed_sentences: List of numpy int32 arrays, each containing word indices
+        discard_probs: Array of discard probabilities indexed by word ID
+        window: Maximum context window size
+        shrink_windows: If True, randomly shrink window for each center word
+        use_subsampling: If True, apply subsampling based on discard_probs
+        temporal_index_map: Array mapping word indices to their base form indices.
+    
+    Returns:
+        Tuple of (context_flat, context_offsets, context_lengths, center_indices)
+    """
+    cdef int num_sentences = len(indexed_sentences)
+    cdef int sent_idx, pos, context_pos, sentence_len, i
+    cdef int center_idx, context_idx, mapped_context_idx, dynamic_window, start, end
+    cdef np.ndarray[ITYPE_t, ndim=1] sentence
+    cdef double rand_val
+    cdef int ctx_count
+    
+    # First pass: estimate sizes for pre-allocation
+    cdef long estimated_examples = 0
+    cdef long estimated_context = 0
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        sentence_len = len(sentence)
+        estimated_examples += sentence_len
+        estimated_context += sentence_len * 2 * window
+    
+    # Pre-allocate output arrays
+    cdef np.ndarray[ITYPE_t, ndim=1] context_flat = np.empty(estimated_context, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] context_offsets = np.empty(estimated_examples, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] context_lengths = np.empty(estimated_examples, dtype=np.int32)
+    cdef np.ndarray[ITYPE_t, ndim=1] center_indices = np.empty(estimated_examples, dtype=np.int32)
+    
+    cdef long example_count = 0
+    cdef long context_total = 0
+    
+    # Temporary buffer for context indices (max possible size = 2 * window)
+    cdef np.ndarray[ITYPE_t, ndim=1] context_buffer = np.empty(2 * window, dtype=np.int32)
+    
+    # Process each sentence
+    for sent_idx in range(num_sentences):
+        sentence = indexed_sentences[sent_idx]
+        sentence_len = len(sentence)
+        
+        if sentence_len == 0:
+            continue
+        
+        # Process each position in the sentence
+        for pos in range(sentence_len):
+            center_idx = sentence[pos]
+            
+            # Skip OOV words
+            if center_idx < 0:
+                continue
+            
+            # Apply subsampling to center word
+            if use_subsampling:
+                rand_val = xorshift128plus_random()
+                if rand_val < discard_probs[center_idx]:
+                    continue
+            
+            # Determine window size
+            if shrink_windows:
+                dynamic_window = 1 + <int>(xorshift128plus_random() * window)
+            else:
+                dynamic_window = window
+            
+            # Calculate context boundaries
+            start = pos - dynamic_window
+            if start < 0:
+                start = 0
+            end = pos + dynamic_window + 1
+            if end > sentence_len:
+                end = sentence_len
+            
+            # Collect context indices with temporal mapping
+            ctx_count = 0
+            for context_pos in range(start, end):
+                if context_pos == pos:
+                    continue
+                
+                context_idx = sentence[context_pos]
+                
+                # Skip OOV context words
+                if context_idx < 0:
+                    continue
+                
+                # Apply subsampling to context word
+                if use_subsampling:
+                    rand_val = xorshift128plus_random()
+                    if rand_val < discard_probs[context_idx]:
+                        continue
+                
+                # Apply temporal mapping to context word (convert to base form)
+                mapped_context_idx = temporal_index_map[context_idx]
+                
+                # Skip if mapping results in invalid index
+                if mapped_context_idx < 0:
+                    continue
+                
+                context_buffer[ctx_count] = mapped_context_idx
+                ctx_count += 1
+            
+            # Only create example if we have at least one context word
+            if ctx_count > 0:
+                # Store example metadata (center word unchanged)
+                context_offsets[example_count] = context_total
+                context_lengths[example_count] = ctx_count
+                center_indices[example_count] = center_idx
+                
+                # Copy mapped context indices to flat array
+                for i in range(ctx_count):
+                    context_flat[context_total + i] = context_buffer[i]
+                
+                context_total += ctx_count
+                example_count += 1
+    
+    # Trim arrays to actual size and return
+    return (
+        context_flat[:context_total].copy(),
+        context_offsets[:example_count].copy(),
+        context_lengths[:example_count].copy(),
+        center_indices[:example_count].copy()
+    )
+
+
+def train_skipgram_from_indexed_temporal(
+    real_t[:, :] W,
+    real_t[:, :] W_prime,
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling,
+    int batch_size,
+    ITYPE_t[:] temporal_index_map
+):
+    """
+    Generate Skip-gram examples with temporal mapping and train in batches.
+    
+    For TempRefWord2Vec: context words (outputs) are mapped to base forms,
+    while center words (inputs) retain their temporal variant form.
+    
+    Args:
+        W: Input word vectors
+        W_prime: Output word vectors  
+        indexed_sentences: List of numpy int32 arrays with word indices
+        discard_probs: Subsampling discard probabilities
+        window: Maximum context window size
+        shrink_windows: Whether to use dynamic window sizing
+        use_subsampling: Whether to apply subsampling
+        batch_size: Number of examples per training batch
+        temporal_index_map: Array mapping temporal variants to base word indices
+    
+    Returns:
+        Tuple of (total_loss, total_examples)
+    """
+    # Generate all examples with temporal mapping
+    input_indices, output_indices = generate_skipgram_examples_temporal(
+        indexed_sentences, discard_probs, window, shrink_windows, 
+        use_subsampling, temporal_index_map
+    )
+    
+    cdef long total_examples = len(input_indices)
+    cdef real_t total_loss = 0.0
+    cdef long start_idx, end_idx
+    cdef int current_batch_size
+    
+    # Train in batches
+    start_idx = 0
+    while start_idx < total_examples:
+        end_idx = start_idx + batch_size
+        if end_idx > total_examples:
+            end_idx = total_examples
+        
+        current_batch_size = end_idx - start_idx
+        
+        # Extract batch
+        batch_input = input_indices[start_idx:end_idx]
+        batch_output = output_indices[start_idx:end_idx]
+        
+        # Train batch
+        total_loss += train_skipgram_batch(W, W_prime, batch_input, batch_output)
+        
+        start_idx = end_idx
+    
+    return total_loss, total_examples
+
+
+def train_cbow_from_indexed_temporal(
+    real_t[:, :] W,
+    real_t[:, :] W_prime,
+    list indexed_sentences,
+    np.float32_t[:] discard_probs,
+    int window,
+    bint shrink_windows,
+    bint use_subsampling,
+    int batch_size,
+    ITYPE_t[:] temporal_index_map
+):
+    """
+    Generate CBOW examples with temporal mapping and train in batches.
+    
+    For TempRefWord2Vec CBOW: context words (inputs) are mapped to base forms,
+    while center words (outputs) retain their temporal variant form.
+    
+    Args:
+        W: Input word vectors
+        W_prime: Output word vectors  
+        indexed_sentences: List of numpy int32 arrays with word indices
+        discard_probs: Subsampling discard probabilities
+        window: Maximum context window size
+        shrink_windows: Whether to use dynamic window sizing
+        use_subsampling: Whether to apply subsampling
+        batch_size: Number of examples per training batch
+        temporal_index_map: Array mapping temporal variants to base word indices
+    
+    Returns:
+        Tuple of (total_loss, total_examples)
+    """
+    # Generate all examples with temporal mapping
+    context_flat, context_offsets, context_lengths, center_indices = generate_cbow_examples_temporal(
+        indexed_sentences, discard_probs, window, shrink_windows,
+        use_subsampling, temporal_index_map
+    )
+    
+    cdef long total_examples = len(center_indices)
+    cdef real_t total_loss = 0.0
+    cdef long start_idx, end_idx
+    cdef int current_batch_size
+    
+    # Train in batches using the optimized flat array interface
+    start_idx = 0
+    while start_idx < total_examples:
+        end_idx = start_idx + batch_size
+        if end_idx > total_examples:
+            end_idx = total_examples
+        
+        current_batch_size = end_idx - start_idx
+        
+        # Extract batch slices
+        batch_offsets = context_offsets[start_idx:end_idx]
+        batch_lengths = context_lengths[start_idx:end_idx]
+        batch_center = center_indices[start_idx:end_idx]
+        
+        # Train batch
+        total_loss += train_cbow_batch(
+            W, W_prime,
+            context_flat,
+            batch_offsets,
+            batch_lengths,
+            batch_center
+        )
+        
+        start_idx = end_idx
+    
+    return total_loss, total_examples

@@ -375,7 +375,8 @@ class Word2Vec:
         Used for learning rate decay scheduling when min_alpha is provided.
         The estimate accounts for subsampling and window effects.
         
-        For Skip-gram: each retained word generates ~2*avg_window context pairs.
+        For Skip-gram: each retained word generates ~2*avg_window context pairs,
+            but context words are also subsampled.
         For CBOW: each retained word generates 1 example (with context as input).
         
         Returns:
@@ -388,20 +389,25 @@ class Word2Vec:
                 self.word_counts[word] * (1.0 - self.discard_probs[idx])
                 for word, idx in self.vocab.items()
             )
+            # Average keep probability for context words (same distribution)
+            avg_keep_prob = effective_words / self.corpus_word_count
         else:
             effective_words = self.corpus_word_count
+            avg_keep_prob = 1.0
         
         # Average window size: if shrink_windows, uniform[1, window] has mean (window+1)/2
         avg_window = (self.window + 1) / 2.0 if self.shrink_windows else self.window
         
         if self.sg:  # Skip-gram
             # Each center word pairs with ~2*window context words (left + right)
-            # Apply 0.85 factor for: edge effects, OOV context words, context subsampling
-            estimated = int(effective_words * 2 * avg_window * 0.85)
+            # Context words are ALSO subsampled, so multiply by avg_keep_prob
+            # Apply 0.85 factor for: edge effects, OOV context words
+            estimated = int(effective_words * 2 * avg_window * avg_keep_prob * 0.85)
         else:  # CBOW
             # Each center word generates 1 example (context words as input)
             # Apply 0.90 factor for edge effects and empty context filtering
-            estimated = int(effective_words * 0.90)
+            # Reduce further if subsampling is aggressive (may lose all context words)
+            estimated = int(effective_words * 0.90 * max(0.5, avg_keep_prob))
         
         return max(1, estimated)
 
@@ -885,9 +891,34 @@ class Word2Vec:
         else:
             return self.generate_cbow_examples(sentences)
 
+    def _index_sentences(self, sentences: List[List[str]]) -> List[np.ndarray]:
+        """
+        Convert sentences to index arrays for efficient Cython processing.
+        
+        Words not in vocabulary are marked as -1.
+        
+        Args:
+            sentences: List of tokenized sentences.
+        
+        Returns:
+            List of numpy int32 arrays with word indices.
+        """
+        indexed = []
+        vocab = self.vocab
+        for sentence in sentences:
+            indices = np.array(
+                [vocab.get(word, -1) for word in sentence],
+                dtype=np.int32
+            )
+            indexed.append(indices)
+        return indexed
+
     def _train_batch(self, samples: List[Tuple], learning_rate: float) -> float:
         """
-        Train the model on a batch of samples, using either Cython or Python implementation.
+        Train the model on a batch of samples using pure Python implementation.
+        
+        Note: This method is only called from _train_epoch_python when Cython is not available.
+        When Cython is available, _train_epoch_cython uses optimized batch functions directly.
         
         Args:
             samples: List of training samples. For Skip-gram: list of (input_idx, output_idx) 
@@ -897,35 +928,7 @@ class Word2Vec:
         Returns:
             Total loss for the batch.
         """
-        if self.use_cython:
-            # Process the batch differently based on the model type
-            if self.sg:  # Skip-gram model
-                # Extract input and output indices
-                input_indices = np.array([sample[0] for sample in samples], dtype=np.int32)
-                output_indices = np.array([sample[1] for sample in samples], dtype=np.int32)
-                
-                # Call the Cython implementation
-                return self.word2vec_c.train_skipgram_batch(
-                    self.W,
-                    self.W_prime,
-                    input_indices,
-                    output_indices
-                )
-            else:  # CBOW model
-                # Extract context indices and center indices
-                context_indices_list = [sample[0] for sample in samples]
-                center_indices = np.array([sample[1] for sample in samples], dtype=np.int32)
-                
-                # Call the Cython implementation
-                return self.word2vec_c.train_cbow_batch(
-                    self.W,
-                    self.W_prime,
-                    context_indices_list,
-                    center_indices
-                )
-        else:
-            # Use the Python implementation
-            return self._train_batch_python(samples, learning_rate)
+        return self._train_batch_python(samples, learning_rate)
 
     def train(self, sentences: Union[List[List[str]], Iterator[List[str]]], 
               epochs: int = 1, 
@@ -1089,10 +1092,221 @@ class Word2Vec:
         -------
         Tuple of (epoch_loss, examples_processed, batch_count, total_examples_processed, current_alpha)
         """
+        epoch_start_time = time.time()
+        
+        # Use optimized Cython path when available
+        if self.use_cython:
+            return self._train_epoch_cython(
+                sentences=sentences,
+                epoch=epoch,
+                epochs=epochs,
+                batch_size=batch_size,
+                decay_alpha=decay_alpha,
+                total_example_count=total_example_count,
+                examples_per_epoch=examples_per_epoch,
+                total_examples_processed=total_examples_processed,
+                current_alpha=current_alpha,
+                start_alpha=start_alpha,
+                calculate_loss=calculate_loss,
+                recent_losses=recent_losses,
+                epoch_start_time=epoch_start_time,
+                verbose=verbose,
+            )
+        
+        # Fall back to Python implementation
+        return self._train_epoch_python(
+            sentences=sentences,
+            epoch=epoch,
+            epochs=epochs,
+            batch_size=batch_size,
+            decay_alpha=decay_alpha,
+            total_example_count=total_example_count,
+            examples_per_epoch=examples_per_epoch,
+            total_examples_processed=total_examples_processed,
+            current_alpha=current_alpha,
+            start_alpha=start_alpha,
+            calculate_loss=calculate_loss,
+            recent_losses=recent_losses,
+            epoch_start_time=epoch_start_time,
+            verbose=verbose,
+        )
+
+    def _train_epoch_cython(
+        self,
+        sentences: List[List[str]],
+        epoch: int,
+        epochs: int,
+        batch_size: int,
+        decay_alpha: bool,
+        total_example_count: int,
+        examples_per_epoch: Optional[int],
+        total_examples_processed: int,
+        current_alpha: float,
+        start_alpha: float,
+        calculate_loss: bool,
+        recent_losses: List[float],
+        epoch_start_time: float,
+        verbose: Optional[int] = None,
+    ) -> Tuple[float, int, int, int, float]:
+        """
+        Train for one epoch using optimized Cython example generation.
+        
+        This method generates all examples in Cython and trains in batches,
+        significantly reducing Python overhead.
+        """
+        def current_time_str() -> str:
+            return time.strftime("%H:%M:%S")
+        
+        # Process sentences in chunks to balance memory and efficiency
+        CHUNK_SIZE = 50000  # Number of sentences per chunk
+        
         epoch_loss = 0.0
         examples_processed_in_epoch = 0
         batch_count = 0
-        epoch_start_time = time.time()
+        
+        # Ensure discard_probs is available
+        if self.sample > 0 and self.discard_probs is None:
+            self._calculate_discard_probs()
+        
+        # Create empty discard_probs if subsampling is disabled
+        discard_probs = self.discard_probs if self.sample > 0 else np.zeros(len(self.vocab), dtype=np.float32)
+        
+        # Convert sentences list to chunks
+        sentence_list = list(sentences) if not isinstance(sentences, list) else sentences
+        num_sentences = len(sentence_list)
+        num_chunks = (num_sentences + CHUNK_SIZE - 1) // CHUNK_SIZE
+        
+        # Progress bar setup
+        use_simple_logging = not decay_alpha and examples_per_epoch is None
+        progress_bar = None
+        
+        if calculate_loss and not use_simple_logging:
+            if decay_alpha:
+                bar_format = '{l_bar}{bar}| {percentage:.2f}% [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
+            else:
+                bar_format = '{desc}: {n_fmt} examples [{elapsed}, {rate_fmt}{postfix}]'
+            
+            progress_bar = tqdm(
+                desc=f"Epoch {epoch+1}/{epochs}",
+                total=examples_per_epoch,
+                bar_format=bar_format,
+                unit="ex",
+                mininterval=0.5
+            )
+        
+        LOSS_HISTORY_SIZE = 100
+        
+        # Process each chunk
+        for chunk_idx in range(num_chunks):
+            chunk_start = chunk_idx * CHUNK_SIZE
+            chunk_end = min(chunk_start + CHUNK_SIZE, num_sentences)
+            chunk_sentences = sentence_list[chunk_start:chunk_end]
+            
+            # Convert chunk to indexed format
+            indexed_sentences = self._index_sentences(chunk_sentences)
+            
+            # Generate examples and train using Cython
+            if self.sg:
+                chunk_loss, chunk_examples = self.word2vec_c.train_skipgram_from_indexed(
+                    self.W,
+                    self.W_prime,
+                    indexed_sentences,
+                    discard_probs,
+                    self.window,
+                    self.shrink_windows,
+                    self.sample > 0,
+                    batch_size
+                )
+            else:
+                chunk_loss, chunk_examples = self.word2vec_c.train_cbow_from_indexed(
+                    self.W,
+                    self.W_prime,
+                    indexed_sentences,
+                    discard_probs,
+                    self.window,
+                    self.shrink_windows,
+                    self.sample > 0,
+                    batch_size
+                )
+            
+            epoch_loss += chunk_loss
+            examples_processed_in_epoch += chunk_examples
+            total_examples_processed += chunk_examples
+            chunk_batches = (chunk_examples + batch_size - 1) // batch_size
+            batch_count += chunk_batches
+            
+            # Update learning rate after chunk
+            if decay_alpha and total_example_count > 0:
+                decay_factor = 1 - (total_examples_processed / total_example_count)
+                current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                self._update_learning_rate(current_alpha)
+            
+            # Update progress
+            if calculate_loss:
+                if chunk_examples > 0:
+                    chunk_avg_loss = chunk_loss / chunk_examples
+                    recent_losses.append(chunk_avg_loss)
+                    if len(recent_losses) > LOSS_HISTORY_SIZE:
+                        recent_losses.pop(0)
+                
+                recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
+                
+                if use_simple_logging:
+                    if verbose is not None and (chunk_idx + 1) % max(1, verbose) == 0:
+                        elapsed = time.time() - epoch_start_time
+                        ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
+                        if decay_alpha:
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
+                        else:
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+                elif progress_bar is not None:
+                    if decay_alpha:
+                        postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
+                    else:
+                        postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
+                    progress_bar.set_postfix_str(postfix_str)
+                    progress_bar.update(chunk_examples)
+        
+        # Close progress bar
+        if progress_bar is not None:
+            if examples_per_epoch is not None and progress_bar.total is not None:
+                progress_bar.update(max(0, progress_bar.total - progress_bar.n))
+            progress_bar.close()
+        
+        # Log epoch summary for simple logging mode
+        if use_simple_logging and calculate_loss:
+            recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
+            elapsed = time.time() - epoch_start_time
+            ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
+            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch} | avg_loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+        
+        return epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha
+
+    def _train_epoch_python(
+        self,
+        sentences: List[List[str]],
+        epoch: int,
+        epochs: int,
+        batch_size: int,
+        decay_alpha: bool,
+        total_example_count: int,
+        examples_per_epoch: Optional[int],
+        total_examples_processed: int,
+        current_alpha: float,
+        start_alpha: float,
+        calculate_loss: bool,
+        recent_losses: List[float],
+        epoch_start_time: float,
+        verbose: Optional[int] = None,
+    ) -> Tuple[float, int, int, int, float]:
+        """
+        Train for one epoch using pure Python implementation.
+        
+        This is the fallback when Cython is not available.
+        """
+        epoch_loss = 0.0
+        examples_processed_in_epoch = 0
+        batch_count = 0
         
         def current_time_str() -> str:
             """Get current time as HH:MM:SS"""
@@ -1671,6 +1885,191 @@ class TempRefWord2Vec(Word2Vec):
             self.vocab_size = len(self.vocab)
             # Add the base word counts to corpus total (for proper frequency normalization)
             self.corpus_word_count += total_base_count
+        
+        # Build the temporal index map for Cython acceleration
+        self._build_temporal_index_map()
+    
+    def _build_temporal_index_map(self) -> None:
+        """
+        Build a numpy array for fast temporal index mapping in Cython.
+        
+        The array maps word indices to their base form indices:
+        - For temporal variants: temporal_index_map[variant_idx] = base_word_idx
+        - For regular words: temporal_index_map[word_idx] = word_idx (identity)
+        
+        This allows O(1) lookup during example generation in Cython instead of
+        Python dictionary lookups.
+        """
+        vocab_size = len(self.vocab)
+        
+        # Initialize with identity mapping (each index maps to itself)
+        self.temporal_index_map = np.arange(vocab_size, dtype=np.int32)
+        
+        # Override mappings for temporal variants
+        for variant_word, base_word in self.reverse_temporal_map.items():
+            if variant_word in self.vocab and base_word in self.vocab:
+                variant_idx = self.vocab[variant_word]
+                base_idx = self.vocab[base_word]
+                self.temporal_index_map[variant_idx] = base_idx
+        
+        logger.debug(f"Built temporal index map with {len(self.reverse_temporal_map)} variant mappings")
+    
+    def _train_epoch_cython(
+        self,
+        sentences: List[List[str]],
+        epoch: int,
+        epochs: int,
+        batch_size: int,
+        decay_alpha: bool,
+        total_example_count: int,
+        examples_per_epoch: Optional[int],
+        total_examples_processed: int,
+        current_alpha: float,
+        start_alpha: float,
+        calculate_loss: bool,
+        recent_losses: List[float],
+        epoch_start_time: float,
+        verbose: Optional[int] = None,
+    ) -> Tuple[float, int, int, int, float]:
+        """
+        Train for one epoch using optimized Cython example generation with temporal mapping.
+        
+        Overrides parent to use temporal-aware Cython functions that map context words
+        to their base forms during example generation.
+        """
+        def current_time_str() -> str:
+            return time.strftime("%H:%M:%S")
+        
+        # Process sentences in chunks to balance memory and efficiency
+        CHUNK_SIZE = 50000  # Number of sentences per chunk
+        
+        epoch_loss = 0.0
+        examples_processed_in_epoch = 0
+        batch_count = 0
+        
+        # Ensure discard_probs is available
+        if self.sample > 0 and self.discard_probs is None:
+            self._calculate_discard_probs()
+        
+        # Create empty discard_probs if subsampling is disabled
+        discard_probs = self.discard_probs if self.sample > 0 else np.zeros(len(self.vocab), dtype=np.float32)
+        
+        # Ensure temporal index map is built
+        if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
+            self._build_temporal_index_map()
+        
+        # Convert sentences list to chunks
+        sentence_list = list(sentences) if not isinstance(sentences, list) else sentences
+        num_sentences = len(sentence_list)
+        num_chunks = (num_sentences + CHUNK_SIZE - 1) // CHUNK_SIZE
+        
+        # Progress bar setup
+        use_simple_logging = not decay_alpha and examples_per_epoch is None
+        progress_bar = None
+        
+        if calculate_loss and not use_simple_logging:
+            if decay_alpha:
+                bar_format = '{l_bar}{bar}| {percentage:.2f}% [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
+            else:
+                bar_format = '{desc}: {n_fmt} examples [{elapsed}, {rate_fmt}{postfix}]'
+            
+            progress_bar = tqdm(
+                desc=f"Epoch {epoch+1}/{epochs}",
+                total=examples_per_epoch,
+                bar_format=bar_format,
+                unit="ex",
+                mininterval=0.5
+            )
+        
+        LOSS_HISTORY_SIZE = 100
+        
+        # Process each chunk
+        for chunk_idx in range(num_chunks):
+            chunk_start = chunk_idx * CHUNK_SIZE
+            chunk_end = min(chunk_start + CHUNK_SIZE, num_sentences)
+            chunk_sentences = sentence_list[chunk_start:chunk_end]
+            
+            # Convert chunk to indexed format
+            indexed_sentences = self._index_sentences(chunk_sentences)
+            
+            # Generate examples and train using Cython with temporal mapping
+            if self.sg:
+                chunk_loss, chunk_examples = self.word2vec_c.train_skipgram_from_indexed_temporal(
+                    self.W,
+                    self.W_prime,
+                    indexed_sentences,
+                    discard_probs,
+                    self.window,
+                    self.shrink_windows,
+                    self.sample > 0,
+                    batch_size,
+                    self.temporal_index_map
+                )
+            else:
+                chunk_loss, chunk_examples = self.word2vec_c.train_cbow_from_indexed_temporal(
+                    self.W,
+                    self.W_prime,
+                    indexed_sentences,
+                    discard_probs,
+                    self.window,
+                    self.shrink_windows,
+                    self.sample > 0,
+                    batch_size,
+                    self.temporal_index_map
+                )
+            
+            epoch_loss += chunk_loss
+            examples_processed_in_epoch += chunk_examples
+            total_examples_processed += chunk_examples
+            chunk_batches = (chunk_examples + batch_size - 1) // batch_size
+            batch_count += chunk_batches
+            
+            # Update learning rate after chunk
+            if decay_alpha and total_example_count > 0:
+                decay_factor = 1 - (total_examples_processed / total_example_count)
+                current_alpha = max(self.min_alpha, start_alpha * decay_factor)
+                self._update_learning_rate(current_alpha)
+            
+            # Update progress
+            if calculate_loss:
+                if chunk_examples > 0:
+                    chunk_avg_loss = chunk_loss / chunk_examples
+                    recent_losses.append(chunk_avg_loss)
+                    if len(recent_losses) > LOSS_HISTORY_SIZE:
+                        recent_losses.pop(0)
+                
+                recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
+                
+                if use_simple_logging:
+                    if verbose is not None and (chunk_idx + 1) % max(1, verbose) == 0:
+                        elapsed = time.time() - epoch_start_time
+                        ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
+                        if decay_alpha:
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
+                        else:
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+                elif progress_bar is not None:
+                    if decay_alpha:
+                        postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
+                    else:
+                        postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
+                    progress_bar.set_postfix_str(postfix_str)
+                    progress_bar.update(chunk_examples)
+        
+        # Close progress bar
+        if progress_bar is not None:
+            if examples_per_epoch is not None and progress_bar.total is not None:
+                progress_bar.update(max(0, progress_bar.total - progress_bar.n))
+            progress_bar.close()
+        
+        # Log epoch summary for simple logging mode
+        if use_simple_logging and calculate_loss:
+            recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
+            elapsed = time.time() - epoch_start_time
+            ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
+            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch} | avg_loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+        
+        return epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha
     
     def generate_skipgram_examples(self, 
                                  sentences: List[List[str]]) -> Generator[Tuple[int, int], None, None]:
@@ -2032,6 +2431,9 @@ class TempRefWord2Vec(Word2Vec):
             label: Counter(counts_dict) 
             for label, counts_dict in model_data['period_vocab_counts'].items()
         }
+        
+        # Build temporal index map for Cython acceleration
+        model._build_temporal_index_map()
         
         # Clear the dummy combined_corpus to save memory
         model.combined_corpus = []
