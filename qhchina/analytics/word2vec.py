@@ -98,9 +98,8 @@ class Word2Vec:
         # Prepare corpus as list of tokenized sentences
         sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
         
-        # Train model
+        # Train model (vocabulary is built automatically during training)
         model = Word2Vec(vector_size=100, window=5, min_word_count=1)
-        model.build_vocab(sentences)
         model.train(sentences, epochs=5)
         
         # Get word vector (can use model directly or model.wv for gensim compatibility)
