@@ -104,7 +104,7 @@ Word2Vec(
     max_vocab_size: Optional[int] = None,
     use_double_precision: bool = False,
     use_cython: bool = True,
-    gradient_clip: float = 1.0
+    verbose: bool = False
 )
 ```
 
@@ -150,7 +150,6 @@ Features:
   None means no limit (keep all words above min_word_count).
 - `use_double_precision` (bool): Whether to use float64 precision for better stability (default: False).
 - `use_cython` (bool): Whether to use Cython acceleration if available (default: True).
-- `gradient_clip` (float): Maximum absolute value for gradients when using Cython (default: 1.0).
 
 **Example:**
 ```python
