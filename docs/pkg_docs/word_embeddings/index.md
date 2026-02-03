@@ -164,31 +164,34 @@ model = Word2Vec(vector_size=100, window=5, min_word_count=1)
 model.build_vocab(sentences)
 model.train(sentences, epochs=5)
 
-# Get word vector
-vector = model.wv['喜欢']
+# Get word vector (can use model directly or model.wv for gensim compatibility)
+vector = model['喜欢']
+vector = model.wv['喜欢']  # Same as above
 
 # Find similar words
-similar = model.wv.most_similar('喜欢', topn=5)
+similar = model.most_similar('喜欢', topn=5)
+similar = model.wv.most_similar('喜欢', topn=5)  # Same as above
 ```
 
 <h4 id="word2vec-build_vocab">Word2Vec.build_vocab()</h4>
 
 ```python
-build_vocab(sentences: Union[List[List[str]], Iterator[List[str]]])
+build_vocab(sentences: List[List[str]])
 ```
 
-Build vocabulary from a list or iterator of sentences.
+Build vocabulary from a list of sentences.
 
 **Parameters:**
-- `sentences`: List or iterator of tokenized sentences (each sentence is a list of words).
+- `sentences`: List of tokenized sentences (each sentence is a list of words).
 
 **Raises:**
 - `ValueError`: If sentences is empty or contains no words.
+- `TypeError`: If sentences is not a list.
 
 <h4 id="word2vec-generate_cbow_examples">Word2Vec.generate_cbow_examples()</h4>
 
 ```python
-generate_cbow_examples(sentences: Union[List[List[str]], Iterator[List[str]]])
+generate_cbow_examples(sentences: List[List[str]])
 ```
 
 Generate CBOW training examples from sentences.
@@ -200,7 +203,7 @@ A CBOW example is a tuple (input_indices, output_idx) where:
 For each positive example, the caller should generate negative examples using the noise distribution.
 
 **Parameters:**
-- `sentences`: List or iterator of sentences (lists of words).
+- `sentences`: List of sentences (lists of words).
 
 **Returns:**
 Generator yielding (input_indices, output_idx) tuples for positive examples.
@@ -208,7 +211,7 @@ Generator yielding (input_indices, output_idx) tuples for positive examples.
 <h4 id="word2vec-generate_skipgram_examples">Word2Vec.generate_skipgram_examples()</h4>
 
 ```python
-generate_skipgram_examples(sentences: Union[List[List[str]], Iterator[List[str]]])
+generate_skipgram_examples(sentences: List[List[str]])
 ```
 
 Generate Skip-gram training examples from sentences.
@@ -220,7 +223,7 @@ A Skip-gram example is a tuple (input_idx, output_idx) where:
 For each positive example, the caller should generate negative examples using the noise distribution.
 
 **Parameters:**
-- `sentences`: List or iterator of sentences (lists of words).
+- `sentences`: List of sentences (lists of words).
 
 **Returns:**
 Generator yielding (input_idx, output_idx) tuples for positive examples.
@@ -290,32 +293,33 @@ Cosine similarity between the two words (float between -1 and 1).
 <h4 id="word2vec-train">Word2Vec.train()</h4>
 
 ```python
-train(sentences: Union[List[List[str]], Iterator[List[str]]], epochs: int = 1, alpha: Optional[float] = None, min_alpha: Optional[float] = None, total_examples: Optional[int] = None, batch_size: int = 2000, callbacks: List[Callable] = None, calculate_loss: bool = True, verbose: Optional[int] = None)
+train(sentences: List[List[str]], epochs: int = 1, alpha: Optional[float] = None, min_alpha: Optional[float] = None, total_examples: Optional[int] = None, batch_size: int = 10000, callbacks: List[Callable] = None, calculate_loss: bool = True, verbose: Optional[int] = None)
 ```
 
 Train word2vec model on given sentences.
 
 **Parameters:**
-- `sentences`: List or iterator of tokenized sentences (lists of words).
+- `sentences`: List of tokenized sentences (lists of words).
 - `epochs`: Number of training iterations over the corpus.
 - `alpha`: Initial learning rate.
 - `min_alpha`: Minimum allowed learning rate. When provided, enables learning rate 
-  decay from `alpha` down to `min_alpha` over the course of training. By 
-  default, this requires counting the total number of training examples 
-  upfront to calculate the decay schedule (which can be slow). Use 
-  `total_examples` to skip counting.
+  decay from `alpha` down to `min_alpha` over the course of training. The 
+  total example count is estimated mathematically for fast startup.
 - `total_examples`: Total number of training examples per epoch. When provided 
-  along with `min_alpha`, skips the automatic counting step and uses this 
-  value for learning rate decay scheduling.
-- `batch_size`: Batch size for training; if 0, no batching is used. Default is 2000.
+  along with `min_alpha`, uses this exact value instead of estimating.
+- `batch_size`: Number of sentences to process per batch. Sentences in a batch are 
+  sent to Cython together, where training examples are generated and trained.
+  Learning rate is updated after each batch. Default is 10000.
 - `callbacks`: List of callback functions to call after each epoch.
 - `calculate_loss`: Whether to calculate and return the final loss.
 - `verbose`: Controls logging frequency. If None, no batch-level logging in simple 
-  mode. If an integer, logs progress every `verbose` batches (when batched) 
-  or every `verbose * 1000` examples (when not batched).
+  mode. If an integer, logs progress every `verbose` batches.
 
 **Returns:**
 Final loss value if calculate_loss is True, None otherwise.
+
+**Raises:**
+- `TypeError`: If sentences is not a list.
 
 <br>
 
@@ -429,7 +433,7 @@ This implementation calls the parent's implementation and then modifies the yiel
 examples by converting any temporal variant context words to their base form.
 
 **Parameters:**
-- `sentences`: List of sentences (lists of words).
+- `sentences`: List of tokenized sentences.
 
 **Returns:**
 Generator yielding (input_indices, output_idx) tuples for positive examples.
@@ -449,7 +453,7 @@ This implementation calls the parent's implementation and then modifies the yiel
 examples by converting any temporal variant context words to their base form.
 
 **Parameters:**
-- `sentences`: List of sentences (lists of words).
+- `sentences`: List of tokenized sentences.
 
 **Returns:**
 Generator yielding (input_idx, output_idx) tuples for positive examples.
