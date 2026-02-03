@@ -25,11 +25,9 @@ Key optimizations:
 
 import numpy as np
 cimport numpy as np
-from libc.math cimport exp, log, fmax, fmin, sqrt
+from libc.math cimport sqrt
 from libc.stdlib cimport rand, RAND_MAX, srand
 from libc.time cimport time
-from cython cimport floating
-from builtins import print as py_print
 
 # Import BLAS functions for optimized linear algebra
 from scipy.linalg.cython_blas cimport sdot, ddot  # Dot product
@@ -48,10 +46,8 @@ DEF DEFAULT_MAX_GRAD = 1.0  # Can be overridden by gradient_clip parameter
 
 # Constants for BLAS
 cdef int ONE = 1
-cdef float ONEF = 1.0
-cdef double ONED = 1.0
-cdef float ZEROF = 0.0  # Add constant for zeroing vectors
-cdef double ZEROD = 0.0  # Add constant for zeroing vectors
+cdef float ZEROF = 0.0  # Constant for zeroing vectors
+cdef double ZEROD = 0.0  # Constant for zeroing vectors
 
 # Global variables for shared resources
 # These will be initialized once per training session
@@ -66,7 +62,6 @@ cdef np.float64_t[:] NOISE_DISTRIBUTION_FLOAT64
 cdef float SIGMOID_SCALE
 cdef int SIGMOID_OFFSET
 cdef int NOISE_DISTRIBUTION_SIZE  # Store size separately to avoid .shape in nogil
-cdef float NOISE_DISTRIBUTION_SUM
 cdef float GRADIENT_CLIP
 cdef float MAX_EXP = 6.0
 cdef int NEGATIVE  # Number of negative samples
@@ -156,7 +151,7 @@ def init_globals(
     global SIGMOID_TABLE_FLOAT32, LOG_SIGMOID_TABLE_FLOAT32, NOISE_DISTRIBUTION_FLOAT32
     global SIGMOID_TABLE_FLOAT64, LOG_SIGMOID_TABLE_FLOAT64, NOISE_DISTRIBUTION_FLOAT64
     global SIGMOID_SCALE, SIGMOID_OFFSET, MAX_EXP
-    global NOISE_DISTRIBUTION_SIZE, NOISE_DISTRIBUTION_SUM
+    global NOISE_DISTRIBUTION_SIZE
     global GRADIENT_CLIP, NEGATIVE, LEARNING_RATE, CBOW_MEAN, USING_DOUBLE_PRECISION
     global VECTOR_SIZE
     
@@ -182,20 +177,6 @@ def init_globals(
     
     NOISE_DISTRIBUTION_SIZE = noise_distribution.shape[0]
     
-    # Calculate the sum of noise distribution
-    cdef float sum_probs = 0.0
-    cdef int i
-    
-    # Calculate sum based on precision
-    if USING_DOUBLE_PRECISION:
-        for i in range(NOISE_DISTRIBUTION_SIZE):
-            sum_probs += NOISE_DISTRIBUTION_FLOAT64[i]
-    else:
-        for i in range(NOISE_DISTRIBUTION_SIZE):
-            sum_probs += NOISE_DISTRIBUTION_FLOAT32[i]
-    
-    NOISE_DISTRIBUTION_SUM = sum_probs
-    
     GRADIENT_CLIP = gradient_clip
     NEGATIVE = negative
     LEARNING_RATE = learning_rate
@@ -218,17 +199,23 @@ def init_alias(noise_distribution):
     Initialize alias method for efficient sampling from discrete probability distribution.
     This implementation uses O(n) setup time and O(1) sampling time.
     
+    The probability table always uses float32 for efficiency - this is sufficient
+    precision for the alias method's binary sampling decision.
+    
     Args:
         noise_distribution: Probability distribution for negative sampling (float32 or float64)
     """
     global alias, prob
     cdef int n = noise_distribution.shape[0]
     alias = np.zeros(n, dtype=np.int32)
+    
+    # Always use float32 for prob table - sufficient precision for sampling decisions
+    # and matches the typed memoryview declaration
     prob = np.zeros(n, dtype=np.float32)
     
-    # Scaled probabilities for alias method - always use float32 for this
+    # Scaled probabilities for alias method
     cdef np.ndarray[np.float32_t, ndim=1] q = np.zeros(n, dtype=np.float32)
-    cdef float sum_probs = 0.0
+    cdef double sum_probs = 0.0
     cdef int i
     
     # Compute sum of probabilities
@@ -436,8 +423,7 @@ def train_skipgram_batch(
     # Declare all variables at the top of the function
     cdef int batch_size = input_indices.shape[0]
     cdef int vector_size = W.shape[1]
-    cdef int vocab_size = W.shape[0]
-    cdef int i, j, k, neg_idx
+    cdef int i, k, neg_idx
     cdef real_t total_loss = 0.0
     cdef real_t score, prediction, gradient
     cdef ITYPE_t in_idx, out_idx
@@ -564,7 +550,6 @@ def train_cbow_batch(
     """
     cdef int batch_size = center_indices.shape[0]
     cdef int vector_size = W.shape[1]
-    cdef int vocab_size = W.shape[0]
     cdef int i, j, k, neg_idx, offset, context_size
     cdef ITYPE_t center_idx, ctx_idx
     cdef real_t total_loss = 0.0
@@ -982,11 +967,10 @@ def train_skipgram_from_indexed(
     np.float32_t[:] discard_probs,
     int window,
     bint shrink_windows,
-    bint use_subsampling,
-    int batch_size
+    bint use_subsampling
 ):
     """
-    Generate Skip-gram examples and train in batches, all in Cython.
+    Generate Skip-gram examples and train, all in Cython.
     
     This combines example generation and training to minimize Python overhead.
     
@@ -998,38 +982,21 @@ def train_skipgram_from_indexed(
         window: Maximum context window size
         shrink_windows: Whether to use dynamic window sizing
         use_subsampling: Whether to apply subsampling
-        batch_size: Number of examples per training batch
     
     Returns:
         Tuple of (total_loss, total_examples)
     """
-    # Generate all examples first
+    # Generate all examples
     input_indices, output_indices = generate_skipgram_examples(
         indexed_sentences, discard_probs, window, shrink_windows, use_subsampling
     )
     
     cdef long total_examples = len(input_indices)
-    cdef real_t total_loss = 0.0
-    cdef long start_idx, end_idx
-    cdef int current_batch_size
+    if total_examples == 0:
+        return 0.0, 0
     
-    # Train in batches
-    start_idx = 0
-    while start_idx < total_examples:
-        end_idx = start_idx + batch_size
-        if end_idx > total_examples:
-            end_idx = total_examples
-        
-        current_batch_size = end_idx - start_idx
-        
-        # Extract batch
-        batch_input = input_indices[start_idx:end_idx]
-        batch_output = output_indices[start_idx:end_idx]
-        
-        # Train batch
-        total_loss += train_skipgram_batch(W, W_prime, batch_input, batch_output)
-        
-        start_idx = end_idx
+    # Train all examples at once
+    cdef real_t total_loss = train_skipgram_batch(W, W_prime, input_indices, output_indices)
     
     return total_loss, total_examples
 
@@ -1041,11 +1008,10 @@ def train_cbow_from_indexed(
     np.float32_t[:] discard_probs,
     int window,
     bint shrink_windows,
-    bint use_subsampling,
-    int batch_size
+    bint use_subsampling
 ):
     """
-    Generate CBOW examples and train in batches, all in Cython.
+    Generate CBOW examples and train, all in Cython.
     
     Uses the optimized flat array interface to avoid Python list construction overhead.
     
@@ -1057,7 +1023,6 @@ def train_cbow_from_indexed(
         window: Maximum context window size
         shrink_windows: Whether to use dynamic window sizing
         use_subsampling: Whether to apply subsampling
-        batch_size: Number of examples per training batch
     
     Returns:
         Tuple of (total_loss, total_examples)
@@ -1068,34 +1033,17 @@ def train_cbow_from_indexed(
     )
     
     cdef long total_examples = len(center_indices)
-    cdef real_t total_loss = 0.0
-    cdef long start_idx, end_idx
-    cdef int current_batch_size
+    if total_examples == 0:
+        return 0.0, 0
     
-    # Train in batches using the optimized flat array interface
-    start_idx = 0
-    while start_idx < total_examples:
-        end_idx = start_idx + batch_size
-        if end_idx > total_examples:
-            end_idx = total_examples
-        
-        current_batch_size = end_idx - start_idx
-        
-        # Extract batch slices (no Python list construction needed)
-        batch_offsets = context_offsets[start_idx:end_idx]
-        batch_lengths = context_lengths[start_idx:end_idx]
-        batch_center = center_indices[start_idx:end_idx]
-        
-        # Train batch
-        total_loss += train_cbow_batch(
-            W, W_prime,
-            context_flat,  # Pass entire flat array (offsets handle indexing)
-            batch_offsets,
-            batch_lengths,
-            batch_center
-        )
-        
-        start_idx = end_idx
+    # Train all examples at once
+    cdef real_t total_loss = train_cbow_batch(
+        W, W_prime,
+        context_flat,
+        context_offsets,
+        context_lengths,
+        center_indices
+    )
     
     return total_loss, total_examples
 
@@ -1367,11 +1315,10 @@ def train_skipgram_from_indexed_temporal(
     int window,
     bint shrink_windows,
     bint use_subsampling,
-    int batch_size,
     ITYPE_t[:] temporal_index_map
 ):
     """
-    Generate Skip-gram examples with temporal mapping and train in batches.
+    Generate Skip-gram examples with temporal mapping and train, all in Cython.
     
     For TempRefWord2Vec: context words (outputs) are mapped to base forms,
     while center words (inputs) retain their temporal variant form.
@@ -1384,7 +1331,6 @@ def train_skipgram_from_indexed_temporal(
         window: Maximum context window size
         shrink_windows: Whether to use dynamic window sizing
         use_subsampling: Whether to apply subsampling
-        batch_size: Number of examples per training batch
         temporal_index_map: Array mapping temporal variants to base word indices
     
     Returns:
@@ -1397,27 +1343,11 @@ def train_skipgram_from_indexed_temporal(
     )
     
     cdef long total_examples = len(input_indices)
-    cdef real_t total_loss = 0.0
-    cdef long start_idx, end_idx
-    cdef int current_batch_size
+    if total_examples == 0:
+        return 0.0, 0
     
-    # Train in batches
-    start_idx = 0
-    while start_idx < total_examples:
-        end_idx = start_idx + batch_size
-        if end_idx > total_examples:
-            end_idx = total_examples
-        
-        current_batch_size = end_idx - start_idx
-        
-        # Extract batch
-        batch_input = input_indices[start_idx:end_idx]
-        batch_output = output_indices[start_idx:end_idx]
-        
-        # Train batch
-        total_loss += train_skipgram_batch(W, W_prime, batch_input, batch_output)
-        
-        start_idx = end_idx
+    # Train all examples at once
+    cdef real_t total_loss = train_skipgram_batch(W, W_prime, input_indices, output_indices)
     
     return total_loss, total_examples
 
@@ -1430,11 +1360,10 @@ def train_cbow_from_indexed_temporal(
     int window,
     bint shrink_windows,
     bint use_subsampling,
-    int batch_size,
     ITYPE_t[:] temporal_index_map
 ):
     """
-    Generate CBOW examples with temporal mapping and train in batches.
+    Generate CBOW examples with temporal mapping and train, all in Cython.
     
     For TempRefWord2Vec CBOW: context words (inputs) are mapped to base forms,
     while center words (outputs) retain their temporal variant form.
@@ -1447,7 +1376,6 @@ def train_cbow_from_indexed_temporal(
         window: Maximum context window size
         shrink_windows: Whether to use dynamic window sizing
         use_subsampling: Whether to apply subsampling
-        batch_size: Number of examples per training batch
         temporal_index_map: Array mapping temporal variants to base word indices
     
     Returns:
@@ -1460,33 +1388,16 @@ def train_cbow_from_indexed_temporal(
     )
     
     cdef long total_examples = len(center_indices)
-    cdef real_t total_loss = 0.0
-    cdef long start_idx, end_idx
-    cdef int current_batch_size
+    if total_examples == 0:
+        return 0.0, 0
     
-    # Train in batches using the optimized flat array interface
-    start_idx = 0
-    while start_idx < total_examples:
-        end_idx = start_idx + batch_size
-        if end_idx > total_examples:
-            end_idx = total_examples
-        
-        current_batch_size = end_idx - start_idx
-        
-        # Extract batch slices
-        batch_offsets = context_offsets[start_idx:end_idx]
-        batch_lengths = context_lengths[start_idx:end_idx]
-        batch_center = center_indices[start_idx:end_idx]
-        
-        # Train batch
-        total_loss += train_cbow_batch(
-            W, W_prime,
-            context_flat,
-            batch_offsets,
-            batch_lengths,
-            batch_center
-        )
-        
-        start_idx = end_idx
+    # Train all examples at once
+    cdef real_t total_loss = train_cbow_batch(
+        W, W_prime,
+        context_flat,
+        context_offsets,
+        context_lengths,
+        center_indices
+    )
     
     return total_loss, total_examples

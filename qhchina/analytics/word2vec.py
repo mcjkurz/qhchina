@@ -26,11 +26,9 @@ Features:
 
 import logging
 import numpy as np
-from collections import defaultdict, Counter
+from collections import Counter
 from itertools import chain
-from typing import List, Dict, Tuple, Set, Optional, Union, Iterator, Generator, Any, Callable
-import random
-import math
+from typing import List, Dict, Tuple, Optional, Union, Generator, Callable
 from tqdm.auto import tqdm
 import warnings
 import time
@@ -105,11 +103,13 @@ class Word2Vec:
         model.build_vocab(sentences)
         model.train(sentences, epochs=5)
         
-        # Get word vector
-        vector = model.wv['喜欢']
+        # Get word vector (can use model directly or model.wv for gensim compatibility)
+        vector = model['喜欢']
+        vector = model.wv['喜欢']  # Same as above
         
         # Find similar words
-        similar = model.wv.most_similar('喜欢', topn=5)
+        similar = model.most_similar('喜欢', topn=5)
+        similar = model.wv.most_similar('喜欢', topn=5)  # Same as above
     """
     
     def __init__(
@@ -298,25 +298,46 @@ class Word2Vec:
             scale = np.minimum(1.0, self.gradient_clip / norms)
             return gradient * scale
 
-    def build_vocab(self, sentences: Union[List[List[str]], Iterator[List[str]]]) -> None:
+    @property
+    def wv(self) -> 'Word2Vec':
         """
-        Build vocabulary from a list or iterator of sentences.
+        Property for gensim compatibility. Returns self since the model directly
+        supports vector access via __getitem__, most_similar(), etc.
+        
+        This allows users familiar with gensim to use model.wv['word'] syntax.
+        Note: This returns self, not a copy - no additional memory is used.
+        
+        Returns:
+            The model itself (self).
+        """
+        return self
+
+    def build_vocab(self, sentences: List[List[str]]) -> None:
+        """
+        Build vocabulary from a list of sentences.
         
         Args:
-            sentences: List or iterator of tokenized sentences (each sentence is a list of words).
+            sentences: List of tokenized sentences (each sentence is a list of words).
         
         Raises:
             ValueError: If sentences is empty or contains no words.
+            TypeError: If sentences is not a list.
         """
-        # Validate input - O(1) check for lists
-        if isinstance(sentences, list) and not sentences:
+        # Validate input type
+        if not isinstance(sentences, list):
+            raise TypeError(
+                f"sentences must be a list of tokenized sentences, got {type(sentences).__name__}. "
+                "Generators/iterators are not supported - please convert to a list first."
+            )
+        
+        if not sentences:
             raise ValueError("sentences cannot be empty")
         
         # Count word occurrences using chain.from_iterable for efficiency
         # This flattens all sentences into a single word stream, reducing Python loop overhead
         self.word_counts = Counter(chain.from_iterable(sentences))
         
-        # Check if any words were found (catches empty iterators or all-empty sentences)
+        # Check if any words were found (catches all-empty sentences)
         if not self.word_counts:
             raise ValueError("sentences contains no words. Provide non-empty tokenized sentences.")
         
@@ -340,7 +361,6 @@ class Word2Vec:
         
         self.corpus_word_count = sum(self.word_counts[word] for word in self.vocab)
         self.vocab_size = len(self.vocab)
-        logger.info(f"Vocabulary size: {self.vocab_size} words")
 
     def _calculate_discard_probs(self) -> None:
         """
@@ -504,7 +524,7 @@ class Word2Vec:
         self.alpha = alpha
 
     def generate_skipgram_examples(self, 
-                                 sentences: Union[List[List[str]], Iterator[List[str]]]) -> Generator[Tuple[int, int], None, None]:
+                                 sentences: List[List[str]]) -> Generator[Tuple[int, int], None, None]:
         """
         Generate Skip-gram training examples from sentences.
         
@@ -515,7 +535,7 @@ class Word2Vec:
         For each positive example, the caller should generate negative examples using the noise distribution.
         
         Args:
-            sentences: List or iterator of sentences (lists of words).
+            sentences: List of sentences (lists of words).
         
         Returns:
             Generator yielding (input_idx, output_idx) tuples for positive examples.
@@ -575,7 +595,7 @@ class Word2Vec:
                     yield (center_idx, context_idx)
 
     def generate_cbow_examples(self, 
-                             sentences: Union[List[List[str]], Iterator[List[str]]]) -> Generator[Tuple[List[int], int], None, None]:
+                             sentences: List[List[str]]) -> Generator[Tuple[List[int], int], None, None]:
         """
         Generate CBOW training examples from sentences.
         
@@ -586,7 +606,7 @@ class Word2Vec:
         For each positive example, the caller should generate negative examples using the noise distribution.
         
         Args:
-            sentences: List or iterator of sentences (lists of words).
+            sentences: List of sentences (lists of words).
         
         Returns:
             Generator yielding (input_indices, output_idx) tuples for positive examples.
@@ -876,12 +896,12 @@ class Word2Vec:
         
         return total_loss
 
-    def _generate_examples(self, sentences: Union[List[List[str]], Iterator[List[str]]]) -> Generator:
+    def _generate_examples(self, sentences: List[List[str]]) -> Generator:
         """
         Generate training examples based on the model type (Skip-gram or CBOW).
         
         Args:
-            sentences: List or iterator of tokenized sentences.
+            sentences: List of tokenized sentences.
         
         Returns:
             Generator yielding training examples.
@@ -930,12 +950,12 @@ class Word2Vec:
         """
         return self._train_batch_python(samples, learning_rate)
 
-    def train(self, sentences: Union[List[List[str]], Iterator[List[str]]], 
+    def train(self, sentences: List[List[str]], 
               epochs: int = 1, 
               alpha: Optional[float] = None,
               min_alpha: Optional[float] = None,
               total_examples: Optional[int] = None,
-              batch_size: int = 2000, 
+              batch_size: int = 10000, 
               callbacks: List[Callable] = None,
               calculate_loss: bool = True,
               verbose: Optional[int] = None) -> Optional[float]:
@@ -943,7 +963,7 @@ class Word2Vec:
         Train word2vec model on given sentences.
         
         Args:
-            sentences: List or iterator of tokenized sentences (lists of words).
+            sentences: List of tokenized sentences (lists of words).
             epochs: Number of training iterations over the corpus.
             alpha: Initial learning rate.
             min_alpha: Minimum allowed learning rate. When provided, enables learning rate 
@@ -951,16 +971,27 @@ class Word2Vec:
                 total example count is estimated mathematically for fast startup.
             total_examples: Total number of training examples per epoch. When provided 
                 along with `min_alpha`, uses this exact value instead of estimating.
-            batch_size: Batch size for training. Must be > 0. Default is 2000.
+            batch_size: Number of sentences to process per batch. Sentences in a batch are 
+                sent to Cython together, where training examples are generated and trained.
+                Learning rate is updated after each batch. Default is 10000.
             callbacks: List of callback functions to call after each epoch.
             calculate_loss: Whether to calculate and return the final loss.
             verbose: Controls logging frequency. If None, no batch-level logging in simple 
-                mode. If an integer, logs progress every `verbose` batches (when batched) 
-                or every `verbose * 1000` examples (when not batched).
+                mode. If an integer, logs progress every `verbose` batches.
         
         Returns:
             Final loss value if calculate_loss is True, None otherwise.
+        
+        Raises:
+            TypeError: If sentences is not a list.
         """
+        # Validate input type
+        if not isinstance(sentences, list):
+            raise TypeError(
+                f"sentences must be a list of tokenized sentences, got {type(sentences).__name__}. "
+                "Generators/iterators are not supported - please convert to a list first."
+            )
+        
         self.epochs = epochs
         if batch_size <= 0:
             raise ValueError("batch_size must be greater than 0")
@@ -976,12 +1007,6 @@ class Word2Vec:
 
         # Determine if we should decay the learning rate based on min_alpha
         decay_alpha = self.min_alpha is not None
-
-        # Convert iterator to list if we need multiple epochs (for shuffling)
-        if epochs > 1:
-            if not isinstance(sentences, list):
-                logger.info("Converting iterator to list for multi-epoch training...")
-                sentences = list(sentences)
         
         if not self.vocab: 
             self.build_vocab(sentences)
@@ -1008,21 +1033,15 @@ class Word2Vec:
                 # User provided the count
                 examples_per_epoch = total_examples
                 total_example_count = total_examples * epochs
-                logger.info(f"Using provided total_examples={total_examples} for learning rate decay (alpha={self.alpha} -> min_alpha={self.min_alpha})")
             else:
                 # Estimate examples mathematically (fast, avoids full iteration)
                 examples_per_epoch = self._estimate_example_count()
                 total_example_count = examples_per_epoch * epochs
-                logger.info(f"Estimated ~{examples_per_epoch:,} examples/epoch for learning rate decay (alpha={self.alpha} -> min_alpha={self.min_alpha})")
-
+                
         total_examples_processed = 0
         current_alpha = start_alpha = self.alpha
         self._update_learning_rate(current_alpha)
 
-        model_type = "Skip-gram" if self.sg else "CBOW"
-        impl_type = "Cython" if self.use_cython else "Python"
-        logger.info(f"Training {model_type} model using {impl_type} implementation")
-        
         # Training loop for each epoch
         for epoch in range(epochs):
             # Shuffle sentences each epoch (only if it's a list)
@@ -1151,14 +1170,11 @@ class Word2Vec:
         """
         Train for one epoch using optimized Cython example generation.
         
-        This method generates all examples in Cython and trains in batches,
-        significantly reducing Python overhead.
+        Sentences are processed in batches of `batch_size` sentences at a time.
+        Each batch is sent to Cython which generates training examples and trains on them.
         """
         def current_time_str() -> str:
             return time.strftime("%H:%M:%S")
-        
-        # Process sentences in chunks to balance memory and efficiency
-        CHUNK_SIZE = 50000  # Number of sentences per chunk
         
         epoch_loss = 0.0
         examples_processed_in_epoch = 0
@@ -1171,10 +1187,8 @@ class Word2Vec:
         # Create empty discard_probs if subsampling is disabled
         discard_probs = self.discard_probs if self.sample > 0 else np.zeros(len(self.vocab), dtype=np.float32)
         
-        # Convert sentences list to chunks
-        sentence_list = list(sentences) if not isinstance(sentences, list) else sentences
-        num_sentences = len(sentence_list)
-        num_chunks = (num_sentences + CHUNK_SIZE - 1) // CHUNK_SIZE
+        num_sentences = len(sentences)
+        num_batches = (num_sentences + batch_size - 1) // batch_size
         
         # Progress bar setup
         use_simple_logging = not decay_alpha and examples_per_epoch is None
@@ -1196,46 +1210,43 @@ class Word2Vec:
         
         LOSS_HISTORY_SIZE = 100
         
-        # Process each chunk
-        for chunk_idx in range(num_chunks):
-            chunk_start = chunk_idx * CHUNK_SIZE
-            chunk_end = min(chunk_start + CHUNK_SIZE, num_sentences)
-            chunk_sentences = sentence_list[chunk_start:chunk_end]
+        # Process sentences in batches
+        for batch_idx in range(num_batches):
+            batch_start = batch_idx * batch_size
+            batch_end = min(batch_start + batch_size, num_sentences)
+            batch_sentences = sentences[batch_start:batch_end]
             
-            # Convert chunk to indexed format
-            indexed_sentences = self._index_sentences(chunk_sentences)
+            # Convert batch to indexed format and train in Cython
+            indexed_sentences = self._index_sentences(batch_sentences)
             
             # Generate examples and train using Cython
             if self.sg:
-                chunk_loss, chunk_examples = self.word2vec_c.train_skipgram_from_indexed(
+                batch_loss, batch_examples = self.word2vec_c.train_skipgram_from_indexed(
                     self.W,
                     self.W_prime,
                     indexed_sentences,
                     discard_probs,
                     self.window,
                     self.shrink_windows,
-                    self.sample > 0,
-                    batch_size
+                    self.sample > 0
                 )
             else:
-                chunk_loss, chunk_examples = self.word2vec_c.train_cbow_from_indexed(
+                batch_loss, batch_examples = self.word2vec_c.train_cbow_from_indexed(
                     self.W,
                     self.W_prime,
                     indexed_sentences,
                     discard_probs,
                     self.window,
                     self.shrink_windows,
-                    self.sample > 0,
-                    batch_size
+                    self.sample > 0
                 )
             
-            epoch_loss += chunk_loss
-            examples_processed_in_epoch += chunk_examples
-            total_examples_processed += chunk_examples
-            chunk_batches = (chunk_examples + batch_size - 1) // batch_size
-            batch_count += chunk_batches
+            epoch_loss += batch_loss
+            examples_processed_in_epoch += batch_examples
+            total_examples_processed += batch_examples
+            batch_count += 1
             
-            # Update learning rate after chunk
+            # Update learning rate after each batch
             if decay_alpha and total_example_count > 0:
                 decay_factor = 1 - (total_examples_processed / total_example_count)
                 current_alpha = max(self.min_alpha, start_alpha * decay_factor)
@@ -1243,29 +1254,29 @@ class Word2Vec:
             
             # Update progress
             if calculate_loss:
-                if chunk_examples > 0:
-                    chunk_avg_loss = chunk_loss / chunk_examples
-                    recent_losses.append(chunk_avg_loss)
+                if batch_examples > 0:
+                    batch_avg_loss = batch_loss / batch_examples
+                    recent_losses.append(batch_avg_loss)
                     if len(recent_losses) > LOSS_HISTORY_SIZE:
                         recent_losses.pop(0)
                 
                 recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
                 
                 if use_simple_logging:
-                    if verbose is not None and (chunk_idx + 1) % max(1, verbose) == 0:
+                    if verbose is not None and batch_count % max(1, verbose) == 0:
                         elapsed = time.time() - epoch_start_time
                         ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
                         if decay_alpha:
-                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count}/{num_batches} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
                         else:
-                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count}/{num_batches} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
                 elif progress_bar is not None:
                     if decay_alpha:
                         postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
                     else:
                         postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
                     progress_bar.set_postfix_str(postfix_str)
-                    progress_bar.update(chunk_examples)
+                    progress_bar.update(batch_examples)
         
         # Close progress bar
         if progress_bar is not None:
@@ -1934,14 +1945,12 @@ class TempRefWord2Vec(Word2Vec):
         """
         Train for one epoch using optimized Cython example generation with temporal mapping.
         
+        Sentences are processed in batches of `batch_size` sentences at a time.
         Overrides parent to use temporal-aware Cython functions that map context words
         to their base forms during example generation.
         """
         def current_time_str() -> str:
             return time.strftime("%H:%M:%S")
-        
-        # Process sentences in chunks to balance memory and efficiency
-        CHUNK_SIZE = 50000  # Number of sentences per chunk
         
         epoch_loss = 0.0
         examples_processed_in_epoch = 0
@@ -1958,10 +1967,8 @@ class TempRefWord2Vec(Word2Vec):
         if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
             self._build_temporal_index_map()
         
-        # Convert sentences list to chunks
-        sentence_list = list(sentences) if not isinstance(sentences, list) else sentences
-        num_sentences = len(sentence_list)
-        num_chunks = (num_sentences + CHUNK_SIZE - 1) // CHUNK_SIZE
+        num_sentences = len(sentences)
+        num_batches = (num_sentences + batch_size - 1) // batch_size
         
         # Progress bar setup
         use_simple_logging = not decay_alpha and examples_per_epoch is None
@@ -1983,18 +1990,18 @@ class TempRefWord2Vec(Word2Vec):
         
         LOSS_HISTORY_SIZE = 100
         
-        # Process each chunk
-        for chunk_idx in range(num_chunks):
-            chunk_start = chunk_idx * CHUNK_SIZE
-            chunk_end = min(chunk_start + CHUNK_SIZE, num_sentences)
-            chunk_sentences = sentence_list[chunk_start:chunk_end]
+        # Process sentences in batches
+        for batch_idx in range(num_batches):
+            batch_start = batch_idx * batch_size
+            batch_end = min(batch_start + batch_size, num_sentences)
+            batch_sentences = sentences[batch_start:batch_end]
             
-            # Convert chunk to indexed format
-            indexed_sentences = self._index_sentences(chunk_sentences)
+            # Convert batch to indexed format and train in Cython
+            indexed_sentences = self._index_sentences(batch_sentences)
             
             # Generate examples and train using Cython with temporal mapping
             if self.sg:
-                chunk_loss, chunk_examples = self.word2vec_c.train_skipgram_from_indexed_temporal(
+                batch_loss, batch_examples = self.word2vec_c.train_skipgram_from_indexed_temporal(
                     self.W,
                     self.W_prime,
                     indexed_sentences,
@@ -2002,11 +2009,10 @@ class TempRefWord2Vec(Word2Vec):
                     self.window,
                     self.shrink_windows,
                     self.sample > 0,
-                    batch_size,
                     self.temporal_index_map
                 )
             else:
-                chunk_loss, chunk_examples = self.word2vec_c.train_cbow_from_indexed_temporal(
+                batch_loss, batch_examples = self.word2vec_c.train_cbow_from_indexed_temporal(
                     self.W,
                     self.W_prime,
                     indexed_sentences,
@@ -2014,17 +2020,15 @@ class TempRefWord2Vec(Word2Vec):
                     self.window,
                     self.shrink_windows,
                     self.sample > 0,
-                    batch_size,
                     self.temporal_index_map
                 )
             
-            epoch_loss += chunk_loss
-            examples_processed_in_epoch += chunk_examples
-            total_examples_processed += chunk_examples
-            chunk_batches = (chunk_examples + batch_size - 1) // batch_size
-            batch_count += chunk_batches
+            epoch_loss += batch_loss
+            examples_processed_in_epoch += batch_examples
+            total_examples_processed += batch_examples
+            batch_count += 1
             
-            # Update learning rate after chunk
+            # Update learning rate after each batch
             if decay_alpha and total_example_count > 0:
                 decay_factor = 1 - (total_examples_processed / total_example_count)
                 current_alpha = max(self.min_alpha, start_alpha * decay_factor)
@@ -2032,29 +2036,29 @@ class TempRefWord2Vec(Word2Vec):
             
             # Update progress
             if calculate_loss:
-                if chunk_examples > 0:
-                    chunk_avg_loss = chunk_loss / chunk_examples
-                    recent_losses.append(chunk_avg_loss)
+                if batch_examples > 0:
+                    batch_avg_loss = batch_loss / batch_examples
+                    recent_losses.append(batch_avg_loss)
                     if len(recent_losses) > LOSS_HISTORY_SIZE:
                         recent_losses.pop(0)
                 
                 recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
                 
                 if use_simple_logging:
-                    if verbose is not None and (chunk_idx + 1) % max(1, verbose) == 0:
+                    if verbose is not None and batch_count % max(1, verbose) == 0:
                         elapsed = time.time() - epoch_start_time
                         ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
                         if decay_alpha:
-                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count}/{num_batches} | loss={recent_avg:.6f} | lr={current_alpha:.6f} | {ex_per_sec:.0f} ex/s")
                         else:
-                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | chunk={chunk_idx+1}/{num_chunks} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+                            print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} | batch={batch_count}/{num_batches} | loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
                 elif progress_bar is not None:
                     if decay_alpha:
                         postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}, b={batch_count}"
                     else:
                         postfix_str = f"loss={recent_avg:.6f}, b={batch_count}"
                     progress_bar.set_postfix_str(postfix_str)
-                    progress_bar.update(chunk_examples)
+                    progress_bar.update(batch_examples)
         
         # Close progress bar
         if progress_bar is not None:
@@ -2083,7 +2087,7 @@ class TempRefWord2Vec(Word2Vec):
         examples by converting any temporal variant context words to their base form.
         
         Args:
-            sentences: List of sentences (lists of words).
+            sentences: List of tokenized sentences.
         
         Returns:
             Generator yielding (input_idx, output_idx) tuples for positive examples.
@@ -2120,7 +2124,7 @@ class TempRefWord2Vec(Word2Vec):
         examples by converting any temporal variant context words to their base form.
         
         Args:
-            sentences: List of sentences (lists of words).
+            sentences: List of tokenized sentences.
         
         Returns:
             Generator yielding (input_indices, output_idx) tuples for positive examples.
