@@ -27,7 +27,6 @@ Features:
 import logging
 import numpy as np
 from collections import Counter
-from itertools import chain
 from typing import List, Dict, Tuple, Optional, Union, Generator, Callable
 from tqdm.auto import tqdm
 import warnings
@@ -90,7 +89,6 @@ class Word2Vec:
             None means no limit (keep all words above min_word_count).
         use_double_precision (bool): Whether to use float64 precision for better stability (default: False).
         use_cython (bool): Whether to use Cython acceleration if available (default: True).
-        gradient_clip (float): Maximum absolute value for gradients when using Cython (default: 1.0).
     
     Example:
         from qhchina.analytics.word2vec import Word2Vec
@@ -130,8 +128,9 @@ class Word2Vec:
         max_vocab_size: Optional[int] = None,
         use_double_precision: bool = False,
         use_cython: bool = True,
-        gradient_clip: float = 1.0,
+        verbose: bool = False,
     ):
+        self.verbose = verbose
         self.vector_size = vector_size
         self.window = window
         self.min_word_count = min_word_count
@@ -146,7 +145,6 @@ class Word2Vec:
         self.shrink_windows = shrink_windows  # Dynamic window size
         self.max_vocab_size = max_vocab_size  # Maximum vocabulary size
         self.use_double_precision = use_double_precision  # Whether to use double precision
-        self.gradient_clip = gradient_clip  # For gradient clipping in Cython
         
         # Initialize use_cython to False by default
         self.word2vec_c = None
@@ -174,7 +172,8 @@ class Word2Vec:
         self.vocab = {}  # word -> index (direct mapping)
         self.index2word = []  # index -> word
         self.word_counts = Counter()  # word -> count
-        self.corpus_word_count = 0
+        self.corpus_word_count = 0  # Token count for words IN vocabulary
+        self.total_corpus_tokens = 0  # Total token count (including OOV words)
         self.discard_probs = None  # Numpy array for subsampling frequent words (indexed by word ID)
         
         # These will be initialized in _initialize_weights
@@ -272,31 +271,6 @@ class Word2Vec:
         # Look up values in the table
         return self.log_sigmoid_table[idx]
 
-    def _clip_gradient(self, gradient: np.ndarray) -> np.ndarray:
-        """
-        Clip gradient by L2 norm to prevent explosion while preserving direction.
-        
-        Args:
-            gradient: Gradient vector(s) to clip. Can be 1D or 2D array.
-        
-        Returns:
-            Clipped gradient (same shape as input).
-        """
-        if gradient.ndim == 1:
-            # Single gradient vector
-            norm = np.linalg.norm(gradient)
-            if norm > self.gradient_clip:
-                return gradient * (self.gradient_clip / norm)
-            return gradient
-        else:
-            # Batch of gradient vectors (2D array)
-            norms = np.linalg.norm(gradient, axis=1, keepdims=True)
-            # Avoid division by zero
-            norms = np.maximum(norms, 1e-12)
-            # Scale factors: 1.0 if norm <= clip, else clip/norm
-            scale = np.minimum(1.0, self.gradient_clip / norms)
-            return gradient * scale
-
     @property
     def wv(self) -> 'Word2Vec':
         """
@@ -332,9 +306,10 @@ class Word2Vec:
         if not sentences:
             raise ValueError("sentences cannot be empty")
         
-        # Count word occurrences using chain.from_iterable for efficiency
-        # This flattens all sentences into a single word stream, reducing Python loop overhead
-        self.word_counts = Counter(chain.from_iterable(sentences))
+        # Count word occurrences with progress bar
+        self.word_counts = Counter()
+        for sentence in tqdm(sentences, desc="Counting vocabulary", unit="sent", leave=False):
+            self.word_counts.update(sentence)
         
         # Check if any words were found (catches all-empty sentences)
         if not self.word_counts:
@@ -358,8 +333,13 @@ class Word2Vec:
                 self.vocab[word] = word_id # word2index
                 self.index2word.append(word)
         
-        self.corpus_word_count = sum(self.word_counts[word] for word in self.vocab)
+        # Compute token counts for example estimation
+        self.total_corpus_tokens = sum(self.word_counts.values())  # All tokens (including OOV)
+        self.corpus_word_count = sum(self.word_counts[word] for word in self.vocab)  # Vocab tokens only
         self.vocab_size = len(self.vocab)
+        
+        if self.verbose:
+            logger.info(f"Vocabulary built: {self.vocab_size:,} words, {self.corpus_word_count:,} tokens in vocab, {self.total_corpus_tokens:,} total tokens")
 
     def _calculate_discard_probs(self) -> None:
         """
@@ -392,15 +372,26 @@ class Word2Vec:
         Estimate total training examples per epoch without iterating through data.
         
         Used for learning rate decay scheduling when min_alpha is provided.
-        The estimate accounts for subsampling and window effects.
+        The estimate accounts for subsampling, vocabulary coverage, and window effects.
         
         For Skip-gram: each retained word generates ~2*avg_window context pairs,
-            but context words are also subsampled.
+            but context words must also be in vocabulary and survive subsampling.
         For CBOW: each retained word generates 1 example (with context as input).
         
         Returns:
             Estimated number of training examples per epoch.
         """
+        # Vocabulary coverage: probability that a random word position is in vocabulary
+        # This is computed exactly from word counts, replacing the old magic constants
+        if self.total_corpus_tokens > 0:
+            vocab_coverage = self.corpus_word_count / self.total_corpus_tokens
+        else:
+            vocab_coverage = 1.0
+        
+        # Edge factor: accounts for sentence boundary effects where context windows
+        # are truncated. This is the only remaining heuristic (~5% loss estimate).
+        edge_factor = 0.95
+        
         # Calculate effective word count after subsampling
         if self.sample > 0 and self.discard_probs is not None:
             # Expected retained words = sum of (count * keep_probability)
@@ -419,14 +410,15 @@ class Word2Vec:
         
         if self.sg:  # Skip-gram
             # Each center word pairs with ~2*window context words (left + right)
-            # Context words are ALSO subsampled, so multiply by avg_keep_prob
-            # Apply 0.85 factor for: edge effects, OOV context words
-            estimated = int(effective_words * 2 * avg_window * avg_keep_prob * 0.85)
+            # Context words must: (1) be in vocabulary, (2) survive subsampling
+            # Edge factor accounts for truncated windows at sentence boundaries
+            estimated = int(effective_words * 2 * avg_window * vocab_coverage * avg_keep_prob * edge_factor)
         else:  # CBOW
             # Each center word generates 1 example (context words as input)
-            # Apply 0.90 factor for edge effects and empty context filtering
-            # Reduce further if subsampling is aggressive (may lose all context words)
-            estimated = int(effective_words * 0.90 * max(0.5, avg_keep_prob))
+            # Edge factor accounts for sentence boundaries
+            # Additional factor for cases where all context words are subsampled away
+            context_survival = max(0.5, vocab_coverage * avg_keep_prob)
+            estimated = int(effective_words * edge_factor * context_survival)
         
         return max(1, estimated)
 
@@ -435,6 +427,8 @@ class Word2Vec:
         Initialize word vectors
         """
         vocab_size = len(self.vocab)
+        if self.verbose:
+            logger.info(f"Initializing vectors: 2 matrices of shape ({vocab_size:,}, {self.vector_size})...")
         
         # Initialize input and output matrices
         # Using Xavier/Glorot initialization for better convergence
@@ -501,7 +495,6 @@ class Word2Vec:
                 max_exp=self.max_exp,
                 noise_distribution=self.noise_distribution,
                 vector_size=self.vector_size,
-                gradient_clip=self.gradient_clip,
                 negative=self.negative,
                 learning_rate=self.alpha,
                 cbow_mean=int(self.cbow_mean),
@@ -757,17 +750,14 @@ class Word2Vec:
             # Compute gradients for input vectors from all negative examples: shape (batch_size, vector_size)
             neg_input_gradients = np.sum(neg_gradients_reshaped * neg_vectors, axis=1)
             
-            # Combine input gradients and clip: shape (batch_size, vector_size)
-            total_input_gradients = self._clip_gradient(input_gradients + neg_input_gradients)
+            # Combine input gradients: shape (batch_size, vector_size)
+            total_input_gradients = input_gradients + neg_input_gradients
             
-            # Clip positive output gradients: shape (batch_size, vector_size)
-            output_gradients = self._clip_gradient(output_gradients)
-            
-            # Clip negative output gradients: shape (batch_size * negative, vector_size)
+            # Flatten negative gradients: shape (batch_size * negative, vector_size)
             flat_neg_indices = neg_indices_buffer.reshape(-1)
-            flat_neg_gradients = self._clip_gradient(neg_output_gradients.reshape(-1, self.vector_size))
+            flat_neg_gradients = neg_output_gradients.reshape(-1, self.vector_size)
             
-            # Apply all updates with clipped gradients
+            # Apply all updates
             np.add.at(self.W, input_indices, -learning_rate * total_input_gradients)
             np.add.at(self.W_prime, output_indices, -learning_rate * output_gradients)
             np.add.at(self.W_prime, flat_neg_indices, -learning_rate * flat_neg_gradients)
@@ -859,12 +849,9 @@ class Word2Vec:
             # Compute gradients for combined inputs from all negative examples: shape (batch_size, vector_size)
             neg_input_gradients = np.sum(neg_gradients_reshaped * neg_vectors, axis=1)
             
-            # Clip center gradients: shape (batch_size, vector_size)
-            center_gradients = self._clip_gradient(center_gradients)
-            
-            # Clip negative output gradients: shape (batch_size * negative, vector_size)
+            # Flatten negative gradients: shape (batch_size * negative, vector_size)
             flat_neg_indices = neg_indices_buffer.reshape(-1)
-            flat_neg_gradients = self._clip_gradient(neg_output_gradients.reshape(-1, self.vector_size))
+            flat_neg_gradients = neg_output_gradients.reshape(-1, self.vector_size)
             
             # Apply updates for center and negative vectors
             np.add.at(self.W_prime, center_indices, -learning_rate * center_gradients)
@@ -887,8 +874,7 @@ class Word2Vec:
                 if self.cbow_mean and context_sizes[batch_idx] > 1:
                     total_input_gradient = total_input_gradient / context_sizes[batch_idx]
                 
-                # Clip and update context vectors
-                total_input_gradient = self._clip_gradient(total_input_gradient)
+                # Update context vectors
                 np.add.at(self.W, context_indices, -learning_rate * total_input_gradient)
             
             total_loss = positive_loss + negative_loss
@@ -1040,11 +1026,16 @@ class Word2Vec:
         total_examples_processed = 0
         current_alpha = start_alpha = self.alpha
         self._update_learning_rate(current_alpha)
+        
+        if self.verbose:
+            logger.info(f"Starting training: {epochs} epoch(s), {len(sentences):,} sentences, alpha={self.alpha}")
 
         # Training loop for each epoch
         for epoch in range(epochs):
             # Shuffle sentences each epoch (only if it's a list)
             if isinstance(sentences, list):
+                if self.verbose:
+                    logger.info(f"Epoch {epoch+1}/{epochs}: Shuffling sentences...")
                 self._rng.shuffle(sentences)
                     
             examples_processed_in_epoch = 0
@@ -1082,7 +1073,8 @@ class Word2Vec:
         # Calculate and return the final average loss if requested
         if calculate_loss and examples_processed_total > 0:
             final_avg_loss = total_loss / examples_processed_total
-            logger.info(f"Training completed. Final average loss: {final_avg_loss:.6f}")
+            if self.verbose:
+                logger.info(f"Training completed. Final average loss: {final_avg_loss:.6f}")
             return final_avg_loss
         
         return None
@@ -1552,7 +1544,6 @@ class Word2Vec:
             'max_vocab_size': self.max_vocab_size,
             'use_double_precision': self.use_double_precision,
             'use_cython': self.use_cython,
-            'gradient_clip': self.gradient_clip,
             'W': self.W,
             'W_prime': self.W_prime
         }
@@ -1577,7 +1568,6 @@ class Word2Vec:
         max_vocab_size = model_data.get('max_vocab_size', None)
         use_double_precision = model_data.get('use_double_precision', False)
         use_cython = model_data.get('use_cython', False)
-        gradient_clip = model_data.get('gradient_clip', 1.0)
         
         model = cls(
             vector_size=model_data['vector_size'],
@@ -1592,7 +1582,6 @@ class Word2Vec:
             max_vocab_size=max_vocab_size,
             use_double_precision=use_double_precision,
             use_cython=use_cython,
-            gradient_clip=gradient_clip
         )
         
         model.vocab = model_data['vocab']
@@ -1755,10 +1744,13 @@ class TempRefWord2Vec(Word2Vec):
         self.labels = labels
         self.targets = targets
         
+        # Extract verbose from kwargs for logging before super().__init__
+        verbose = kwargs.get('verbose', False)
+        
         # print how many sentences in each corpus (each corpus a list of sentences)
         # and total size of each corpus (how many words; each sentence a list of words)
         # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-        if not all(len(corpus) == 0 for corpus in corpora):
+        if verbose and not all(len(corpus) == 0 for corpus in corpora):
             for i, corpus in enumerate(corpora):
                 logger.info(f"Corpus {labels[i]} has {len(corpus)} sentences and {sum(len(sentence) for sentence in corpus)} words")
 
@@ -1766,7 +1758,8 @@ class TempRefWord2Vec(Word2Vec):
         if balance:
             corpus_token_counts = [sum(len(sentence) for sentence in corpus) for corpus in corpora]
             target_token_count = min(corpus_token_counts)
-            logger.info(f"Balancing corpora to minimum size: {target_token_count} tokens")
+            if verbose:
+                logger.info(f"Balancing corpora to minimum size: {target_token_count} tokens")
             
             # Balance corpus sizes
             balanced_corpora = []
@@ -1795,14 +1788,14 @@ class TempRefWord2Vec(Word2Vec):
                 period_counter.update(sentence)
             self.period_vocab_counts[label] = period_counter
             # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-            if not all(len(corpus) == 0 for corpus in corpora):
+            if verbose and not all(len(corpus) == 0 for corpus in corpora):
                 logger.info(f"Period '{label}': {len(period_counter)} unique tokens, {sum(period_counter.values())} total tokens")
         
         # Combine all tagged corpora
         for corpus in tagged_corpora:
             self.combined_corpus.extend(corpus)
         # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-        if not all(len(corpus) == 0 for corpus in corpora):
+        if verbose and not all(len(corpus) == 0 for corpus in corpora):
             logger.info(f"Combined corpus: {len(self.combined_corpus)} sentences, {sum(len(s) for s in self.combined_corpus)} tokens")
         
         # clear memory
@@ -2329,7 +2322,6 @@ class TempRefWord2Vec(Word2Vec):
             'max_vocab_size': self.max_vocab_size,
             'use_double_precision': self.use_double_precision,
             'use_cython': self.use_cython,
-            'gradient_clip': self.gradient_clip,
             'W': self.W,
             'W_prime': self.W_prime
         }
@@ -2349,12 +2341,13 @@ class TempRefWord2Vec(Word2Vec):
         
         # Save to file
         np.save(path, model_data, allow_pickle=True)
-        logger.info(f"TempRefWord2Vec model saved to {path}")
-        logger.info(f"Saved data includes:")
-        logger.info(f"  - Vocabulary: {len(self.vocab)} words")
-        logger.info(f"  - Time periods: {len(self.labels)} ({', '.join(self.labels)})")
-        logger.info(f"  - Target words: {len(self.targets)} ({', '.join(self.targets)})")
-        logger.info(f"  - Period vocab counts: {len(self.period_vocab_counts)} periods")
+        if self.verbose:
+            logger.info(f"TempRefWord2Vec model saved to {path}")
+            logger.info(f"Saved data includes:")
+            logger.info(f"  - Vocabulary: {len(self.vocab)} words")
+            logger.info(f"  - Time periods: {len(self.labels)} ({', '.join(self.labels)})")
+            logger.info(f"  - Target words: {len(self.targets)} ({', '.join(self.targets)})")
+            logger.info(f"  - Period vocab counts: {len(self.period_vocab_counts)} periods")
     
     @classmethod
     def load(cls, path: str) -> 'TempRefWord2Vec':
@@ -2397,7 +2390,6 @@ class TempRefWord2Vec(Word2Vec):
         max_vocab_size = model_data.get('max_vocab_size', None)
         use_double_precision = model_data.get('use_double_precision', False)
         use_cython = model_data.get('use_cython', False)
-        gradient_clip = model_data.get('gradient_clip', 1.0)
         
         # Create model instance with dummy data (will be overwritten)
         model = cls(
@@ -2416,7 +2408,6 @@ class TempRefWord2Vec(Word2Vec):
             max_vocab_size=max_vocab_size,
             use_double_precision=use_double_precision,
             use_cython=use_cython,
-            gradient_clip=gradient_clip,
             balance=False  # Don't balance dummy corpora
         )
         
@@ -2455,12 +2446,13 @@ class TempRefWord2Vec(Word2Vec):
                     f"Error: {e}"
                 )
         
-        logger.info(f"TempRefWord2Vec model loaded from {path}")
-        logger.info(f"Restored data includes:")
-        logger.info(f"  - Vocabulary: {len(model.vocab)} words")
-        logger.info(f"  - Time periods: {len(model.labels)} ({', '.join(model.labels)})")
-        logger.info(f"  - Target words: {len(model.targets)} ({', '.join(model.targets)})")
-        logger.info(f"  - Period vocab counts: {len(model.period_vocab_counts)} periods")
+        if model.verbose:
+            logger.info(f"TempRefWord2Vec model loaded from {path}")
+            logger.info(f"Restored data includes:")
+            logger.info(f"  - Vocabulary: {len(model.vocab)} words")
+            logger.info(f"  - Time periods: {len(model.labels)} ({', '.join(model.labels)})")
+            logger.info(f"  - Target words: {len(model.targets)} ({', '.join(model.targets)})")
+            logger.info(f"  - Period vocab counts: {len(model.period_vocab_counts)} periods")
         
         return model
 
