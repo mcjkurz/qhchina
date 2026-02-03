@@ -558,8 +558,10 @@ class TestStylometryVisualization:
         """Test PCA visualization."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         # Should not raise
         fitted_stylo.plot(method='pca', show=False)
         plt.close('all')
@@ -568,8 +570,10 @@ class TestStylometryVisualization:
         """Test t-SNE visualization."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         # Should not raise
         fitted_stylo.plot(method='tsne', show=False)
         plt.close('all')
@@ -578,8 +582,10 @@ class TestStylometryVisualization:
         """Test MDS visualization."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         # Should not raise
         fitted_stylo.plot(method='mds', show=False)
         plt.close('all')
@@ -593,8 +599,10 @@ class TestStylometryVisualization:
         """Test visualization at author level."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         fitted_stylo.plot(method='pca', level='author', show=False)
         plt.close('all')
     
@@ -602,8 +610,10 @@ class TestStylometryVisualization:
         """Test saving plot to file."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         filepath = tmp_path / "stylometry_plot.png"
         fitted_stylo.plot(method='pca', filename=str(filepath), show=False)
         plt.close('all')
@@ -614,8 +624,10 @@ class TestStylometryVisualization:
         """Test basic dendrogram visualization."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         # Should not raise
         fitted_stylo.dendrogram(show=False)
         plt.close('all')
@@ -624,8 +636,10 @@ class TestStylometryVisualization:
         """Test dendrogram at author level."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         fitted_stylo.dendrogram(level='author', show=False)
         plt.close('all')
     
@@ -633,8 +647,10 @@ class TestStylometryVisualization:
         """Test dendrogram with different linkage methods."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         for method in ['single', 'complete', 'average', 'ward']:
             fitted_stylo.dendrogram(method=method, show=False)
             plt.close('all')
@@ -648,8 +664,10 @@ class TestStylometryVisualization:
         """Test saving dendrogram to file."""
         import matplotlib
         matplotlib.use('Agg')
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         filepath = tmp_path / "dendrogram.png"
         fitted_stylo.dendrogram(filename=str(filepath), show=False)
         plt.close('all')

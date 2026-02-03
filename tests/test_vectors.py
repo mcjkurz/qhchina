@@ -124,7 +124,10 @@ class TestProject2D:
         import matplotlib
         matplotlib.use('Agg')
         from qhchina.analytics.vectors import project_2d
+        from qhchina import helpers
         import matplotlib.pyplot as plt
+        
+        helpers.load_fonts()
         
         # Create some random vectors
         vectors = np.random.randn(10, 50)
@@ -139,8 +142,10 @@ class TestProject2D:
         import matplotlib
         matplotlib.use('Agg')
         from qhchina.analytics.vectors import project_2d
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         vectors = np.random.randn(10, 50)
         labels = [f"vec_{i}" for i in range(10)]
         
@@ -153,8 +158,10 @@ class TestProject2D:
         import matplotlib
         matplotlib.use('Agg')
         from qhchina.analytics.vectors import project_2d
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         vectors = {
             "a": np.random.randn(50),
             "b": np.random.randn(50),
@@ -187,8 +194,10 @@ class TestProject2D:
         import matplotlib
         matplotlib.use('Agg')
         from qhchina.analytics.vectors import project_2d
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         try:
             import umap
         except ImportError:
@@ -215,8 +224,10 @@ class TestProject2D:
         import matplotlib
         matplotlib.use('Agg')
         from qhchina.analytics.vectors import project_2d
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         vectors = np.random.randn(10, 50)
         labels = [f"vec_{i}" for i in range(10)]
         
@@ -231,8 +242,10 @@ class TestProject2D:
         import matplotlib
         matplotlib.use('Agg')
         from qhchina.analytics.vectors import project_2d
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         vectors = np.random.randn(5, 50)
         labels = [f"vec_{i}" for i in range(5)]
         colors = ['red', 'blue', 'green', 'yellow', 'purple']
@@ -245,8 +258,10 @@ class TestProject2D:
         import matplotlib
         matplotlib.use('Agg')
         from qhchina.analytics.vectors import project_2d
+        from qhchina import helpers
         import matplotlib.pyplot as plt
         
+        helpers.load_fonts()
         vectors = np.random.randn(5, 50)
         
         project_2d(vectors, method='pca', title="Test Projection")

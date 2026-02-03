@@ -834,7 +834,9 @@ class TestPlotCollocates:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         from qhchina.analytics.collocations import find_collocates, plot_collocates
+        from qhchina import helpers
         
+        helpers.load_fonts()
         collocates = find_collocates(larger_documents, target_words=["我"])
         
         if len(collocates) > 0:
@@ -863,7 +865,9 @@ class TestPlotCollocates:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         from qhchina.analytics.collocations import find_collocates, plot_collocates
+        from qhchina import helpers
         
+        helpers.load_fonts()
         collocates = find_collocates(larger_documents, target_words=["我"])
         
         if len(collocates) > 0:
@@ -876,7 +880,9 @@ class TestPlotCollocates:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         from qhchina.analytics.collocations import find_collocates, plot_collocates
+        from qhchina import helpers
         
+        helpers.load_fonts()
         collocates = find_collocates(larger_documents, target_words=["我"])
         
         if len(collocates) > 0:
@@ -890,7 +896,9 @@ class TestPlotCollocates:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         from qhchina.analytics.collocations import find_collocates, plot_collocates
+        from qhchina import helpers
         
+        helpers.load_fonts()
         collocates = find_collocates(larger_documents, target_words=["我"])
         
         if len(collocates) > 0:
@@ -906,7 +914,9 @@ class TestPlotCollocates:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         from qhchina.analytics.collocations import find_collocates, plot_collocates
+        from qhchina import helpers
         
+        helpers.load_fonts()
         collocates = find_collocates(larger_documents, target_words=["我"])
         
         if len(collocates) > 0:

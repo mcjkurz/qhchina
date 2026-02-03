@@ -14,7 +14,9 @@ class TestVisualizePerplexities:
         matplotlib.use('Agg')  # Use non-GUI backend
         import matplotlib.pyplot as plt
         from qhchina.analytics.perplexity import visualize_perplexities
+        from qhchina import helpers
         
+        helpers.load_fonts()
         perplexities = [10.0, 20.0, 15.0, 30.0]
         labels = ['a', 'b', 'c', 'd']
         
@@ -38,7 +40,9 @@ class TestVisualizePerplexities:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         from qhchina.analytics.perplexity import visualize_perplexities
+        from qhchina import helpers
         
+        helpers.load_fonts()
         perplexities = [5.0, 10.0, 8.0]
         labels = ['x', 'y', 'z']
         
