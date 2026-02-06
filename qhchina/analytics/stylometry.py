@@ -25,7 +25,7 @@ from scipy.stats import fisher_exact, chi2_contingency
 from tqdm.auto import tqdm
 from .vectors import cosine_similarity as _cosine_similarity, cosine_distance
 from ..config import resolve_seed
-from ..utils import validate_filters
+from ..utils import validate_filters, apply_p_value_correction, VALID_CORRECTIONS
 
 logger = logging.getLogger("qhchina.analytics.stylometry")
 
@@ -1768,7 +1768,8 @@ class Stylometry:
 def compare_corpora(corpusA: Union[List[str], List[List[str]]], 
                     corpusB: Union[List[str], List[List[str]]], 
                     method: str = 'fisher', 
-                    filters: Dict = None,
+                    filters: Optional[Dict] = None,
+                    correction: Optional[str] = None,
                     as_dataframe: bool = True) -> List[Dict]:
     """
     Compare two corpora to identify statistically significant differences in word usage.
@@ -1784,9 +1785,19 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             - 'min_count': int or tuple - Minimum count threshold(s) for a word to be 
               included (can be a single int for both corpora or tuple (min_countA, 
               min_countB)). Default is 0.
-            - 'max_p': float - Maximum p-value threshold for statistical significance.
+            - 'max_p': float - Maximum raw p-value threshold for statistical 
+              significance.
+            - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
+              valid when ``correction`` is set.
             - 'stopwords': list - Words to exclude from results.
             - 'min_word_length': int - Minimum character length for words.
+        correction (str, optional): Multiple testing correction method. When set,
+            an ``adjusted_p_value`` column is added to the results.
+            - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
+              error rate).
+            - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate,
+              recommended for corpus comparison).
+            - None: No correction (default).
         as_dataframe (bool): Whether to return a pandas DataFrame.
     
     Returns:
@@ -1801,8 +1812,21 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
         Two-sided tests are used because we want to detect whether words are 
         overrepresented in either corpus.
     """
+    # Validate corpus inputs
+    if not isinstance(corpusA, list):
+        raise TypeError(f"corpusA must be a list, got {type(corpusA).__name__}")
+    if not isinstance(corpusB, list):
+        raise TypeError(f"corpusB must be a list, got {type(corpusB).__name__}")
+    
+    # Validate correction parameter
+    if correction is not None and correction not in VALID_CORRECTIONS:
+        raise ValueError(
+            f"Unknown correction method '{correction}'. "
+            f"Valid methods are: {VALID_CORRECTIONS}"
+        )
+    
     # Validate filter keys
-    valid_filter_keys = {'min_count', 'max_p', 'stopwords', 'min_word_length'}
+    valid_filter_keys = {'min_count', 'max_p', 'max_adjusted_p', 'stopwords', 'min_word_length'}
     validate_filters(filters, valid_filter_keys, context='compare_corpora')
     
     # Validate and print filters
@@ -1824,6 +1848,12 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             if not isinstance(filters['max_p'], (int, float)) or filters['max_p'] < 0 or filters['max_p'] > 1:
                 raise ValueError("max_p must be a number between 0 and 1")
         
+        if 'max_adjusted_p' in filters:
+            if not isinstance(filters['max_adjusted_p'], (int, float)) or filters['max_adjusted_p'] < 0 or filters['max_adjusted_p'] > 1:
+                raise ValueError("max_adjusted_p must be a number between 0 and 1")
+            if correction is None:
+                raise ValueError("max_adjusted_p filter requires a correction method to be set")
+        
         if 'stopwords' in filters:
             if not isinstance(filters['stopwords'], (list, set)):
                 raise ValueError("stopwords must be a list or set")
@@ -1838,6 +1868,8 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             filter_strs.append(f"min_count={filters['min_count']}")
         if 'max_p' in filters:
             filter_strs.append(f"max_p={filters['max_p']}")
+        if 'max_adjusted_p' in filters:
+            filter_strs.append(f"max_adjusted_p={filters['max_adjusted_p']}")
         if 'stopwords' in filters:
             filter_strs.append(f"stopwords=<{len(filters['stopwords'])} words>")
         if 'min_word_length' in filters:
@@ -1917,15 +1949,27 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             "p_value": p_value,
         })
     
+    # Apply multiple testing correction if requested
+    if correction is not None and results:
+        raw_p_values = [r["p_value"] for r in results]
+        adjusted = apply_p_value_correction(raw_p_values, method=correction)
+        for r, adj_p in zip(results, adjusted):
+            r["adjusted_p_value"] = adj_p
+    
     # Apply other filters if specified
     if filters:
-        # Filter by p-value threshold
+        # Filter by raw p-value threshold
         if 'max_p' in filters:
             results = [result for result in results if result["p_value"] <= filters['max_p']]
         
+        # Filter by adjusted p-value threshold
+        if 'max_adjusted_p' in filters:
+            results = [result for result in results if result["adjusted_p_value"] <= filters['max_adjusted_p']]
+        
         # Filter out stopwords
         if 'stopwords' in filters:
-            results = [result for result in results if result["word"] not in filters['stopwords']]
+            stopwords_set = set(filters['stopwords']) if isinstance(filters['stopwords'], list) else filters['stopwords']
+            results = [result for result in results if result["word"] not in stopwords_set]
         
         # Filter by minimum length
         if 'min_word_length' in filters:

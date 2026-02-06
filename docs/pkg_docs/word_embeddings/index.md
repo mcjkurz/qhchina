@@ -7,10 +7,6 @@ functions:
     anchor: word2vec
   - name: Word2Vec.build_vocab()
     anchor: word2vec-build_vocab
-  - name: Word2Vec.generate_cbow_examples()
-    anchor: word2vec-generate_cbow_examples
-  - name: Word2Vec.generate_skipgram_examples()
-    anchor: word2vec-generate_skipgram_examples
   - name: Word2Vec.get_vector()
     anchor: word2vec-get_vector
   - name: Word2Vec.most_similar()
@@ -27,10 +23,6 @@ functions:
     anchor: temprefword2vec-build_vocab
   - name: TempRefWord2Vec.calculate_semantic_change()
     anchor: temprefword2vec-calculate_semantic_change
-  - name: TempRefWord2Vec.generate_cbow_examples()
-    anchor: temprefword2vec-generate_cbow_examples
-  - name: TempRefWord2Vec.generate_skipgram_examples()
-    anchor: temprefword2vec-generate_skipgram_examples
   - name: TempRefWord2Vec.get_available_targets()
     anchor: temprefword2vec-get_available_targets
   - name: TempRefWord2Vec.get_period_vocab_counts()
@@ -87,6 +79,7 @@ similar = model.most_similar("经济", topn=10)  # Find words similar to "经济
 
 ```python
 Word2Vec(
+    sentences: Optional[List[List[str]]] = None,
     vector_size: int = 100,
     window: int = 5,
     min_word_count: int = 5,
@@ -99,16 +92,17 @@ Word2Vec(
     min_alpha: Optional[float] = None,
     sample: float = 0.001,
     shrink_windows: bool = True,
-    exp_table_size: int = 1000,
-    max_exp: float = 6.0,
     max_vocab_size: Optional[int] = None,
-    use_double_precision: bool = False,
-    use_cython: bool = True,
-    verbose: bool = False
+    verbose: bool = False,
+    epochs: int = 1,
+    batch_size: int = 10000,
+    callbacks: Optional[List[Callable]] = None,
+    calculate_loss: bool = True,
+    total_examples: Optional[int] = None
 )
 ```
 
-Implementation of Word2Vec algorithm with sample-based training approach.
+Implementation of Word2Vec algorithm with Cython-accelerated training.
 
 This class implements both Skip-gram and CBOW architectures:
 - Skip-gram (sg=1): Each training example is (input_idx, output_idx) where input is the center word
@@ -116,21 +110,23 @@ This class implements both Skip-gram and CBOW architectures:
 - CBOW (sg=0): Each training example is (input_indices, output_idx) where inputs are context words
   and output is the center word.
 
-Training is performed one example at a time, with negative examples generated for each positive example.
+Training is performed using optimized Cython routines with BLAS operations for maximum speed.
+
+If ``sentences`` is provided at initialization, training starts immediately. Otherwise, call
+:meth:`train` later with the sentences to train on.
 
 Features:
-- CBOW and Skip-gram architectures with appropriate example generation
-- Training with individual examples (one by one)
-- Explicit negative sampling for each training example
+- CBOW and Skip-gram architectures
+- Cython-accelerated training with BLAS operations
+- Negative sampling for each training example
 - Subsampling of frequent words
 - Dynamic window sizing with shrink_windows parameter
 - Properly managed learning rate decay
-- Sigmoid precomputation for faster training
 - Vocabulary size restriction with max_vocab_size parameter
-- Optional double precision for numerical stability
-- Optional Cython acceleration for significantly faster training
 
 **Parameters:**
+- `sentences` (list of list of str): Tokenized sentences for training. If provided,
+  training starts immediately during initialization.
 - `vector_size` (int): Dimensionality of the word vectors (default: 100).
 - `window` (int): Maximum distance between the current and predicted word (default: 5).
 - `min_word_count` (int): Ignores all words with frequency lower than this (default: 5).
@@ -144,12 +140,14 @@ Features:
 - `sample` (float): Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
 - `shrink_windows` (bool): If True, the effective window size is uniformly sampled from [1, window] 
   for each target word during training. If False, always use the full window (default: True).
-- `exp_table_size` (int): Size of sigmoid lookup table for precomputation (default: 1000).
-- `max_exp` (float): Range of values for sigmoid precomputation [-max_exp, max_exp] (default: 6.0).
 - `max_vocab_size` (int): Maximum vocabulary size to keep, keeping the most frequent words.
   None means no limit (keep all words above min_word_count).
-- `use_double_precision` (bool): Whether to use float64 precision for better stability (default: False).
-- `use_cython` (bool): Whether to use Cython acceleration if available (default: True).
+- `epochs` (int): Number of training iterations over the corpus (default: 1).
+- `batch_size` (int): Number of sentences to process per batch (default: 10000).
+- `callbacks` (list of callable): Callback functions to call after each epoch.
+- `calculate_loss` (bool): Whether to calculate and return the final loss (default: True).
+- `total_examples` (int): Total number of training examples per epoch. When provided 
+  along with ``min_alpha``, uses this exact value instead of estimating for learning rate decay.
 
 **Example:**
 ```python
@@ -158,9 +156,12 @@ from qhchina.analytics.word2vec import Word2Vec
 # Prepare corpus as list of tokenized sentences
 sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
 
-# Train model (vocabulary is built automatically during training)
-model = Word2Vec(vector_size=100, window=5, min_word_count=1)
-model.train(sentences, epochs=5)
+# Option 1: Train immediately by providing sentences at init
+model = Word2Vec(sentences, vector_size=100, window=5, min_word_count=1, epochs=5)
+
+# Option 2: Initialize first, train later
+model = Word2Vec(vector_size=100, window=5, min_word_count=1, epochs=5)
+model.train(sentences)
 
 # Get word vector (can use model directly or model.wv for gensim compatibility)
 vector = model['喜欢']
@@ -185,46 +186,6 @@ Build vocabulary from a list of sentences.
 **Raises:**
 - `ValueError`: If sentences is empty or contains no words.
 - `TypeError`: If sentences is not a list.
-
-<h4 id="word2vec-generate_cbow_examples">Word2Vec.generate_cbow_examples()</h4>
-
-```python
-generate_cbow_examples(sentences: List[List[str]])
-```
-
-Generate CBOW training examples from sentences.
-
-A CBOW example is a tuple (input_indices, output_idx) where:
-- input_indices is a list of indices of context words
-- output_idx is the index of the center word
-
-For each positive example, the caller should generate negative examples using the noise distribution.
-
-**Parameters:**
-- `sentences`: List of sentences (lists of words).
-
-**Returns:**
-Generator yielding (input_indices, output_idx) tuples for positive examples.
-
-<h4 id="word2vec-generate_skipgram_examples">Word2Vec.generate_skipgram_examples()</h4>
-
-```python
-generate_skipgram_examples(sentences: List[List[str]])
-```
-
-Generate Skip-gram training examples from sentences.
-
-A Skip-gram example is a tuple (input_idx, output_idx) where:
-- input_idx is the index of the center word
-- output_idx is the index of a context word
-
-For each positive example, the caller should generate negative examples using the noise distribution.
-
-**Parameters:**
-- `sentences`: List of sentences (lists of words).
-
-**Returns:**
-Generator yielding (input_idx, output_idx) tuples for positive examples.
 
 <h4 id="word2vec-get_vector">Word2Vec.get_vector()</h4>
 
@@ -291,27 +252,16 @@ Cosine similarity between the two words (float between -1 and 1).
 <h4 id="word2vec-train">Word2Vec.train()</h4>
 
 ```python
-train(sentences: List[List[str]], epochs: int = 1, alpha: Optional[float] = None, min_alpha: Optional[float] = None, total_examples: Optional[int] = None, batch_size: int = 10000, callbacks: List[Callable] = None, calculate_loss: bool = True, verbose: Optional[int] = None)
+train(sentences: List[List[str]])
 ```
 
 Train word2vec model on given sentences.
 
+All training configuration (epochs, batch_size, alpha, min_alpha, etc.) is read
+from instance attributes set during initialization.
+
 **Parameters:**
 - `sentences`: List of tokenized sentences (lists of words).
-- `epochs`: Number of training iterations over the corpus.
-- `alpha`: Initial learning rate.
-- `min_alpha`: Minimum allowed learning rate. When provided, enables learning rate 
-  decay from `alpha` down to `min_alpha` over the course of training. The 
-  total example count is estimated mathematically for fast startup.
-- `total_examples`: Total number of training examples per epoch. When provided 
-  along with `min_alpha`, uses this exact value instead of estimating.
-- `batch_size`: Number of sentences to process per batch. Sentences in a batch are 
-  sent to Cython together, where training examples are generated and trained.
-  Learning rate is updated after each batch. Default is 10000.
-- `callbacks`: List of callback functions to call after each epoch.
-- `calculate_loss`: Whether to calculate and return the final loss.
-- `verbose`: Controls logging frequency. If None, no batch-level logging in simple 
-  mode. If an integer, logs progress every `verbose` batches.
 
 **Returns:**
 Final loss value if calculate_loss is True, None otherwise.
@@ -369,7 +319,7 @@ model = TempRefWord2Vec(
 ... )
 
 # Train (uses preprocessed internal corpus)
-model.train(epochs=5)
+model.train()
 
 # Analyze semantic change
 model.most_similar("bread_1800s")  # Words similar to "bread" in the 1800s
@@ -414,47 +364,6 @@ for transition, word_changes in changes.items():
     print("Words moved towards:", word_changes[:5])  # Top 5 increases
     print("Words moved away:", word_changes[-5:])   # Top 5 decreases
 ```
-
-<h4 id="temprefword2vec-generate_cbow_examples">TempRefWord2Vec.generate_cbow_examples()</h4>
-
-```python
-generate_cbow_examples(sentences: List[List[str]])
-```
-
-Override parent method to implement temporal referencing in CBOW model.
-
-For CBOW, temporal referencing means:
-- Context words (inputs) should be converted to their base forms
-- Target words (outputs) are already handled by data preprocessing (with temporal variants)
-
-This implementation calls the parent's implementation and then modifies the yielded
-examples by converting any temporal variant context words to their base form.
-
-**Parameters:**
-- `sentences`: List of tokenized sentences.
-
-**Returns:**
-Generator yielding (input_indices, output_idx) tuples for positive examples.
-
-<h4 id="temprefword2vec-generate_skipgram_examples">TempRefWord2Vec.generate_skipgram_examples()</h4>
-
-```python
-generate_skipgram_examples(sentences: List[List[str]])
-```
-
-Override parent method to implement temporal referencing in Skip-gram model.
-
-For Skip-gram, temporal referencing means that target words (inputs) are replaced
-with their temporal variants, while context words (outputs) remain unchanged.
-
-This implementation calls the parent's implementation and then modifies the yielded
-examples by converting any temporal variant context words to their base form.
-
-**Parameters:**
-- `sentences`: List of tokenized sentences.
-
-**Returns:**
-Generator yielding (input_idx, output_idx) tuples for positive examples.
 
 <h4 id="temprefword2vec-get_available_targets">TempRefWord2Vec.get_available_targets()</h4>
 
@@ -515,7 +424,7 @@ Note: The combined corpus is NOT saved to reduce file size.
 <h4 id="temprefword2vec-train">TempRefWord2Vec.train()</h4>
 
 ```python
-train(sentences: Optional[List[str]] = None, **kwargs)
+train(sentences: Optional[List[str]] = None)
 ```
 
 Train the TempRefWord2Vec model using the preprocessed combined corpus.
@@ -524,13 +433,14 @@ Unlike the parent Word2Vec class, TempRefWord2Vec always uses its internal combi
 that was created and preprocessed during initialization. This ensures the training
 data has the proper temporal references.
 
+All training configuration (epochs, batch_size, alpha, min_alpha, etc.) is read
+from instance attributes set during initialization via ``**kwargs``.
+
 **Parameters:**
 - `sentences`: Ignored in TempRefWord2Vec, will use self.combined_corpus instead.
-- `**kwargs`: All additional arguments are passed to the parent's train method
-  (epochs, batch_size, alpha, min_alpha, callbacks, calculate_loss, etc.).
 
 **Returns:**
-Final loss value if calculate_loss is True in kwargs, None otherwise.
+Final loss value if calculate_loss is True, None otherwise.
 
 <br>
 

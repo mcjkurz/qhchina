@@ -922,3 +922,134 @@ class TestPlotCollocates:
         if len(collocates) > 0:
             plot_collocates(collocates, color_by='obs_global')
             plt.close('all')
+
+
+class TestFindCollocatesCorrection:
+    """Tests for multiple testing correction in find_collocates."""
+    
+    def test_bonferroni_adds_adjusted_column(self, larger_documents):
+        """Test that Bonferroni correction adds adjusted_p_value column."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        result = find_collocates(
+            larger_documents,
+            target_words=["我"],
+            correction='bonferroni',
+            as_dataframe=True
+        )
+        
+        assert 'adjusted_p_value' in result.columns
+        assert 'p_value' in result.columns
+        # Adjusted p-values should be >= raw p-values
+        assert all(result['adjusted_p_value'] >= result['p_value'] - 1e-15)
+        # Adjusted p-values should be capped at 1.0
+        assert all(result['adjusted_p_value'] <= 1.0)
+    
+    def test_fdr_bh_adds_adjusted_column(self, larger_documents):
+        """Test that Benjamini-Hochberg correction adds adjusted_p_value column."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        result = find_collocates(
+            larger_documents,
+            target_words=["我"],
+            correction='fdr_bh',
+            as_dataframe=True
+        )
+        
+        assert 'adjusted_p_value' in result.columns
+        assert all(result['adjusted_p_value'] >= result['p_value'] - 1e-15)
+        assert all(result['adjusted_p_value'] <= 1.0)
+    
+    def test_no_correction_by_default(self, larger_documents):
+        """Test that no correction is applied by default."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        result = find_collocates(
+            larger_documents,
+            target_words=["我"],
+            as_dataframe=True
+        )
+        
+        assert 'adjusted_p_value' not in result.columns
+    
+    def test_invalid_correction_raises_error(self, larger_documents):
+        """Test that invalid correction method raises ValueError."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        with pytest.raises(ValueError, match="Unknown correction method"):
+            find_collocates(
+                larger_documents,
+                target_words=["我"],
+                correction='invalid_method'
+            )
+    
+    def test_max_p_filter_still_uses_raw_p_value(self, larger_documents):
+        """Test that max_p filter always uses raw p_value, even with correction."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        result = find_collocates(
+            larger_documents,
+            target_words=["我"],
+            correction='bonferroni',
+            filters={'max_p': 0.05},
+            as_dataframe=True
+        )
+        
+        if len(result) > 0:
+            assert all(result['p_value'] <= 0.05)
+    
+    def test_max_adjusted_p_filters_on_adjusted(self, larger_documents):
+        """Test that max_adjusted_p filter uses adjusted_p_value."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        result = find_collocates(
+            larger_documents,
+            target_words=["我"],
+            correction='bonferroni',
+            filters={'max_adjusted_p': 0.05},
+            as_dataframe=True
+        )
+        
+        if len(result) > 0:
+            assert all(result['adjusted_p_value'] <= 0.05)
+    
+    def test_max_adjusted_p_without_correction_raises_error(self, larger_documents):
+        """Test that max_adjusted_p without correction raises ValueError."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        with pytest.raises(ValueError, match="max_adjusted_p filter requires a correction"):
+            find_collocates(
+                larger_documents,
+                target_words=["我"],
+                filters={'max_adjusted_p': 0.05}
+            )
+    
+    def test_correction_with_list_output(self, larger_documents):
+        """Test correction works when as_dataframe=False."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        result = find_collocates(
+            larger_documents,
+            target_words=["我"],
+            correction='fdr_bh',
+            as_dataframe=False
+        )
+        
+        assert isinstance(result, list)
+        if len(result) > 0:
+            assert 'adjusted_p_value' in result[0]
+    
+    def test_correction_with_sentence_method(self, larger_documents):
+        """Test that correction works with sentence method too."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        result = find_collocates(
+            larger_documents,
+            target_words=["我"],
+            method='sentence',
+            correction='bonferroni',
+            as_dataframe=True
+        )
+        
+        if len(result) > 0:
+            assert 'adjusted_p_value' in result.columns

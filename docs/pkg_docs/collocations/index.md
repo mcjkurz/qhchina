@@ -51,6 +51,7 @@ find_collocates(
     method: str = 'window',
     horizon: Union[int, tuple, NoneType] = None,
     filters: Optional[qhchina.analytics.collocations.FilterOptions] = None,
+    correction: Optional[str] = None,
     as_dataframe: bool = True,
     max_sentence_length: Optional[int] = 256,
     alternative: str = 'greater'
@@ -77,7 +78,10 @@ Find collocates for target words within a corpus of sentences.
   - None: Uses default of 5 for 'window' method
 - `filters` (Optional[FilterOptions]): Dictionary of filters to apply to results, 
   AFTER computation is done:
-  - 'max_p': float - Maximum p-value threshold for statistical significance
+  - 'max_p': float - Maximum raw p-value threshold for statistical 
+    significance.
+  - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
+    valid when ``correction`` is set.
   - 'stopwords': List[str] - Words to exclude from results
   - 'min_word_length': int - Minimum character length for collocates
   - 'min_exp_local': float - Minimum expected local frequency
@@ -88,6 +92,12 @@ Find collocates for target words within a corpus of sentences.
   - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
   - 'min_obs_global': int - Minimum global frequency
   - 'max_obs_global': int - Maximum global frequency
+- `correction` (str): Multiple testing correction method. When set,
+  an ``adjusted_p_value`` column is added to the results.
+  - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
+    error rate).
+  - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).
+  - None: No correction (default).
 - `as_dataframe` (bool): If True, return results as a pandas DataFrame. Default is True.
 - `max_sentence_length` (Optional[int]): Maximum sentence length for preprocessing. 
   Used by both 'window' and 'sentence' methods. Longer sentences will be truncated 

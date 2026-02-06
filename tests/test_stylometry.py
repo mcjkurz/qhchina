@@ -799,3 +799,179 @@ class TestStylometryValidation:
         
         with pytest.raises(ValueError, match="mode must be one of"):
             Stylometry(mode='invalid')
+
+
+class TestCompareCorporaCorrection:
+    """Tests for multiple testing correction in compare_corpora."""
+    
+    def test_bonferroni_adds_adjusted_column(self, song_ming_flat):
+        """Test that Bonferroni correction adds adjusted_p_value column."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            method='fisher',
+            correction='bonferroni',
+            as_dataframe=True
+        )
+        
+        assert 'adjusted_p_value' in result.columns
+        assert 'p_value' in result.columns
+        # Adjusted p-values should be >= raw p-values
+        assert all(result['adjusted_p_value'] >= result['p_value'] - 1e-15)
+        # Adjusted p-values should be capped at 1.0
+        assert all(result['adjusted_p_value'] <= 1.0)
+    
+    def test_fdr_bh_adds_adjusted_column(self, song_ming_flat):
+        """Test that Benjamini-Hochberg correction adds adjusted_p_value column."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            method='fisher',
+            correction='fdr_bh',
+            as_dataframe=True
+        )
+        
+        assert 'adjusted_p_value' in result.columns
+        # Adjusted p-values should be >= raw p-values
+        assert all(result['adjusted_p_value'] >= result['p_value'] - 1e-15)
+        # Adjusted p-values should be capped at 1.0
+        assert all(result['adjusted_p_value'] <= 1.0)
+    
+    def test_no_correction_by_default(self, song_ming_flat):
+        """Test that no correction is applied by default."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            method='fisher',
+            as_dataframe=True
+        )
+        
+        assert 'adjusted_p_value' not in result.columns
+    
+    def test_correction_none_same_as_default(self, song_ming_flat):
+        """Test that correction=None produces same result as no correction."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            method='fisher',
+            correction=None,
+            as_dataframe=True
+        )
+        
+        assert 'adjusted_p_value' not in result.columns
+    
+    def test_invalid_correction_raises_error(self, song_ming_flat):
+        """Test that invalid correction method raises ValueError."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        with pytest.raises(ValueError, match="Unknown correction method"):
+            compare_corpora(
+                corpusA=song_ming_flat['song'],
+                corpusB=song_ming_flat['ming'],
+                correction='invalid_method'
+            )
+    
+    def test_bonferroni_more_conservative_than_fdr(self, song_ming_flat):
+        """Test that Bonferroni correction is more conservative than FDR."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result_bonf = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            correction='bonferroni',
+            as_dataframe=True
+        )
+        result_fdr = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            correction='fdr_bh',
+            as_dataframe=True
+        )
+        
+        # Merge on word to compare
+        merged = result_bonf.merge(result_fdr, on='word', suffixes=('_bonf', '_fdr'))
+        # Bonferroni adjusted p should be >= FDR adjusted p in general
+        assert all(
+            merged['adjusted_p_value_bonf'] >= merged['adjusted_p_value_fdr'] - 1e-15
+        )
+    
+    def test_max_p_filter_still_uses_raw_p_value(self, song_ming_flat):
+        """Test that max_p filter always uses raw p_value, even with correction."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            correction='bonferroni',
+            filters={'max_p': 0.05},
+            as_dataframe=True
+        )
+        
+        if len(result) > 0:
+            # max_p should filter on raw p_value
+            assert all(result['p_value'] <= 0.05)
+    
+    def test_max_adjusted_p_filters_on_adjusted(self, song_ming_flat):
+        """Test that max_adjusted_p filter uses adjusted_p_value."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            correction='bonferroni',
+            filters={'max_adjusted_p': 0.05},
+            as_dataframe=True
+        )
+        
+        if len(result) > 0:
+            assert all(result['adjusted_p_value'] <= 0.05)
+    
+    def test_max_adjusted_p_without_correction_raises_error(self, song_ming_flat):
+        """Test that max_adjusted_p without correction raises ValueError."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        with pytest.raises(ValueError, match="max_adjusted_p filter requires a correction"):
+            compare_corpora(
+                corpusA=song_ming_flat['song'],
+                corpusB=song_ming_flat['ming'],
+                filters={'max_adjusted_p': 0.05}
+            )
+    
+    def test_both_max_p_and_max_adjusted_p(self, song_ming_flat):
+        """Test using both max_p and max_adjusted_p together."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            correction='fdr_bh',
+            filters={'max_p': 0.01, 'max_adjusted_p': 0.05},
+            as_dataframe=True
+        )
+        
+        if len(result) > 0:
+            assert all(result['p_value'] <= 0.01)
+            assert all(result['adjusted_p_value'] <= 0.05)
+    
+    def test_correction_with_list_output(self, song_ming_flat):
+        """Test correction works when as_dataframe=False."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            correction='fdr_bh',
+            as_dataframe=False
+        )
+        
+        assert isinstance(result, list)
+        assert len(result) > 0
+        assert 'adjusted_p_value' in result[0]

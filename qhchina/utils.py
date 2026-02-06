@@ -5,14 +5,80 @@ This module provides common utilities used across multiple modules.
 """
 
 import logging
-from typing import Dict, Set, Any, Optional
+from typing import Dict, List, Set, Any, Optional
+
+import numpy as np
 
 logger = logging.getLogger("qhchina.utils")
 
 
 __all__ = [
     'validate_filters',
+    'apply_p_value_correction',
 ]
+
+
+VALID_CORRECTIONS = ('bonferroni', 'fdr_bh')
+
+
+def apply_p_value_correction(
+    p_values: List[float],
+    method: str,
+) -> np.ndarray:
+    """
+    Apply multiple testing correction to a list of p-values.
+    
+    Args:
+        p_values: List or array of raw p-values.
+        method: Correction method. Options:
+            - 'bonferroni': Bonferroni correction (controls family-wise error rate).
+              Adjusted p = p * n_tests, capped at 1.0.
+            - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).
+              Generally less conservative than Bonferroni.
+    
+    Returns:
+        numpy array of adjusted p-values (same length as input).
+    
+    Raises:
+        ValueError: If method is not recognized or p_values is empty.
+    """
+    if method not in VALID_CORRECTIONS:
+        raise ValueError(
+            f"Unknown correction method '{method}'. "
+            f"Valid methods are: {VALID_CORRECTIONS}"
+        )
+    
+    p_arr = np.asarray(p_values, dtype=np.float64)
+    n = len(p_arr)
+    
+    if n == 0:
+        return p_arr
+    
+    if method == 'bonferroni':
+        adjusted = np.minimum(p_arr * n, 1.0)
+    
+    elif method == 'fdr_bh':
+        # Benjamini-Hochberg procedure
+        sorted_indices = np.argsort(p_arr)
+        sorted_p = p_arr[sorted_indices]
+        
+        # Compute adjusted p-values: p_adjusted[i] = p[i] * n / rank
+        ranks = np.arange(1, n + 1, dtype=np.float64)
+        adjusted_sorted = sorted_p * n / ranks
+        
+        # Enforce monotonicity (working backwards from largest rank)
+        # Each adjusted p cannot be larger than the one at the next higher rank
+        for i in range(n - 2, -1, -1):
+            adjusted_sorted[i] = min(adjusted_sorted[i], adjusted_sorted[i + 1])
+        
+        # Cap at 1.0
+        adjusted_sorted = np.minimum(adjusted_sorted, 1.0)
+        
+        # Restore original order
+        adjusted = np.empty(n, dtype=np.float64)
+        adjusted[sorted_indices] = adjusted_sorted
+    
+    return adjusted
 
 
 def validate_filters(

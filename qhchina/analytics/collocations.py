@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Union, TypedDict, Tuple, Any
 import matplotlib.pyplot as plt
 
 from scipy.stats import fisher_exact as scipy_fisher_exact
+from ..utils import apply_p_value_correction, VALID_CORRECTIONS
 
 logger = logging.getLogger("qhchina.analytics.collocations")
 
@@ -32,6 +33,7 @@ except ImportError:
 class FilterOptions(TypedDict, total=False):
     """Type definition for filter options in collocation analysis."""
     max_p: float
+    max_adjusted_p: float
     stopwords: List[str]
     min_word_length: int
     min_exp_local: float
@@ -367,6 +369,7 @@ def find_collocates(
     method: str = 'window', 
     horizon: Optional[Union[int, tuple]] = None, 
     filters: Optional[FilterOptions] = None, 
+    correction: Optional[str] = None,
     as_dataframe: bool = True,
     max_sentence_length: Optional[int] = 256,
     alternative: str = 'greater'
@@ -392,7 +395,10 @@ def find_collocates(
             - None: Uses default of 5 for 'window' method
         filters (Optional[FilterOptions]): Dictionary of filters to apply to results, 
             AFTER computation is done:
-            - 'max_p': float - Maximum p-value threshold for statistical significance
+            - 'max_p': float - Maximum raw p-value threshold for statistical 
+              significance.
+            - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
+              valid when ``correction`` is set.
             - 'stopwords': List[str] - Words to exclude from results
             - 'min_word_length': int - Minimum character length for collocates
             - 'min_exp_local': float - Minimum expected local frequency
@@ -403,6 +409,12 @@ def find_collocates(
             - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
             - 'min_obs_global': int - Minimum global frequency
             - 'max_obs_global': int - Maximum global frequency
+        correction (str, optional): Multiple testing correction method. When set,
+            an ``adjusted_p_value`` column is added to the results.
+            - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
+              error rate).
+            - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).
+            - None: No correction (default).
         as_dataframe (bool): If True, return results as a pandas DataFrame. Default is True.
         max_sentence_length (Optional[int]): Maximum sentence length for preprocessing. 
             Used by both 'window' and 'sentence' methods. Longer sentences will be truncated 
@@ -420,6 +432,13 @@ def find_collocates(
         raise ValueError("sentences cannot be empty")
     if not all(isinstance(s, list) for s in sentences):
         raise ValueError("sentences must be a list of lists (tokenized sentences)")
+    
+    # Validate correction parameter
+    if correction is not None and correction not in VALID_CORRECTIONS:
+        raise ValueError(
+            f"Unknown correction method '{correction}'. "
+            f"Valid methods are: {VALID_CORRECTIONS}"
+        )
     
     # Filter out empty sentences
     sentences = [s for s in sentences if s]
@@ -499,9 +518,17 @@ def find_collocates(
         else:
             raise NotImplementedError(f"The method {method} is not implemented.")
 
+    # Apply multiple testing correction if requested
+    if correction is not None and results:
+        raw_p_values = [r["p_value"] for r in results]
+        adjusted = apply_p_value_correction(raw_p_values, method=correction)
+        for r, adj_p in zip(results, adjusted):
+            r["adjusted_p_value"] = adj_p
+
     if filters:
         valid_keys = {
-            'max_p', 'stopwords', 'min_word_length', 'min_exp_local', 'max_exp_local',
+            'max_p', 'max_adjusted_p', 'stopwords', 'min_word_length', 
+            'min_exp_local', 'max_exp_local',
             'min_obs_local', 'max_obs_local', 'min_ratio_local', 'max_ratio_local',
             'min_obs_global', 'max_obs_global'
         }
@@ -514,6 +541,14 @@ def find_collocates(
             if not isinstance(max_p, (int, float)) or max_p < 0 or max_p > 1:
                 raise ValueError("max_p must be a number between 0 and 1")
             results = [result for result in results if result["p_value"] <= max_p]
+        
+        if 'max_adjusted_p' in filters:
+            max_adj_p = filters['max_adjusted_p']
+            if not isinstance(max_adj_p, (int, float)) or max_adj_p < 0 or max_adj_p > 1:
+                raise ValueError("max_adjusted_p must be a number between 0 and 1")
+            if correction is None:
+                raise ValueError("max_adjusted_p filter requires a correction method to be set")
+            results = [result for result in results if result["adjusted_p_value"] <= max_adj_p]
         
         if 'stopwords' in filters:
             stopwords = filters['stopwords']

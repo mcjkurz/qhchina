@@ -28,6 +28,7 @@ dist/
 # Editor-specific files (optional, but common)
 .idea/  # IntelliJ IDEA
 .vscode/ # VS Code
+.cursor/ # Cursor AI
 
 # Macbook stuff
 .DS_Store

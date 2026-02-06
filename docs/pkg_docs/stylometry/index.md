@@ -458,7 +458,8 @@ compare_corpora(
     corpusA: Union[List[str], List[List[str]]],
     corpusB: Union[List[str], List[List[str]]],
     method: str = 'fisher',
-    filters: Dict = None,
+    filters: Optional[Dict] = None,
+    correction: Optional[str] = None,
     as_dataframe: bool = True
 )
 ```
@@ -476,9 +477,19 @@ Compare two corpora to identify statistically significant differences in word us
   - 'min_count': int or tuple - Minimum count threshold(s) for a word to be 
     included (can be a single int for both corpora or tuple (min_countA, 
     min_countB)). Default is 0.
-  - 'max_p': float - Maximum p-value threshold for statistical significance.
+  - 'max_p': float - Maximum raw p-value threshold for statistical 
+    significance.
+  - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
+    valid when ``correction`` is set.
   - 'stopwords': list - Words to exclude from results.
   - 'min_word_length': int - Minimum character length for words.
+- `correction` (str): Multiple testing correction method. When set,
+  an ``adjusted_p_value`` column is added to the results.
+  - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
+    error rate).
+  - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate,
+    recommended for corpus comparison).
+  - None: No correction (default).
 - `as_dataframe` (bool): Whether to return a pandas DataFrame.
 
 **Returns:**
