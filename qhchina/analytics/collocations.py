@@ -393,24 +393,32 @@ def find_collocates(
               the RIGHT of target; (5, 0) finds collocates up to 5 words to the LEFT; 
               (2, 3) finds collocates 2 words left and 3 words right of target.
             - None: Uses default of 5 for 'window' method
-        filters (Optional[FilterOptions]): Dictionary of filters to apply to results, 
-            AFTER computation is done:
-            - 'max_p': float - Maximum raw p-value threshold for statistical 
-              significance.
-            - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
-              valid when ``correction`` is set.
+        filters (Optional[FilterOptions]): Dictionary of filters to apply to results.
+            All filters (except ``max_adjusted_p``) are applied BEFORE multiple testing 
+            correction, defining the "family" of hypotheses being tested. This maximizes 
+            statistical power by not correcting for collocates that were never of interest.
+            
+            Available filters:
+            
             - 'stopwords': List[str] - Words to exclude from results
             - 'min_word_length': int - Minimum character length for collocates
-            - 'min_exp_local': float - Minimum expected local frequency
-            - 'max_exp_local': float - Maximum expected local frequency
             - 'min_obs_local': int - Minimum observed local frequency
             - 'max_obs_local': int - Maximum observed local frequency
-            - 'min_ratio_local': float - Minimum local frequency ratio (obs/exp)
-            - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
             - 'min_obs_global': int - Minimum global frequency
             - 'max_obs_global': int - Maximum global frequency
+            - 'min_exp_local': float - Minimum expected local frequency
+            - 'max_exp_local': float - Maximum expected local frequency
+            - 'min_ratio_local': float - Minimum local frequency ratio (obs/exp)
+            - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
+            - 'max_p': float - Maximum raw p-value threshold
+            - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction,
+              applied after correction is computed)
+            
         correction (str, optional): Multiple testing correction method. When set,
-            an ``adjusted_p_value`` column is added to the results.
+            an ``adjusted_p_value`` column is added to the results. The correction
+            is applied AFTER all other filters, so only collocates that pass those
+            filters count toward the number of tests.
+            
             - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
               error rate).
             - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).
@@ -518,13 +526,12 @@ def find_collocates(
         else:
             raise NotImplementedError(f"The method {method} is not implemented.")
 
-    # Apply multiple testing correction if requested
-    if correction is not None and results:
-        raw_p_values = [r["p_value"] for r in results]
-        adjusted = apply_p_value_correction(raw_p_values, method=correction)
-        for r, adj_p in zip(results, adjusted):
-            r["adjusted_p_value"] = adj_p
-
+    # =========================================================================
+    # STAGE 1: Apply all filters BEFORE multiple testing correction
+    # All user-specified filters define the "family" of hypotheses being tested.
+    # This maximizes statistical power by not correcting for collocates that
+    # were never of interest in the first place.
+    # =========================================================================
     if filters:
         valid_keys = {
             'max_p', 'max_adjusted_p', 'stopwords', 'min_word_length', 
@@ -535,20 +542,6 @@ def find_collocates(
         invalid_keys = set(filters.keys()) - valid_keys
         if invalid_keys:
             raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_keys}")
-        
-        if 'max_p' in filters:
-            max_p = filters['max_p']
-            if not isinstance(max_p, (int, float)) or max_p < 0 or max_p > 1:
-                raise ValueError("max_p must be a number between 0 and 1")
-            results = [result for result in results if result["p_value"] <= max_p]
-        
-        if 'max_adjusted_p' in filters:
-            max_adj_p = filters['max_adjusted_p']
-            if not isinstance(max_adj_p, (int, float)) or max_adj_p < 0 or max_adj_p > 1:
-                raise ValueError("max_adjusted_p must be a number between 0 and 1")
-            if correction is None:
-                raise ValueError("max_adjusted_p filter requires a correction method to be set")
-            results = [result for result in results if result["adjusted_p_value"] <= max_adj_p]
         
         if 'stopwords' in filters:
             stopwords = filters['stopwords']
@@ -563,18 +556,6 @@ def find_collocates(
                 raise ValueError("min_word_length must be a positive integer")
             results = [result for result in results if len(result["collocate"]) >= min_word_length]
         
-        if 'min_exp_local' in filters:
-            min_exp = filters['min_exp_local']
-            if not isinstance(min_exp, (int, float)) or min_exp < 0:
-                raise ValueError("min_exp_local must be a non-negative number")
-            results = [result for result in results if result["exp_local"] >= min_exp]
-        
-        if 'max_exp_local' in filters:
-            max_exp = filters['max_exp_local']
-            if not isinstance(max_exp, (int, float)) or max_exp < 0:
-                raise ValueError("max_exp_local must be a non-negative number")
-            results = [result for result in results if result["exp_local"] <= max_exp]
-        
         if 'min_obs_local' in filters:
             min_obs = filters['min_obs_local']
             if not isinstance(min_obs, int) or min_obs < 0:
@@ -586,6 +567,30 @@ def find_collocates(
             if not isinstance(max_obs, int) or max_obs < 0:
                 raise ValueError("max_obs_local must be a non-negative integer")
             results = [result for result in results if result["obs_local"] <= max_obs]
+        
+        if 'min_obs_global' in filters:
+            min_global = filters['min_obs_global']
+            if not isinstance(min_global, int) or min_global < 0:
+                raise ValueError("min_obs_global must be a non-negative integer")
+            results = [result for result in results if result["obs_global"] >= min_global]
+        
+        if 'max_obs_global' in filters:
+            max_global = filters['max_obs_global']
+            if not isinstance(max_global, int) or max_global < 0:
+                raise ValueError("max_obs_global must be a non-negative integer")
+            results = [result for result in results if result["obs_global"] <= max_global]
+        
+        if 'min_exp_local' in filters:
+            min_exp = filters['min_exp_local']
+            if not isinstance(min_exp, (int, float)) or min_exp < 0:
+                raise ValueError("min_exp_local must be a non-negative number")
+            results = [result for result in results if result["exp_local"] >= min_exp]
+        
+        if 'max_exp_local' in filters:
+            max_exp = filters['max_exp_local']
+            if not isinstance(max_exp, (int, float)) or max_exp < 0:
+                raise ValueError("max_exp_local must be a non-negative number")
+            results = [result for result in results if result["exp_local"] <= max_exp]
         
         if 'min_ratio_local' in filters:
             min_ratio = filters['min_ratio_local']
@@ -599,17 +604,32 @@ def find_collocates(
                 raise ValueError("max_ratio_local must be a non-negative number")
             results = [result for result in results if result["ratio_local"] <= max_ratio]
         
-        if 'min_obs_global' in filters:
-            min_global = filters['min_obs_global']
-            if not isinstance(min_global, int) or min_global < 0:
-                raise ValueError("min_obs_global must be a non-negative integer")
-            results = [result for result in results if result["obs_global"] >= min_global]
-        
-        if 'max_obs_global' in filters:
-            max_global = filters['max_obs_global']
-            if not isinstance(max_global, int) or max_global < 0:
-                raise ValueError("max_obs_global must be a non-negative integer")
-            results = [result for result in results if result["obs_global"] <= max_global]
+        if 'max_p' in filters:
+            max_p = filters['max_p']
+            if not isinstance(max_p, (int, float)) or max_p < 0 or max_p > 1:
+                raise ValueError("max_p must be a number between 0 and 1")
+            results = [result for result in results if result["p_value"] <= max_p]
+
+    # =========================================================================
+    # STAGE 2: Multiple testing correction (based on filtered hypothesis count)
+    # Applied only to collocates that passed all filters above.
+    # =========================================================================
+    if correction is not None and results:
+        raw_p_values = [r["p_value"] for r in results]
+        adjusted = apply_p_value_correction(raw_p_values, method=correction)
+        for r, adj_p in zip(results, adjusted):
+            r["adjusted_p_value"] = adj_p
+
+    # =========================================================================
+    # STAGE 3: Filter by adjusted p-value (must come after correction)
+    # =========================================================================
+    if filters and 'max_adjusted_p' in filters:
+        max_adj_p = filters['max_adjusted_p']
+        if not isinstance(max_adj_p, (int, float)) or max_adj_p < 0 or max_adj_p > 1:
+            raise ValueError("max_adjusted_p must be a number between 0 and 1")
+        if correction is None:
+            raise ValueError("max_adjusted_p filter requires a correction method to be set")
+        results = [result for result in results if result["adjusted_p_value"] <= max_adj_p]
 
     if as_dataframe:
         results = pd.DataFrame(results)

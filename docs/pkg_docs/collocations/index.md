@@ -76,24 +76,31 @@ Find collocates for target words within a corpus of sentences.
     the RIGHT of target; (5, 0) finds collocates up to 5 words to the LEFT; 
     (2, 3) finds collocates 2 words left and 3 words right of target.
   - None: Uses default of 5 for 'window' method
-- `filters` (Optional[FilterOptions]): Dictionary of filters to apply to results, 
-  AFTER computation is done:
-  - 'max_p': float - Maximum raw p-value threshold for statistical 
-    significance.
-  - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
-    valid when ``correction`` is set.
+- `filters` (Optional[FilterOptions]): Dictionary of filters to apply to results.
+  All filters (except ``max_adjusted_p``) are applied BEFORE multiple testing 
+  correction, defining the "family" of hypotheses being tested. This maximizes 
+  statistical power by not correcting for collocates that were never of interest.
+  
+  Available filters:
+  
   - 'stopwords': List[str] - Words to exclude from results
   - 'min_word_length': int - Minimum character length for collocates
-  - 'min_exp_local': float - Minimum expected local frequency
-  - 'max_exp_local': float - Maximum expected local frequency
   - 'min_obs_local': int - Minimum observed local frequency
   - 'max_obs_local': int - Maximum observed local frequency
-  - 'min_ratio_local': float - Minimum local frequency ratio (obs/exp)
-  - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
   - 'min_obs_global': int - Minimum global frequency
   - 'max_obs_global': int - Maximum global frequency
+  - 'min_exp_local': float - Minimum expected local frequency
+  - 'max_exp_local': float - Maximum expected local frequency
+  - 'min_ratio_local': float - Minimum local frequency ratio (obs/exp)
+  - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
+  - 'max_p': float - Maximum raw p-value threshold
+  - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction,
+    applied after correction is computed)
 - `correction` (str): Multiple testing correction method. When set,
-  an ``adjusted_p_value`` column is added to the results.
+  an ``adjusted_p_value`` column is added to the results. The correction
+  is applied AFTER all other filters, so only collocates that pass those
+  filters count toward the number of tests.
+  
   - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
     error rate).
   - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).

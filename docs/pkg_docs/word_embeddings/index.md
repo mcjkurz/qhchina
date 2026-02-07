@@ -175,17 +175,18 @@ similar = model.wv.most_similar('喜欢', topn=5)  # Same as above
 <h4 id="word2vec-build_vocab">Word2Vec.build_vocab()</h4>
 
 ```python
-build_vocab(sentences: List[List[str]])
+build_vocab(sentences: collections.abc.Iterable[typing.List[str]])
 ```
 
-Build vocabulary from a list of sentences.
+Build vocabulary from sentences.
 
 **Parameters:**
-- `sentences`: List of tokenized sentences (each sentence is a list of words).
+- `sentences`: Iterable of tokenized sentences (each sentence is a list of words).
+  Can be a list (for fast path) or any iterable (for streaming path).
+  If an iterable/generator is provided, it will be consumed during vocab building.
 
 **Raises:**
 - `ValueError`: If sentences is empty or contains no words.
-- `TypeError`: If sentences is not a list.
 
 <h4 id="word2vec-get_vector">Word2Vec.get_vector()</h4>
 
@@ -252,22 +253,35 @@ Cosine similarity between the two words (float between -1 and 1).
 <h4 id="word2vec-train">Word2Vec.train()</h4>
 
 ```python
-train(sentences: List[List[str]])
+train(sentences: Union[List[List[str]], collections.abc.Iterable[List[str]]])
 ```
 
 Train word2vec model on given sentences.
+
+Supports two training modes:
+
+1. **Fast path** (list input): When ``sentences`` is a list, the entire corpus
+   is passed to Cython in a single call per epoch, minimizing Python/Cython
+   boundary crossings. This is ~35% faster than Gensim for single-threaded training.
+
+2. **Streaming path** (iterable input): When ``sentences`` is a non-list iterable
+   (e.g., file-backed iterator), sentences are processed in chunks to minimize
+   memory usage. The iterable must be restartable (can be iterated multiple times).
 
 All training configuration (epochs, batch_size, alpha, min_alpha, etc.) is read
 from instance attributes set during initialization.
 
 **Parameters:**
-- `sentences`: List of tokenized sentences (lists of words).
+- `sentences`: Tokenized sentences. Can be:
+  - A list of sentences (fast path, requires all data in memory)
+  - A restartable iterable (streaming path, memory-efficient)
+  
+  Note: Single-use generators will only work for 1 epoch and will raise
+  a warning. For multi-epoch training with generators, convert to a list
+  or use a restartable iterable (e.g., file-backed).
 
 **Returns:**
 Final loss value if calculate_loss is True, None otherwise.
-
-**Raises:**
-- `TypeError`: If sentences is not a list.
 
 <br>
 

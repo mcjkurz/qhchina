@@ -1781,18 +1781,27 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             being a list of tokens).
         method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
             for the chi-square test. All tests use two-sided alternatives.
-        filters (dict, optional): Dictionary of filters to apply to results:
+        filters (dict, optional): Dictionary of filters to apply to results.
+            All filters (except ``max_adjusted_p``) are applied BEFORE multiple testing 
+            correction, defining the "family" of hypotheses being tested. This maximizes 
+            statistical power by not correcting for words that were never of interest.
+            
+            Available filters:
+            
             - 'min_count': int or tuple - Minimum count threshold(s) for a word to be 
               included (can be a single int for both corpora or tuple (min_countA, 
               min_countB)). Default is 0.
-            - 'max_p': float - Maximum raw p-value threshold for statistical 
-              significance.
-            - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
-              valid when ``correction`` is set.
             - 'stopwords': list - Words to exclude from results.
             - 'min_word_length': int - Minimum character length for words.
+            - 'max_p': float - Maximum raw p-value threshold.
+            - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction,
+              applied after correction is computed).
+              
         correction (str, optional): Multiple testing correction method. When set,
-            an ``adjusted_p_value`` column is added to the results.
+            an ``adjusted_p_value`` column is added to the results. The correction
+            is applied AFTER all other filters, so only words that pass those
+            filters count toward the number of tests.
+            
             - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
               error rate).
             - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate,
@@ -1949,23 +1958,14 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
             "p_value": p_value,
         })
     
-    # Apply multiple testing correction if requested
-    if correction is not None and results:
-        raw_p_values = [r["p_value"] for r in results]
-        adjusted = apply_p_value_correction(raw_p_values, method=correction)
-        for r, adj_p in zip(results, adjusted):
-            r["adjusted_p_value"] = adj_p
-    
-    # Apply other filters if specified
+    # =========================================================================
+    # Apply all filters BEFORE multiple testing correction
+    # All user-specified filters define the "family" of hypotheses being tested.
+    # This maximizes statistical power by not correcting for words that were
+    # never of interest in the first place.
+    # (Note: min_count is already applied during the loop above)
+    # =========================================================================
     if filters:
-        # Filter by raw p-value threshold
-        if 'max_p' in filters:
-            results = [result for result in results if result["p_value"] <= filters['max_p']]
-        
-        # Filter by adjusted p-value threshold
-        if 'max_adjusted_p' in filters:
-            results = [result for result in results if result["adjusted_p_value"] <= filters['max_adjusted_p']]
-        
         # Filter out stopwords
         if 'stopwords' in filters:
             stopwords_set = set(filters['stopwords']) if isinstance(filters['stopwords'], list) else filters['stopwords']
@@ -1974,6 +1974,26 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
         # Filter by minimum length
         if 'min_word_length' in filters:
             results = [result for result in results if len(result["word"]) >= filters['min_word_length']]
+        
+        # Filter by raw p-value threshold
+        if 'max_p' in filters:
+            results = [result for result in results if result["p_value"] <= filters['max_p']]
+
+    # =========================================================================
+    # Multiple testing correction (based on filtered hypothesis count)
+    # Applied only to words that passed all filters above.
+    # =========================================================================
+    if correction is not None and results:
+        raw_p_values = [r["p_value"] for r in results]
+        adjusted = apply_p_value_correction(raw_p_values, method=correction)
+        for r, adj_p in zip(results, adjusted):
+            r["adjusted_p_value"] = adj_p
+    
+    # =========================================================================
+    # Filter by adjusted p-value (must come after correction)
+    # =========================================================================
+    if filters and 'max_adjusted_p' in filters:
+        results = [result for result in results if result["adjusted_p_value"] <= filters['max_adjusted_p']]
             
     if as_dataframe:
         results = pd.DataFrame(results)

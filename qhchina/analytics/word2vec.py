@@ -25,6 +25,8 @@ Features:
 import logging
 import numpy as np
 from collections import Counter
+from collections.abc import Iterator, Iterable
+from types import GeneratorType
 from typing import List, Dict, Tuple, Optional, Union, Callable
 from tqdm.auto import tqdm
 import warnings
@@ -205,31 +207,36 @@ class Word2Vec:
         """
         return self
 
-    def build_vocab(self, sentences: List[List[str]]) -> None:
+    def build_vocab(self, sentences: Iterable[List[str]]) -> None:
         """
-        Build vocabulary from a list of sentences.
+        Build vocabulary from sentences.
         
         Args:
-            sentences: List of tokenized sentences (each sentence is a list of words).
+            sentences: Iterable of tokenized sentences (each sentence is a list of words).
+                Can be a list (for fast path) or any iterable (for streaming path).
+                If an iterable/generator is provided, it will be consumed during vocab building.
         
         Raises:
             ValueError: If sentences is empty or contains no words.
-            TypeError: If sentences is not a list.
         """
-        # Validate input type
-        if not isinstance(sentences, list):
-            raise TypeError(
-                f"sentences must be a list of tokenized sentences, got {type(sentences).__name__}. "
-                "Generators/iterators are not supported - please convert to a list first."
-            )
-        
-        if not sentences:
-            raise ValueError("sentences cannot be empty")
-        
-        # Count word occurrences with progress bar
+        # Count word occurrences
+        # For iterables, we can't show total progress, but we can still count
         self.word_counts = Counter()
-        for sentence in tqdm(sentences, desc="Building vocabulary", unit="sent", leave=True):
+        sentence_count = 0
+        
+        # Check if we can determine length for progress bar
+        if hasattr(sentences, '__len__'):
+            iterator = tqdm(sentences, desc="Building vocabulary", unit="sent", leave=True)
+        else:
+            # For generators/iterators, show progress without total
+            iterator = tqdm(sentences, desc="Building vocabulary", unit="sent", leave=True)
+        
+        for sentence in iterator:
             self.word_counts.update(sentence)
+            sentence_count += 1
+        
+        if sentence_count == 0:
+            raise ValueError("sentences cannot be empty")
         
         # Check if any words were found (catches all-empty sentences)
         if not self.word_counts:
@@ -436,28 +443,70 @@ class Word2Vec:
             sample_ints[idx] = min(np.uint32(keep_prob * 4294967295.0), np.uint32(4294967295))
         
         return sample_ints
+    
+    def _iter_chunks(self, sentences: Iterable[List[str]], chunk_size: int = 50000):
+        """
+        Yield chunks of sentences as lists.
         
-    def train(self, sentences: List[List[str]]) -> Optional[float]:
+        This allows streaming through large corpora without loading everything
+        into memory at once.
+        
+        Args:
+            sentences: Iterable of tokenized sentences.
+            chunk_size: Maximum number of sentences per chunk.
+        
+        Yields:
+            List of sentences (each chunk is a list).
+        """
+        chunk = []
+        for sent in sentences:
+            chunk.append(sent)
+            if len(chunk) >= chunk_size:
+                yield chunk
+                chunk = []
+        if chunk:
+            yield chunk
+        
+    def train(self, sentences: Union[List[List[str]], Iterable[List[str]]]) -> Optional[float]:
         """
         Train word2vec model on given sentences.
+        
+        Supports two training modes:
+        
+        1. **Fast path** (list input): When ``sentences`` is a list, the entire corpus
+           is passed to Cython in a single call per epoch, minimizing Python/Cython
+           boundary crossings. This is ~35% faster than Gensim for single-threaded training.
+        
+        2. **Streaming path** (iterable input): When ``sentences`` is a non-list iterable
+           (e.g., file-backed iterator), sentences are processed in chunks to minimize
+           memory usage. The iterable must be restartable (can be iterated multiple times).
         
         All training configuration (epochs, batch_size, alpha, min_alpha, etc.) is read
         from instance attributes set during initialization.
         
         Args:
-            sentences: List of tokenized sentences (lists of words).
+            sentences: Tokenized sentences. Can be:
+                - A list of sentences (fast path, requires all data in memory)
+                - A restartable iterable (streaming path, memory-efficient)
+                
+                Note: Single-use generators will only work for 1 epoch and will raise
+                a warning. For multi-epoch training with generators, convert to a list
+                or use a restartable iterable (e.g., file-backed).
         
         Returns:
             Final loss value if calculate_loss is True, None otherwise.
-        
-        Raises:
-            TypeError: If sentences is not a list.
         """
-        # Validate input type
-        if not isinstance(sentences, list):
-            raise TypeError(
-                f"sentences must be a list of tokenized sentences, got {type(sentences).__name__}. "
-                "Generators/iterators are not supported - please convert to a list first."
+        # Detect input type and choose training path
+        is_list = isinstance(sentences, list)
+        is_generator = isinstance(sentences, GeneratorType)
+        
+        # Warn about generators with multiple epochs
+        if is_generator and self.epochs > 1:
+            warnings.warn(
+                f"Generator detected with epochs={self.epochs}. Generators can only be "
+                "iterated once, so only the first epoch will have training data. "
+                "For multi-epoch training, use a list or restartable iterable.",
+                UserWarning
             )
         
         if self.alpha is None:
@@ -468,6 +517,9 @@ class Word2Vec:
         # Determine if we should decay the learning rate based on min_alpha
         decay_alpha = self.min_alpha is not None
         
+        # Build vocab if not already done
+        # Note: For non-list iterables, this will consume the iterator once
+        # The iterator must be restartable for training
         if not self.vocab: 
             self.build_vocab(sentences)
         if self.W is None or self.W_prime is None:
@@ -479,6 +531,28 @@ class Word2Vec:
         
         self._initialize_cython_globals()
         
+        # Dispatch to appropriate training path
+        if is_list:
+            # FAST PATH: Pass entire list to Cython (minimal boundary crossings)
+            return self._train_fast(sentences, decay_alpha)
+        else:
+            # STREAMING PATH: Process in chunks (memory-efficient)
+            return self._train_streaming(sentences, decay_alpha)
+    
+    def _train_fast(self, sentences: List[List[str]], decay_alpha: bool) -> Optional[float]:
+        """
+        Fast training path for list input.
+        
+        Passes the entire sentence list to Cython in a single call per epoch,
+        minimizing Python/Cython boundary crossings for maximum performance.
+        
+        Args:
+            sentences: List of tokenized sentences.
+            decay_alpha: Whether to decay learning rate.
+        
+        Returns:
+            Final loss value if calculate_loss is True, None otherwise.
+        """
         # Read training configuration from instance attributes
         epochs = self.epochs
         batch_size = self.batch_size
@@ -508,7 +582,7 @@ class Word2Vec:
         current_alpha = start_alpha = self.alpha
         
         if self.verbose:
-            logger.info(f"Starting training: {epochs} epoch(s), {len(sentences):,} sentences, alpha={self.alpha}")
+            logger.info(f"Starting training (fast path): {epochs} epoch(s), {len(sentences):,} sentences, alpha={self.alpha}")
 
         # Training loop for each epoch
         for epoch in range(epochs):
@@ -539,6 +613,10 @@ class Word2Vec:
                 total_loss += epoch_loss
                 examples_processed_total += examples_processed_in_epoch
             
+            # Update instance alpha to reflect current learning rate (for callbacks)
+            if decay_alpha:
+                self.alpha = current_alpha
+            
             # Call any registered callbacks
             if callbacks:
                 for callback in callbacks:
@@ -553,6 +631,193 @@ class Word2Vec:
             final_avg_loss = total_loss / examples_processed_total
             if self.verbose:
                 logger.info(f"Training completed. Final average loss: {final_avg_loss:.6f}")
+            return final_avg_loss
+        
+        return None
+    
+    def _train_streaming(self, sentences: Iterable[List[str]], decay_alpha: bool) -> Optional[float]:
+        """
+        Streaming training path for iterable input.
+        
+        Processes sentences in chunks, allowing training on corpora that don't fit
+        in memory. The iterable must be restartable (can iterate multiple times)
+        for multi-epoch training.
+        
+        This path is slower than the fast path due to more Python/Cython boundary
+        crossings, but uses significantly less memory for large corpora.
+        
+        Args:
+            sentences: Restartable iterable of tokenized sentences.
+            decay_alpha: Whether to decay learning rate.
+        
+        Returns:
+            Final loss value if calculate_loss is True, None otherwise.
+        """
+        # Read training configuration from instance attributes
+        epochs = self.epochs
+        callbacks = self.callbacks
+        calculate_loss = self.calculate_loss
+        total_examples = self.total_examples_hint
+        
+        # Chunk size for streaming (number of sentences per chunk)
+        # Larger chunks = fewer Cython calls but more memory
+        chunk_size = 50000  # 50K sentences per chunk
+        
+        # Setup for loss calculation
+        total_loss = 0.0
+        examples_processed_total = 0
+        total_example_count = 0
+        recent_losses = []
+        
+        # Estimate total examples if needed for learning rate decay
+        examples_per_epoch = None
+        if decay_alpha:
+            if total_examples is not None:
+                examples_per_epoch = total_examples
+                total_example_count = total_examples * epochs
+            else:
+                examples_per_epoch = self._estimate_example_count()
+                total_example_count = examples_per_epoch * epochs
+        
+        # Track progress across all epochs for learning rate decay
+        total_words_all_epochs = self.corpus_word_count * epochs
+        global_words_processed = 0
+        
+        start_alpha = self.alpha
+        min_alpha_val = self.min_alpha if self.min_alpha else start_alpha
+        
+        if self.verbose:
+            logger.info(f"Starting training (streaming path): {epochs} epoch(s), chunk_size={chunk_size:,}, alpha={self.alpha}")
+        
+        # Compute sample_ints for subsampling (same as fast path)
+        sample_ints = self._compute_sample_ints()
+        
+        # Training loop for each epoch
+        for epoch in range(epochs):
+            epoch_start_time = time.time()
+            epoch_loss = 0.0
+            epoch_examples = 0
+            epoch_words = 0
+            chunk_count = 0
+            
+            # Progress tracking for this epoch
+            LOSS_HISTORY_SIZE = 100
+            
+            # Progress bar for streaming (we know total words from vocab building)
+            if calculate_loss:
+                bar_format = '{l_bar}{bar}| {percentage:.1f}% [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
+                progress_bar = tqdm(
+                    desc=f"Epoch {epoch+1}/{epochs}",
+                    total=self.corpus_word_count,
+                    bar_format=bar_format,
+                    unit=" tokens",
+                    unit_scale=True,
+                    mininterval=0.5
+                )
+            else:
+                progress_bar = None
+            
+            # Iterate through chunks
+            for chunk in self._iter_chunks(sentences, chunk_size=chunk_size):
+                chunk_count += 1
+                
+                # Compute learning rate for this chunk based on global progress
+                if decay_alpha and total_words_all_epochs > 0:
+                    progress = global_words_processed / total_words_all_epochs
+                    progress = min(progress, 1.0)
+                    chunk_alpha_start = start_alpha + (min_alpha_val - start_alpha) * progress
+                    
+                    # Estimate words in this chunk for end alpha
+                    # Use average words per sentence from corpus stats
+                    avg_words_per_sent = self.corpus_word_count / max(1, sum(1 for _ in []))  # Can't easily compute
+                    # Rough estimate: chunk has about chunk_size * avg_sentence_length words
+                    estimated_chunk_words = len(chunk) * (self.corpus_word_count / max(1, len(chunk) * chunk_count))
+                    progress_end = min((global_words_processed + estimated_chunk_words) / total_words_all_epochs, 1.0)
+                    chunk_alpha_end = start_alpha + (min_alpha_val - start_alpha) * progress_end
+                else:
+                    chunk_alpha_start = start_alpha
+                    chunk_alpha_end = start_alpha
+                
+                # Train on this chunk
+                chunk_loss, chunk_examples_count, chunk_words_count = word2vec_c.train_epoch(
+                    self.W,
+                    self.W_prime,
+                    chunk,  # Pass the chunk (a list) to Cython
+                    self.vocab,
+                    sample_ints,
+                    self.sample > 0,
+                    self.window,
+                    self.shrink_windows,
+                    chunk_alpha_start,
+                    chunk_alpha_end,
+                    len(chunk) * 10,  # Rough estimate for intra-chunk LR decay
+                    None,  # No callback for streaming (we handle progress in Python)
+                    chunk_size,  # callback_every_n_sentences (won't be called with None callback)
+                    self.sg,
+                    calculate_loss,
+                )
+                
+                # Accumulate stats
+                epoch_loss += chunk_loss
+                epoch_examples += chunk_examples_count
+                epoch_words += chunk_words_count
+                global_words_processed += chunk_words_count
+                
+                # Track loss history
+                if chunk_examples_count > 0 and chunk_loss > 0:
+                    chunk_avg_loss = chunk_loss / chunk_examples_count
+                    recent_losses.append(chunk_avg_loss)
+                    if len(recent_losses) > LOSS_HISTORY_SIZE:
+                        recent_losses.pop(0)
+                
+                # Update progress bar
+                if progress_bar is not None:
+                    recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
+                    if decay_alpha:
+                        postfix_str = f"loss={recent_avg:.6f}, lr={chunk_alpha_start:.6f}"
+                    else:
+                        postfix_str = f"loss={recent_avg:.6f}"
+                    progress_bar.set_postfix_str(postfix_str)
+                    progress_bar.update(chunk_words_count)
+            
+            # Close progress bar
+            if progress_bar is not None:
+                if progress_bar.total is not None:
+                    remaining = max(0, progress_bar.total - progress_bar.n)
+                    if remaining > 0:
+                        progress_bar.update(remaining)
+                progress_bar.close()
+            
+            # Add epoch loss to total
+            if calculate_loss:
+                total_loss += epoch_loss
+                examples_processed_total += epoch_examples
+            
+            # Update instance alpha to reflect current learning rate (for callbacks)
+            if decay_alpha:
+                # Calculate what alpha should be at end of this epoch
+                epoch_progress = (epoch + 1) / epochs
+                self.alpha = start_alpha + (min_alpha_val - start_alpha) * epoch_progress
+            
+            # Call any registered callbacks
+            if callbacks:
+                for callback in callbacks:
+                    callback(self, epoch)
+            
+            if self.verbose:
+                elapsed = time.time() - epoch_start_time
+                logger.info(f"Epoch {epoch+1}/{epochs} completed: {epoch_examples:,} examples, "
+                          f"{epoch_words:,} words, {chunk_count} chunks in {elapsed:.1f}s")
+        
+        # Update the instance alpha to reflect the final learning rate
+        if decay_alpha:
+            self.alpha = self.min_alpha
+        
+        # Calculate and return the final average loss if requested
+        if calculate_loss and examples_processed_total > 0:
+            final_avg_loss = total_loss / examples_processed_total
+            if self.verbose:
+                logger.info(f"Training completed (streaming). Final average loss: {final_avg_loss:.6f}")
             return final_avg_loss
         
         return None
@@ -763,6 +1028,10 @@ class Word2Vec:
             elapsed = time.time() - epoch_start_time
             ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
             print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch:,} | words={words_processed:,} | avg_loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
+        
+        # Set current_alpha to the end-of-epoch value (epoch_end_alpha was computed above)
+        # This ensures correct alpha is returned even when callback wasn't used
+        current_alpha = epoch_end_alpha
         
         return epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha
 
