@@ -30,7 +30,7 @@ This will compile the Cython extensions and install the package in editable mode
 
 ## Documentation
 
-Full documentation and examples: [www.qhchina.org/pkg_docs/](https://www.qhchina.org/pkg_docs/)
+Full documentation and examples: [www.qhchina.org/docs/](https://www.qhchina.org/docs/)
 
 ## Tests
 
