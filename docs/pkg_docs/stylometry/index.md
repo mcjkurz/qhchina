@@ -473,18 +473,27 @@ Compare two corpora to identify statistically significant differences in word us
   being a list of tokens).
 - `method` (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
   for the chi-square test. All tests use two-sided alternatives.
-- `filters` (dict): Dictionary of filters to apply to results:
+- `filters` (dict): Dictionary of filters to apply to results.
+  All filters (except ``max_adjusted_p``) are applied BEFORE multiple testing 
+  correction, defining the "family" of hypotheses being tested. This maximizes 
+  statistical power by not correcting for words that were never of interest.
+  
+  Available filters:
+  
   - 'min_count': int or tuple - Minimum count threshold(s) for a word to be 
     included (can be a single int for both corpora or tuple (min_countA, 
     min_countB)). Default is 0.
-  - 'max_p': float - Maximum raw p-value threshold for statistical 
-    significance.
-  - 'max_adjusted_p': float - Maximum adjusted p-value threshold. Only 
-    valid when ``correction`` is set.
   - 'stopwords': list - Words to exclude from results.
   - 'min_word_length': int - Minimum character length for words.
+  - 'max_p': float - Maximum raw p-value threshold.
+  - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction,
+    applied after correction is computed).
+    
 - `correction` (str): Multiple testing correction method. When set,
-  an ``adjusted_p_value`` column is added to the results.
+  an ``adjusted_p_value`` column is added to the results. The correction
+  is applied AFTER all other filters, so only words that pass those
+  filters count toward the number of tests.
+  
   - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
     error rate).
   - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate,
