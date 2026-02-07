@@ -272,14 +272,12 @@ class Word2Vec:
         """
         Calculate the probability of discarding frequent words during subsampling.
         
-        Formula from the original word2vec paper:
+        Formula from Google's word2vec.c (also used by Gensim):
         
-        $P(w_i) = 1 - \\sqrt{\\frac{t}{f(w_i)}}$
+        $P(\\text{keep } w_i) = \\left(\\sqrt{\\frac{t}{f(w_i)}} + 1\\right) \\cdot \\frac{t}{f(w_i)} = \\sqrt{\\frac{t}{f(w_i)}} + \\frac{t}{f(w_i)}$
         
         where $t$ is the sample threshold and $f(w_i)$ is the word frequency 
         normalized by the total corpus word count.
-        
-        A word will be discarded with probability $P(w_i)$.
         
         Creates a numpy array indexed by word ID for fast lookup during example generation.
         """
@@ -289,8 +287,9 @@ class Word2Vec:
         for word, idx in self.vocab.items():
             # Calculate normalized word frequency
             word_freq = self.word_counts[word] / total_words
-            # Calculate probability of discarding the word
-            discard_prob = 1.0 - np.sqrt(self.sample / word_freq)
+            # Google/Gensim formula: keep_prob = sqrt(t/f) + t/f
+            keep_prob = np.sqrt(self.sample / word_freq) + (self.sample / word_freq)
+            discard_prob = 1.0 - keep_prob
             # Clamp the probability to [0, 1]
             self.discard_probs[idx] = max(0.0, min(1.0, discard_prob))
 
@@ -432,11 +431,9 @@ class Word2Vec:
         
         for word, idx in self.vocab.items():
             word_freq = self.word_counts[word] / total_words
-            # Keep probability = sqrt(sample / freq) (capped at 1.0)
-            if word_freq > self.sample:
-                keep_prob = np.sqrt(self.sample / word_freq)
-            else:
-                keep_prob = 1.0
+            # Google/Gensim formula: keep_prob = sqrt(t/f) + t/f
+            keep_prob = np.sqrt(self.sample / word_freq) + (self.sample / word_freq)
+            keep_prob = min(keep_prob, 1.0)
             
             # Convert to uint32 threshold: word is kept if random < threshold
             # So threshold = keep_prob * 2^32 (we use 2^32 - 1 as max)

@@ -1,13 +1,12 @@
 import logging
 import numpy as np
 from typing import List, Tuple, Dict, Optional, Union, Callable, Any
-import random
 import time
 import warnings
 from collections import defaultdict, Counter
 from pathlib import Path
 import matplotlib.pyplot as plt
-from tqdm.auto import trange, tqdm
+from tqdm.auto import tqdm
 from scipy.special import psi, polygamma
 
 from ..config import get_rng, resolve_seed
