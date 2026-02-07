@@ -18,6 +18,16 @@ A Python toolkit for computational analysis of Chinese texts in humanities resea
 pip install qhchina
 ```
 
+## Building from Source
+
+```bash
+git clone https://github.com/mcjkurz/qhchina.git
+cd qhchina
+pip install -e .
+```
+
+This will compile the Cython extensions and install the package in editable mode.
+
 ## Documentation
 
 Full documentation and examples: [www.qhchina.org/pkg_docs/](https://www.qhchina.org/pkg_docs/)
