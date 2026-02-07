@@ -4,6 +4,9 @@ Fast Word2Vec training operations implemented in Cython.
 This module provides optimized implementations of the core training
 operations for Word2Vec with minimal Python/Cython boundary crossings.
 
+THREAD SAFETY: This module is fully thread-safe. All state is passed as
+parameters to functions - there are no global mutable variables.
+
 Key optimizations:
 - Direct BLAS function calls via scipy.linalg.cython_blas
 - Vocabulary lookup happens inside Cython (with GIL, but no intermediate allocations)
@@ -35,33 +38,39 @@ ctypedef np.uint32_t UITYPE_t
 cdef int ONE = 1
 cdef REAL_t ONEF = <REAL_t>1.0
 
-DEF MAX_WORDS_IN_BATCH = 50000  # 50K words max per training chunk
-DEF MAX_SENTENCES_IN_BATCH = 10000  # 10K sentences max
 DEF EXP_TABLE_SIZE = 1000
 DEF MAX_EXP = 6.0
 
 # =============================================================================
-# Global State (initialized once, used throughout training)
+# Sigmoid Lookup Tables (read-only, initialized once at module load)
 # =============================================================================
 
-# Sigmoid lookup tables
+# These are the only module-level variables. They are:
+# 1. Read-only after initialization
+# 2. Thread-safe (no writes during training)
+# 3. Initialized at module import time
 cdef REAL_t[EXP_TABLE_SIZE] EXP_TABLE
 cdef REAL_t[EXP_TABLE_SIZE] LOG_TABLE
+cdef bint _tables_initialized = False
 
-# Cumulative table for negative sampling
-cdef UITYPE_t *CUM_TABLE
-cdef unsigned long long CUM_TABLE_LEN
+cdef void _init_tables() noexcept:
+    """Initialize sigmoid lookup tables (called once at module load)."""
+    global _tables_initialized
+    if _tables_initialized:
+        return
+    
+    cdef int i
+    cdef REAL_t x
+    for i in range(EXP_TABLE_SIZE):
+        x = (i / <REAL_t>EXP_TABLE_SIZE * 2 - 1) * MAX_EXP
+        EXP_TABLE[i] = <REAL_t>(1.0 / (1.0 + exp(-x)))
+        LOG_TABLE[i] = <REAL_t>log(max(EXP_TABLE[i], 1e-10))
+    
+    _tables_initialized = True
 
-# Training hyperparameters (set during init)
-cdef int NEGATIVE
-cdef int VECTOR_SIZE
-cdef bint CBOW_MEAN
+# Initialize tables at module import
+_init_tables()
 
-# RNG state
-cdef unsigned long long NEXT_RANDOM = 1
-
-# Global reference to prevent garbage collection
-_cum_table_holder = None
 
 # =============================================================================
 # Fast LCG Random Number Generator
@@ -73,10 +82,6 @@ cdef inline unsigned long long random_int32(unsigned long long *next_random) noe
     next_random[0] = (next_random[0] * <unsigned long long>25214903917ULL + 11) & 281474976710655ULL
     return this_random
 
-def set_seed(unsigned long long seed):
-    """Set the random number generator seed for reproducibility."""
-    global NEXT_RANDOM
-    NEXT_RANDOM = seed
 
 # =============================================================================
 # Binary Search for Negative Sampling
@@ -98,52 +103,35 @@ cdef inline unsigned long long bisect_left(
             lo = mid + 1
     return lo
 
+
 # =============================================================================
-# Initialization
+# Cumulative Table Builder (returns numpy array, caller keeps reference)
 # =============================================================================
 
-def init_globals(
-    noise_distribution,
-    int vector_size,
-    int negative=5,
-    bint cbow_mean=True,
-):
+def build_cum_table(noise_distribution):
     """
-    Initialize global variables for training.
+    Build cumulative table for negative sampling.
     
-    Call this once before training starts.
+    Args:
+        noise_distribution: Array of word probabilities (normalized)
+    
+    Returns:
+        np.ndarray[uint32]: Cumulative distribution table
+        
+    The caller MUST keep a reference to this array alive during training.
     """
-    global CUM_TABLE, CUM_TABLE_LEN
-    global NEGATIVE, VECTOR_SIZE, CBOW_MEAN
-    global EXP_TABLE, LOG_TABLE, _cum_table_holder
-    
-    cdef int i
-    cdef REAL_t x
-    
-    # Build sigmoid tables
-    for i in range(EXP_TABLE_SIZE):
-        x = (i / <REAL_t>EXP_TABLE_SIZE * 2 - 1) * MAX_EXP
-        EXP_TABLE[i] = <REAL_t>(1.0 / (1.0 + np.exp(-x)))
-        LOG_TABLE[i] = <REAL_t>np.log(max(EXP_TABLE[i], 1e-10))
-    
-    # Build cumulative table for negative sampling
-    cdef np.ndarray[UITYPE_t, ndim=1] cum_table_arr = np.zeros(len(noise_distribution), dtype=np.uint32)
-    cdef double running = 0.0
     cdef int n = len(noise_distribution)
+    cdef np.ndarray[UITYPE_t, ndim=1] cum_table = np.zeros(n, dtype=np.uint32)
+    cdef double running = 0.0
     cdef double domain = 2147483647.0  # 2^31 - 1
+    cdef int i
     
     for i in range(n):
         running += noise_distribution[i]
-        cum_table_arr[i] = <UITYPE_t>min(running * domain, domain)
+        cum_table[i] = <UITYPE_t>min(running * domain, domain)
     
-    # Store reference to prevent garbage collection
-    _cum_table_holder = cum_table_arr
-    CUM_TABLE = <UITYPE_t *>np.PyArray_DATA(cum_table_arr)
-    CUM_TABLE_LEN = n
-    
-    NEGATIVE = negative
-    VECTOR_SIZE = vector_size
-    CBOW_MEAN = cbow_mean
+    return cum_table
+
 
 # =============================================================================
 # Core Skip-gram Training (nogil)
@@ -158,6 +146,11 @@ cdef inline unsigned long long train_sg_pair(
     const REAL_t alpha,
     REAL_t *work,
     unsigned long long next_random,
+    # Negative sampling parameters (passed, not global)
+    UITYPE_t *cum_table,
+    unsigned long long cum_table_len,
+    int negative,
+    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss
 ) noexcept nogil:
@@ -171,12 +164,12 @@ cdef inline unsigned long long train_sg_pair(
     
     memset(work, 0, size * cython.sizeof(REAL_t))
     
-    for d in range(NEGATIVE + 1):
+    for d in range(negative + 1):
         if d == 0:
             target_index = word_index
             label = ONEF
         else:
-            target_index = bisect_left(CUM_TABLE, (next_random >> 16) % CUM_TABLE[CUM_TABLE_LEN - 1], 0, CUM_TABLE_LEN)
+            target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
             next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
             if target_index == word_index:
                 continue
@@ -191,7 +184,7 @@ cdef inline unsigned long long train_sg_pair(
         f = EXP_TABLE[<int>((f_dot + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
         g = (label - f) * alpha
         
-        # Accumulate loss only if requested (Gensim-style conditional)
+        # Accumulate loss only if requested
         if _compute_loss == 1:
             f_dot_for_loss = (f_dot if d == 0 else -f_dot)
             if f_dot_for_loss <= -MAX_EXP or f_dot_for_loss >= MAX_EXP:
@@ -206,6 +199,7 @@ cdef inline unsigned long long train_sg_pair(
     saxpy(&size, &ONEF, work, &ONE, &syn0[row1], &ONE)
     
     return next_random
+
 
 # =============================================================================
 # Core CBOW Training (nogil)
@@ -223,6 +217,11 @@ cdef inline unsigned long long train_cbow_pair(
     REAL_t *work,
     unsigned long long next_random,
     bint cbow_mean,
+    # Negative sampling parameters (passed, not global)
+    UITYPE_t *cum_table,
+    unsigned long long cum_table_len,
+    int negative,
+    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss
 ) noexcept nogil:
@@ -249,12 +248,12 @@ cdef inline unsigned long long train_cbow_pair(
     
     memset(work, 0, size * cython.sizeof(REAL_t))
     
-    for d in range(NEGATIVE + 1):
+    for d in range(negative + 1):
         if d == 0:
             target_index = center_index
             label = ONEF
         else:
-            target_index = bisect_left(CUM_TABLE, (next_random >> 16) % CUM_TABLE[CUM_TABLE_LEN - 1], 0, CUM_TABLE_LEN)
+            target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
             next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
             if target_index == center_index:
                 continue
@@ -269,7 +268,7 @@ cdef inline unsigned long long train_cbow_pair(
         f = EXP_TABLE[<int>((f_dot + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
         g = (label - f) * alpha
         
-        # Accumulate loss only if requested (Gensim-style conditional)
+        # Accumulate loss only if requested
         if _compute_loss == 1:
             f_dot_for_loss = (f_dot if d == 0 else -f_dot)
             if f_dot_for_loss <= -MAX_EXP or f_dot_for_loss >= MAX_EXP:
@@ -289,6 +288,7 @@ cdef inline unsigned long long train_cbow_pair(
     
     return next_random
 
+
 # =============================================================================
 # Training chunk processor (nogil inner loop)
 # =============================================================================
@@ -305,6 +305,11 @@ cdef void train_chunk_sg(
     REAL_t alpha,
     REAL_t *work,
     unsigned long long *next_random,
+    # Negative sampling parameters
+    UITYPE_t *cum_table,
+    unsigned long long cum_table_len,
+    int negative,
+    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss,
     long long *examples_trained
@@ -332,7 +337,9 @@ cdef void train_chunk_sg(
                 next_random[0] = train_sg_pair(
                     syn0, syn1neg, size,
                     indexes[i], indexes[j],
-                    alpha, work, next_random[0], _compute_loss, running_loss
+                    alpha, work, next_random[0],
+                    cum_table, cum_table_len, negative,
+                    _compute_loss, running_loss
                 )
                 examples_trained[0] += 1
 
@@ -352,6 +359,11 @@ cdef void train_chunk_cbow(
     UITYPE_t *context_buffer,
     unsigned long long *next_random,
     bint cbow_mean,
+    # Negative sampling parameters
+    UITYPE_t *cum_table,
+    unsigned long long cum_table_len,
+    int negative,
+    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss,
     long long *examples_trained
@@ -387,7 +399,9 @@ cdef void train_chunk_cbow(
                 syn0, syn1neg, size,
                 context_buffer, ctx_count, indexes[i],
                 alpha, neu1, work, next_random[0],
-                cbow_mean, _compute_loss, running_loss
+                cbow_mean,
+                cum_table, cum_table_len, negative,
+                _compute_loss, running_loss
             )
             examples_trained[0] += 1
 
@@ -396,31 +410,36 @@ cdef void train_chunk_cbow(
 # Main Training Functions - Full Epoch in One Call
 # =============================================================================
 
-def train_epoch(
+def train_sentences(
     np.float32_t[:, :] syn0,
     np.float32_t[:, :] syn1neg,
     list sentences,
     dict word2idx,
     np.uint32_t[:] sample_ints,
+    np.uint32_t[:] cum_table,
     bint use_subsampling,
     int window,
     bint shrink_windows,
     float start_alpha,
     float end_alpha,
-    long long total_words_expected,
     object progress_callback,
-    int callback_every_n_sentences,
+    int batch_size,
     bint sg,
+    int negative,
+    bint cbow_mean,
+    unsigned long long random_seed,
     bint compute_loss=True,
 ):
     """
-    Train Word2Vec (Skip-gram or CBOW) for one full epoch.
+    Train Word2Vec (Skip-gram or CBOW) on a list of sentences.
     
-    Processes ALL sentences in a single call, minimizing Python/Cython crossings.
-    Vocabulary lookup happens inside Cython.
+    THREAD SAFE: All state is passed as parameters. No global variables are used.
+    
+    Processes all provided sentences in a single call, minimizing Python/Cython 
+    boundary crossings. Vocabulary lookup happens inside Cython.
     
     Learning rate linearly interpolates from start_alpha to end_alpha based on
-    word processing progress within this epoch.
+    sentence processing progress (sentences_processed / total_sentences).
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size)
@@ -428,34 +447,41 @@ def train_epoch(
         sentences: List of tokenized sentences (list of list of str)
         word2idx: Dictionary mapping words to indices
         sample_ints: Pre-computed subsampling thresholds (uint32)
+        cum_table: Cumulative distribution table for negative sampling
         use_subsampling: Whether to apply subsampling
         window: Context window size
         shrink_windows: Whether to randomly shrink windows
-        start_alpha: Learning rate at the start of this epoch
-        end_alpha: Learning rate at the end of this epoch
-        total_words_expected: Expected in-vocab words for this epoch (for LR decay)
-        progress_callback: Function(words_processed, loss) called periodically
-        callback_every_n_sentences: How often to call progress callback
+        start_alpha: Learning rate at the start
+        end_alpha: Learning rate at the end
+        progress_callback: Function(words_processed, examples, loss, lr) called periodically
+        batch_size: Maximum words per training batch (triggers callback after each batch)
         sg: If True, use Skip-gram; if False, use CBOW
+        negative: Number of negative samples
+        cbow_mean: If True, average context vectors (for CBOW)
+        random_seed: Seed for random number generator
         compute_loss: Whether to compute and track loss (default True)
     
     Returns:
-        Tuple of (total_loss, total_examples_trained, total_words_processed)
+        Tuple of (total_loss, total_examples_trained, total_words_processed, final_random_state)
     """
     cdef int vector_size = syn0.shape[1]
     cdef int num_sentences = len(sentences)
     cdef int _compute_loss = 1 if compute_loss else 0
     cdef int _sg = 1 if sg else 0
+    cdef int _batch_size = batch_size
+    cdef unsigned long long cum_table_len = len(cum_table)
     
     # Get raw pointers to weight matrices
     cdef REAL_t *syn0_ptr = &syn0[0, 0]
     cdef REAL_t *syn1neg_ptr = &syn1neg[0, 0]
     cdef UITYPE_t *sample_ints_ptr = &sample_ints[0]
+    cdef UITYPE_t *cum_table_ptr = &cum_table[0]
     
-    # Pre-allocate all buffers (fixed size, no per-batch allocation)
-    cdef np.ndarray[UITYPE_t, ndim=1] indexes = np.zeros(MAX_WORDS_IN_BATCH, dtype=np.uint32)
-    cdef np.ndarray[UITYPE_t, ndim=1] sentence_idx = np.zeros(MAX_SENTENCES_IN_BATCH + 1, dtype=np.uint32)
-    cdef np.ndarray[ITYPE_t, ndim=1] reduced_windows = np.zeros(MAX_WORDS_IN_BATCH, dtype=np.int32)
+    # Pre-allocate all buffers based on batch_size
+    # sentence_idx needs batch_size + 1 (worst case: every word is a 1-word sentence, plus end marker)
+    cdef np.ndarray[UITYPE_t, ndim=1] indexes = np.zeros(_batch_size, dtype=np.uint32)
+    cdef np.ndarray[UITYPE_t, ndim=1] sentence_idx = np.zeros(_batch_size + 1, dtype=np.uint32)
+    cdef np.ndarray[ITYPE_t, ndim=1] reduced_windows = np.zeros(_batch_size, dtype=np.int32)
     cdef np.ndarray[REAL_t, ndim=1] work = np.zeros(vector_size, dtype=np.float32)
     # CBOW-specific buffers (allocated but only used if sg=0)
     cdef np.ndarray[REAL_t, ndim=1] neu1 = np.zeros(vector_size, dtype=np.float32)
@@ -468,8 +494,8 @@ def train_epoch(
     cdef REAL_t *neu1_ptr = <REAL_t *>np.PyArray_DATA(neu1)
     cdef UITYPE_t *context_buffer_ptr = <UITYPE_t *>np.PyArray_DATA(context_buffer)
     
-    # State variables
-    cdef unsigned long long next_random = NEXT_RANDOM
+    # State variables (local, not global)
+    cdef unsigned long long next_random = random_seed
     cdef REAL_t running_loss = 0.0
     cdef REAL_t chunk_loss = 0.0
     cdef long long total_examples = 0
@@ -477,11 +503,11 @@ def train_epoch(
     cdef long long total_words = 0
     cdef REAL_t alpha = start_alpha
     cdef REAL_t progress
+    cdef int sentences_processed = 0
     
-    # Chunk processing state
+    # Batch processing state
     cdef int effective_words = 0
     cdef int effective_sentences = 0
-    cdef int sentences_since_callback = 0
     cdef int word_idx
     cdef int sent_global_idx
     cdef int i
@@ -511,37 +537,29 @@ def train_epoch(
             indexes_ptr[effective_words] = <UITYPE_t>word_idx
             effective_words += 1
             
-            # Check if buffer is getting full
-            if effective_words >= MAX_WORDS_IN_BATCH - 1000:
+            # Check if buffer is full
+            if effective_words >= _batch_size:
                 break
         
         effective_sentences += 1
+        sentences_processed += 1
         sentence_idx_ptr[effective_sentences] = effective_words
-        sentences_since_callback += 1
         
-        # Check if we should train the current chunk
-        should_train = (
-            effective_words >= MAX_WORDS_IN_BATCH - 1000 or
-            effective_sentences >= MAX_SENTENCES_IN_BATCH - 1 or
-            sentences_since_callback >= callback_every_n_sentences
-        )
-        
-        if should_train and effective_words > 0:
-            # Compute reduced windows
+        # Train when batch is full
+        if effective_words >= _batch_size:
             if shrink_windows:
                 for i in range(effective_words):
                     reduced_windows_ptr[i] = <ITYPE_t>(random_int32(&next_random) % window)
             else:
                 memset(reduced_windows_ptr, 0, effective_words * cython.sizeof(ITYPE_t))
             
-            # Compute learning rate: linear interpolation from start_alpha to end_alpha
-            if total_words_expected > 0:
-                progress = <REAL_t>total_words / <REAL_t>total_words_expected
+            # Compute learning rate: linear interpolation based on sentence progress
+            if num_sentences > 0:
+                progress = <REAL_t>sentences_processed / <REAL_t>num_sentences
                 if progress > 1.0:
                     progress = 1.0
                 alpha = start_alpha + (end_alpha - start_alpha) * progress
             
-            # Train on this chunk (RELEASE GIL)
             chunk_loss = 0.0
             chunk_examples = 0
             
@@ -551,7 +569,9 @@ def train_epoch(
                         syn0_ptr, syn1neg_ptr, vector_size,
                         indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
                         effective_sentences, window, alpha,
-                        work_ptr, &next_random, _compute_loss, &chunk_loss, &chunk_examples
+                        work_ptr, &next_random,
+                        cum_table_ptr, cum_table_len, negative,
+                        _compute_loss, &chunk_loss, &chunk_examples
                     )
                 else:
                     train_chunk_cbow(
@@ -559,21 +579,22 @@ def train_epoch(
                         indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
                         effective_sentences, window, alpha,
                         neu1_ptr, work_ptr, context_buffer_ptr,
-                        &next_random, CBOW_MEAN, _compute_loss, &chunk_loss, &chunk_examples
+                        &next_random, cbow_mean,
+                        cum_table_ptr, cum_table_len, negative,
+                        _compute_loss, &chunk_loss, &chunk_examples
                     )
             
             running_loss += chunk_loss
             total_examples += chunk_examples
             
             # Progress callback (if provided)
-            if progress_callback is not None and sentences_since_callback >= callback_every_n_sentences:
+            if progress_callback is not None:
                 try:
                     progress_callback(total_words, total_examples, running_loss, alpha)
                 except:
                     pass
-                sentences_since_callback = 0
             
-            # Always reset buffer after training to avoid re-training same data
+            # Reset buffer for next batch
             effective_words = 0
             effective_sentences = 0
             sentence_idx_ptr[0] = 0
@@ -586,9 +607,9 @@ def train_epoch(
         else:
             memset(reduced_windows_ptr, 0, effective_words * cython.sizeof(ITYPE_t))
         
-        # Compute learning rate: linear interpolation from start_alpha to end_alpha
-        if total_words_expected > 0:
-            progress = <REAL_t>total_words / <REAL_t>total_words_expected
+        # Compute learning rate: linear interpolation based on sentence progress
+        if num_sentences > 0:
+            progress = <REAL_t>sentences_processed / <REAL_t>num_sentences
             if progress > 1.0:
                 progress = 1.0
             alpha = start_alpha + (end_alpha - start_alpha) * progress
@@ -602,7 +623,9 @@ def train_epoch(
                     syn0_ptr, syn1neg_ptr, vector_size,
                     indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
                     effective_sentences, window, alpha,
-                    work_ptr, &next_random, _compute_loss, &chunk_loss, &chunk_examples
+                    work_ptr, &next_random,
+                    cum_table_ptr, cum_table_len, negative,
+                    _compute_loss, &chunk_loss, &chunk_examples
                 )
             else:
                 train_chunk_cbow(
@@ -610,7 +633,9 @@ def train_epoch(
                     indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
                     effective_sentences, window, alpha,
                     neu1_ptr, work_ptr, context_buffer_ptr,
-                    &next_random, CBOW_MEAN, _compute_loss, &chunk_loss, &chunk_examples
+                    &next_random, cbow_mean,
+                    cum_table_ptr, cum_table_len, negative,
+                    _compute_loss, &chunk_loss, &chunk_examples
                 )
         
         running_loss += chunk_loss
@@ -623,90 +648,102 @@ def train_epoch(
         except:
             pass
     
-    # Update global random state
-    global NEXT_RANDOM
-    NEXT_RANDOM = next_random
-    
-    return running_loss, total_examples, total_words
+    return running_loss, total_examples, total_words, next_random
 
 
 # =============================================================================
 # Temporal Referencing Variants (for TempRefWord2Vec)
 # =============================================================================
 
-def train_epoch_temporal(
+def train_sentences_temporal(
     np.float32_t[:, :] syn0,
     np.float32_t[:, :] syn1neg,
     list sentences,
     dict word2idx,
     np.int32_t[:] temporal_index_map,
     np.uint32_t[:] sample_ints,
+    np.uint32_t[:] cum_table,
     bint use_subsampling,
     int window,
     bint shrink_windows,
     float start_alpha,
     float end_alpha,
-    long long total_words_expected,
     object progress_callback,
-    int callback_every_n_sentences,
+    int batch_size,
     bint sg,
+    int negative,
+    bint cbow_mean,
+    unsigned long long random_seed,
     bint compute_loss=True,
 ):
     """
-    Train Word2Vec (Skip-gram or CBOW) with temporal mapping for one full epoch.
+    Train Word2Vec (Skip-gram or CBOW) with temporal mapping on a list of sentences.
+    
+    THREAD SAFE: All state is passed as parameters. No global variables are used.
     
     Context words are mapped to base forms, center words keep temporal variant.
-    Learning rate linearly interpolates from start_alpha to end_alpha.
+    Learning rate linearly interpolates from start_alpha to end_alpha based on
+    sentence processing progress.
+    
+    This version only supports Skip-gram (sg=True) since CBOW with temporal
+    mapping would require context vectors to use base forms.
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size)
         syn1neg: Output word vectors (vocab_size x vector_size)
         sentences: List of tokenized sentences (list of list of str)
         word2idx: Dictionary mapping words to indices
-        temporal_index_map: Array mapping word indices to base form indices
+        temporal_index_map: Array mapping vocab index -> base form index (identity mapping for non-temporal words)
         sample_ints: Pre-computed subsampling thresholds (uint32)
+        cum_table: Cumulative distribution table for negative sampling
         use_subsampling: Whether to apply subsampling
         window: Context window size
         shrink_windows: Whether to randomly shrink windows
-        start_alpha: Learning rate at the start of this epoch
-        end_alpha: Learning rate at the end of this epoch
-        total_words_expected: Expected in-vocab words for this epoch (for LR decay)
-        progress_callback: Function(words_processed, loss) called periodically
-        callback_every_n_sentences: How often to call progress callback
-        sg: If True, use Skip-gram; if False, use CBOW
+        start_alpha: Learning rate at the start
+        end_alpha: Learning rate at the end
+        progress_callback: Function(words_processed, examples, loss, lr) called periodically
+        batch_size: Maximum words per training batch (triggers callback after each batch)
+        sg: Must be True (Skip-gram only for temporal training)
+        negative: Number of negative samples
+        cbow_mean: Unused for Skip-gram
+        random_seed: Seed for random number generator
         compute_loss: Whether to compute and track loss (default True)
     
     Returns:
-        Tuple of (total_loss, total_examples_trained, total_words_processed)
+        Tuple of (total_loss, total_examples_trained, total_words_processed, final_random_state)
     """
+    if not sg:
+        raise ValueError("Temporal training only supports Skip-gram (sg=True)")
+    
     cdef int vector_size = syn0.shape[1]
     cdef int num_sentences = len(sentences)
     cdef int _compute_loss = 1 if compute_loss else 0
-    cdef int _sg = 1 if sg else 0
+    cdef int _batch_size = batch_size
+    cdef unsigned long long cum_table_len = len(cum_table)
     
+    # Get raw pointers
     cdef REAL_t *syn0_ptr = &syn0[0, 0]
     cdef REAL_t *syn1neg_ptr = &syn1neg[0, 0]
     cdef UITYPE_t *sample_ints_ptr = &sample_ints[0]
     cdef ITYPE_t *temporal_map_ptr = &temporal_index_map[0]
+    cdef UITYPE_t *cum_table_ptr = &cum_table[0]
     
-    cdef np.ndarray[UITYPE_t, ndim=1] indexes = np.zeros(MAX_WORDS_IN_BATCH, dtype=np.uint32)
-    cdef np.ndarray[UITYPE_t, ndim=1] mapped_indexes = np.zeros(MAX_WORDS_IN_BATCH, dtype=np.uint32)
-    cdef np.ndarray[UITYPE_t, ndim=1] sentence_idx = np.zeros(MAX_SENTENCES_IN_BATCH + 1, dtype=np.uint32)
-    cdef np.ndarray[ITYPE_t, ndim=1] reduced_windows = np.zeros(MAX_WORDS_IN_BATCH, dtype=np.int32)
+    # Pre-allocate buffers
+    # For temporal: we store both center index and context (mapped) index
+    cdef np.ndarray[UITYPE_t, ndim=1] center_indexes = np.zeros(_batch_size, dtype=np.uint32)
+    cdef np.ndarray[UITYPE_t, ndim=1] context_indexes = np.zeros(_batch_size, dtype=np.uint32)
+    cdef np.ndarray[UITYPE_t, ndim=1] sentence_idx = np.zeros(_batch_size + 1, dtype=np.uint32)
+    cdef np.ndarray[ITYPE_t, ndim=1] reduced_windows = np.zeros(_batch_size, dtype=np.int32)
     cdef np.ndarray[REAL_t, ndim=1] work = np.zeros(vector_size, dtype=np.float32)
-    # CBOW-specific buffers (allocated but only used if sg=0)
-    cdef np.ndarray[REAL_t, ndim=1] neu1 = np.zeros(vector_size, dtype=np.float32)
-    cdef np.ndarray[UITYPE_t, ndim=1] context_buffer = np.zeros(2 * window + 1, dtype=np.uint32)
     
-    cdef UITYPE_t *indexes_ptr = <UITYPE_t *>np.PyArray_DATA(indexes)
-    cdef UITYPE_t *mapped_indexes_ptr = <UITYPE_t *>np.PyArray_DATA(mapped_indexes)
+    cdef UITYPE_t *center_indexes_ptr = <UITYPE_t *>np.PyArray_DATA(center_indexes)
+    cdef UITYPE_t *context_indexes_ptr = <UITYPE_t *>np.PyArray_DATA(context_indexes)
     cdef UITYPE_t *sentence_idx_ptr = <UITYPE_t *>np.PyArray_DATA(sentence_idx)
     cdef ITYPE_t *reduced_windows_ptr = <ITYPE_t *>np.PyArray_DATA(reduced_windows)
     cdef REAL_t *work_ptr = <REAL_t *>np.PyArray_DATA(work)
-    cdef REAL_t *neu1_ptr = <REAL_t *>np.PyArray_DATA(neu1)
-    cdef UITYPE_t *context_buffer_ptr = <UITYPE_t *>np.PyArray_DATA(context_buffer)
     
-    cdef unsigned long long next_random = NEXT_RANDOM
+    # State variables (local, not global)
+    cdef unsigned long long next_random = random_seed
     cdef REAL_t running_loss = 0.0
     cdef REAL_t chunk_loss = 0.0
     cdef long long total_examples = 0
@@ -714,14 +751,16 @@ def train_epoch_temporal(
     cdef long long total_words = 0
     cdef REAL_t alpha = start_alpha
     cdef REAL_t progress
+    cdef int sentences_processed = 0
     
+    # Batch processing state
     cdef int effective_words = 0
     cdef int effective_sentences = 0
-    cdef int sentences_since_callback = 0
-    cdef int word_idx, mapped_idx
+    cdef int word_idx
     cdef int sent_global_idx
     cdef int i
     
+    # Process all sentences
     sentence_idx_ptr[0] = 0
     
     for sent_global_idx in range(num_sentences):
@@ -730,49 +769,45 @@ def train_epoch_temporal(
         if sent is None or len(sent) == 0:
             continue
         
+        # Index this sentence with temporal mapping
         for token in sent:
             if token not in word2idx:
                 continue
             
             word_idx = word2idx[token]
-            mapped_idx = temporal_map_ptr[word_idx]
-            
-            if mapped_idx < 0:
-                continue
-            
             total_words += 1
             
+            # Subsampling (use original index for subsampling decision)
             if use_subsampling:
                 if sample_ints_ptr[word_idx] < (random_int32(&next_random) & 0xFFFFFFFF):
                     continue
             
-            indexes_ptr[effective_words] = <UITYPE_t>word_idx
-            mapped_indexes_ptr[effective_words] = <UITYPE_t>mapped_idx
+            # Store center index (may be temporal variant)
+            center_indexes_ptr[effective_words] = <UITYPE_t>word_idx
+            
+            # Store context index (mapped to base form via temporal_index_map)
+            # For non-temporal words, this is identity mapping (index maps to itself)
+            context_indexes_ptr[effective_words] = <UITYPE_t>temporal_map_ptr[word_idx]
+            
             effective_words += 1
             
-            if effective_words >= MAX_WORDS_IN_BATCH - 1000:
+            if effective_words >= _batch_size:
                 break
         
         effective_sentences += 1
+        sentences_processed += 1
         sentence_idx_ptr[effective_sentences] = effective_words
-        sentences_since_callback += 1
         
-        should_train = (
-            effective_words >= MAX_WORDS_IN_BATCH - 1000 or
-            effective_sentences >= MAX_SENTENCES_IN_BATCH - 1 or
-            sentences_since_callback >= callback_every_n_sentences
-        )
-        
-        if should_train and effective_words > 0:
+        # Train when batch is full
+        if effective_words >= _batch_size:
             if shrink_windows:
                 for i in range(effective_words):
                     reduced_windows_ptr[i] = <ITYPE_t>(random_int32(&next_random) % window)
             else:
                 memset(reduced_windows_ptr, 0, effective_words * cython.sizeof(ITYPE_t))
             
-            # Compute learning rate: linear interpolation from start_alpha to end_alpha
-            if total_words_expected > 0:
-                progress = <REAL_t>total_words / <REAL_t>total_words_expected
+            if num_sentences > 0:
+                progress = <REAL_t>sentences_processed / <REAL_t>num_sentences
                 if progress > 1.0:
                     progress = 1.0
                 alpha = start_alpha + (end_alpha - start_alpha) * progress
@@ -781,38 +816,29 @@ def train_epoch_temporal(
             chunk_examples = 0
             
             with nogil:
-                if _sg == 1:
-                    train_chunk_sg_temporal(
-                        syn0_ptr, syn1neg_ptr, vector_size,
-                        indexes_ptr, mapped_indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
-                        effective_sentences, window, alpha,
-                        work_ptr, &next_random, _compute_loss, &chunk_loss, &chunk_examples
-                    )
-                else:
-                    train_chunk_cbow_temporal(
-                        syn0_ptr, syn1neg_ptr, vector_size,
-                        indexes_ptr, mapped_indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
-                        effective_sentences, window, alpha,
-                        neu1_ptr, work_ptr, context_buffer_ptr,
-                        &next_random, CBOW_MEAN, _compute_loss, &chunk_loss, &chunk_examples
-                    )
+                train_chunk_sg_temporal(
+                    syn0_ptr, syn1neg_ptr, vector_size,
+                    center_indexes_ptr, context_indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
+                    effective_sentences, window, alpha,
+                    work_ptr, &next_random,
+                    cum_table_ptr, cum_table_len, negative,
+                    _compute_loss, &chunk_loss, &chunk_examples
+                )
             
             running_loss += chunk_loss
             total_examples += chunk_examples
             
-            if progress_callback is not None and sentences_since_callback >= callback_every_n_sentences:
+            if progress_callback is not None:
                 try:
                     progress_callback(total_words, total_examples, running_loss, alpha)
                 except:
                     pass
-                sentences_since_callback = 0
             
-            # Always reset buffer after training
             effective_words = 0
             effective_sentences = 0
             sentence_idx_ptr[0] = 0
     
-    # Train remaining
+    # Train any remaining data
     if effective_words > 0 and effective_sentences > 0:
         if shrink_windows:
             for i in range(effective_words):
@@ -820,9 +846,8 @@ def train_epoch_temporal(
         else:
             memset(reduced_windows_ptr, 0, effective_words * cython.sizeof(ITYPE_t))
         
-        # Compute learning rate: linear interpolation from start_alpha to end_alpha
-        if total_words_expected > 0:
-            progress = <REAL_t>total_words / <REAL_t>total_words_expected
+        if num_sentences > 0:
+            progress = <REAL_t>sentences_processed / <REAL_t>num_sentences
             if progress > 1.0:
                 progress = 1.0
             alpha = start_alpha + (end_alpha - start_alpha) * progress
@@ -831,43 +856,34 @@ def train_epoch_temporal(
         chunk_examples = 0
         
         with nogil:
-            if _sg == 1:
-                train_chunk_sg_temporal(
-                    syn0_ptr, syn1neg_ptr, vector_size,
-                    indexes_ptr, mapped_indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
-                    effective_sentences, window, alpha,
-                    work_ptr, &next_random, _compute_loss, &chunk_loss, &chunk_examples
-                )
-            else:
-                train_chunk_cbow_temporal(
-                    syn0_ptr, syn1neg_ptr, vector_size,
-                    indexes_ptr, mapped_indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
-                    effective_sentences, window, alpha,
-                    neu1_ptr, work_ptr, context_buffer_ptr,
-                    &next_random, CBOW_MEAN, _compute_loss, &chunk_loss, &chunk_examples
-                )
+            train_chunk_sg_temporal(
+                syn0_ptr, syn1neg_ptr, vector_size,
+                center_indexes_ptr, context_indexes_ptr, sentence_idx_ptr, reduced_windows_ptr,
+                effective_sentences, window, alpha,
+                work_ptr, &next_random,
+                cum_table_ptr, cum_table_len, negative,
+                _compute_loss, &chunk_loss, &chunk_examples
+            )
         
         running_loss += chunk_loss
         total_examples += chunk_examples
     
+    # Final callback
     if progress_callback is not None:
         try:
             progress_callback(total_words, total_examples, running_loss, alpha)
         except:
             pass
     
-    global NEXT_RANDOM
-    NEXT_RANDOM = next_random
-    
-    return running_loss, total_examples, total_words
+    return running_loss, total_examples, total_words, next_random
 
 
 cdef void train_chunk_sg_temporal(
     REAL_t *syn0,
     REAL_t *syn1neg,
     const int size,
-    UITYPE_t *indexes,
-    UITYPE_t *mapped_indexes,
+    UITYPE_t *center_indexes,
+    UITYPE_t *context_indexes,
     UITYPE_t *sentence_idx,
     ITYPE_t *reduced_windows,
     int num_sentences,
@@ -875,11 +891,25 @@ cdef void train_chunk_sg_temporal(
     REAL_t alpha,
     REAL_t *work,
     unsigned long long *next_random,
+    # Negative sampling parameters
+    UITYPE_t *cum_table,
+    unsigned long long cum_table_len,
+    int negative,
+    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss,
     long long *examples_trained
 ) noexcept nogil:
-    """Train skip-gram temporal on a chunk (nogil)."""
+    """
+    Train skip-gram on a chunk with temporal mapping (nogil).
+    
+    center_indexes: Original word indices (may be temporal variants)
+    context_indexes: Mapped indices (base forms for context)
+    
+    For each (center, context) pair:
+    - center word uses center_indexes[i] (keeps temporal variant)
+    - context word uses context_indexes[j] (mapped to base form)
+    """
     cdef int sent_idx, i, j, k
     cdef int idx_start, idx_end
     
@@ -899,67 +929,13 @@ cdef void train_chunk_sg_temporal(
                 if j == i:
                     continue
                 
-                # Center word: original index, Context word: mapped to base
+                # Train: center word (original) predicts context word (mapped base form)
                 next_random[0] = train_sg_pair(
                     syn0, syn1neg, size,
-                    indexes[i], mapped_indexes[j],
-                    alpha, work, next_random[0], _compute_loss, running_loss
+                    center_indexes[i],   # center word (may be temporal variant)
+                    context_indexes[j],  # context word (mapped to base form)
+                    alpha, work, next_random[0],
+                    cum_table, cum_table_len, negative,
+                    _compute_loss, running_loss
                 )
                 examples_trained[0] += 1
-
-
-cdef void train_chunk_cbow_temporal(
-    REAL_t *syn0,
-    REAL_t *syn1neg,
-    const int size,
-    UITYPE_t *indexes,
-    UITYPE_t *mapped_indexes,
-    UITYPE_t *sentence_idx,
-    ITYPE_t *reduced_windows,
-    int num_sentences,
-    int window,
-    REAL_t alpha,
-    REAL_t *neu1,
-    REAL_t *work,
-    UITYPE_t *context_buffer,
-    unsigned long long *next_random,
-    bint cbow_mean,
-    const int _compute_loss,
-    REAL_t *running_loss,
-    long long *examples_trained
-) noexcept nogil:
-    """Train CBOW temporal on a chunk (nogil)."""
-    cdef int sent_idx, i, j, k, m, ctx_count
-    cdef int idx_start, idx_end
-    
-    for sent_idx in range(num_sentences):
-        idx_start = sentence_idx[sent_idx]
-        idx_end = sentence_idx[sent_idx + 1]
-        
-        for i in range(idx_start, idx_end):
-            j = i - window + reduced_windows[i]
-            if j < idx_start:
-                j = idx_start
-            k = i + window + 1 - reduced_windows[i]
-            if k > idx_end:
-                k = idx_end
-            
-            # Collect MAPPED context indices
-            ctx_count = 0
-            for m in range(j, k):
-                if m == i:
-                    continue
-                context_buffer[ctx_count] = mapped_indexes[m]
-                ctx_count += 1
-            
-            if ctx_count == 0:
-                continue
-            
-            # Center word uses original index
-            next_random[0] = train_cbow_pair(
-                syn0, syn1neg, size,
-                context_buffer, ctx_count, indexes[i],
-                alpha, neu1, work, next_random[0],
-                cbow_mean, _compute_loss, running_loss
-            )
-            examples_trained[0] += 1

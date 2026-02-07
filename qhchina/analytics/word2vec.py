@@ -25,7 +25,6 @@ Features:
 import logging
 import numpy as np
 from collections import Counter
-from collections.abc import Iterator, Iterable
 from types import GeneratorType
 from typing import List, Dict, Tuple, Optional, Union, Callable, Iterable
 from tqdm.auto import tqdm
@@ -93,7 +92,7 @@ class Word2Vec:
         max_vocab_size (int): Maximum vocabulary size to keep, keeping the most frequent words.
             None means no limit (keep all words above min_word_count).
         epochs (int): Number of training iterations over the corpus (default: 1).
-        batch_size (int): Number of sentences to process per batch (default: 10000).
+        batch_size (int): Maximum words per training batch (default: 10000).
         callbacks (list of callable, optional): Callback functions to call after each epoch.
         calculate_loss (bool): Whether to calculate and return the final loss (default: True).
         total_examples (int, optional): Total number of training examples per epoch. When provided 
@@ -189,10 +188,6 @@ class Word2Vec:
         self.calculate_loss = calculate_loss
         self.total_examples_hint = total_examples
         
-        # For tracking training progress
-        self.epoch_losses = []
-        self.total_examples = 0
-        
         # Auto-train if sentences are provided
         if sentences is not None:
             self.train(sentences)
@@ -223,19 +218,11 @@ class Word2Vec:
         Raises:
             ValueError: If sentences is empty or contains no words.
         """
-        # Count word occurrences
-        # For iterables, we can't show total progress, but we can still count
+
         self.word_counts = Counter()
         sentence_count = 0
         
-        # Check if we can determine length for progress bar
-        if hasattr(sentences, '__len__'):
-            iterator = tqdm(sentences, desc="Building vocabulary", unit="sent", leave=True)
-        else:
-            # For generators/iterators, show progress without total
-            iterator = tqdm(sentences, desc="Building vocabulary", unit="sent", leave=True)
-        
-        for sentence in iterator:
+        for sentence in sentences:
             self.word_counts.update(sentence)
             sentence_count += 1
         
@@ -278,7 +265,7 @@ class Word2Vec:
         
         Formula from Google's word2vec.c (also used by Gensim):
         
-        $P(\\text{keep } w_i) = \\left(\\sqrt{\\frac{t}{f(w_i)}} + 1\\right) \\cdot \\frac{t}{f(w_i)} = \\sqrt{\\frac{t}{f(w_i)}} + \\frac{t}{f(w_i)}$
+        $P(\\text{keep } w_i) = \\sqrt{\\frac{t}{f(w_i)}} + \\frac{t}{f(w_i)}$
         
         where $t$ is the sample threshold and $f(w_i)$ is the word frequency 
         normalized by the total corpus word count.
@@ -287,6 +274,10 @@ class Word2Vec:
         """
         self.discard_probs = np.zeros(len(self.vocab), dtype=np.float32)
         total_words = self.corpus_word_count
+        
+        # Guard against empty vocabulary (all words filtered)
+        if total_words == 0:
+            return
         
         for word, idx in self.vocab.items():
             # Calculate normalized word frequency
@@ -323,7 +314,7 @@ class Word2Vec:
         edge_factor = 0.95
         
         # Calculate effective word count after subsampling
-        if self.sample > 0 and self.discard_probs is not None:
+        if self.sample > 0 and self.discard_probs is not None and self.corpus_word_count > 0:
             # Expected retained words = sum of (count * keep_probability)
             effective_words = sum(
                 self.word_counts[word] * (1.0 - self.discard_probs[idx])
@@ -354,7 +345,11 @@ class Word2Vec:
 
     def _initialize_vectors(self) -> None:
         """
-        Initialize word vectors
+        Initialize input (W) and output (W_prime) word embedding matrices.
+        
+        Uses Xavier/Glorot initialization with uniform distribution in range 
+        [-0.5/vector_size, 0.5/vector_size] for better convergence during training.
+        Both matrices are initialized with random values (not zeros).
         """
         vocab_size = len(self.vocab)
         if self.verbose:
@@ -385,6 +380,10 @@ class Word2Vec:
         Applies subsampling with the ns_exponent parameter to prevent 
         extremely common words from dominating.
         """
+        # Guard against empty vocabulary
+        if len(self.vocab) == 0:
+            self.noise_distribution = np.array([], dtype=self.dtype)
+            return
         
         # Get counts of each word in the vocabulary
         word_counts = np.array([self.word_counts[word] for word in self.vocab])
@@ -393,29 +392,44 @@ class Word2Vec:
         noise_dist = word_counts ** self.ns_exponent
         
         # Normalize to get a probability distribution
-        noise_dist_normalized = noise_dist / np.sum(noise_dist)
+        total = np.sum(noise_dist)
+        if total == 0:
+            # Fallback to uniform distribution if all counts are zero
+            noise_dist_normalized = np.ones(len(self.vocab), dtype=self.dtype) / len(self.vocab)
+        else:
+            noise_dist_normalized = noise_dist / total
         
         # Explicitly cast to the correct dtype (float32 or float64)
         self.noise_distribution = noise_dist_normalized.astype(self.dtype)
 
-    def _initialize_cython_globals(self) -> None:
-        """Initialize Cython module with noise distribution and hyperparameters."""
+    def _build_cum_table(self) -> np.ndarray:
+        """
+        Build cumulative distribution table for negative sampling.
+        
+        Returns:
+            np.ndarray[uint32]: Cumulative distribution table
+            
+        The model keeps a reference to this array to prevent garbage collection.
+        """
         # Ensure noise distribution is contiguous
         if not isinstance(self.noise_distribution, np.ndarray):
             raise ValueError("noise_distribution must be a numpy array")
         if not self.noise_distribution.flags['C_CONTIGUOUS']:
             self.noise_distribution = np.ascontiguousarray(self.noise_distribution, dtype=self.dtype)
         
-        # Initialize Cython globals
-        # Sync Cython RNG with the current seed for reproducibility
-        word2vec_c.set_seed(self.seed)
-        
-        word2vec_c.init_globals(
-            noise_distribution=self.noise_distribution,
-            vector_size=self.vector_size,
-            negative=self.negative,
-            cbow_mean=int(self.cbow_mean),
-        )
+        # Build cumulative table using Cython helper
+        self._cum_table = word2vec_c.build_cum_table(self.noise_distribution)
+        return self._cum_table
+    
+    def _get_random_state(self) -> int:
+        """Get current random state for training."""
+        if not hasattr(self, '_random_state'):
+            self._random_state = self.seed
+        return self._random_state
+    
+    def _set_random_state(self, state: int) -> None:
+        """Update random state after training."""
+        self._random_state = state
     
     def _compute_sample_ints(self) -> np.ndarray:
         """
@@ -433,6 +447,10 @@ class Word2Vec:
         
         total_words = self.corpus_word_count
         
+        # Guard against empty vocabulary (all words filtered)
+        if total_words == 0:
+            return sample_ints
+        
         for word, idx in self.vocab.items():
             word_freq = self.word_counts[word] / total_words
             # Google/Gensim formula: keep_prob = sqrt(t/f) + t/f
@@ -445,16 +463,18 @@ class Word2Vec:
         
         return sample_ints
     
-    def _iter_chunks(self, sentences: Iterable[List[str]], chunk_size: int = 50000):
+    def _iter_chunks(self, sentences: Iterable[List[str]], chunk_size: int = 10000):
         """
-        Yield chunks of sentences as lists.
+        Yield chunks of sentences as lists for streaming training.
         
         This allows streaming through large corpora without loading everything
-        into memory at once.
+        into memory at once. In streaming mode, chunk_size is set to batch_size
+        for consistency with the fast training path.
         
         Args:
             sentences: Iterable of tokenized sentences.
-            chunk_size: Maximum number of sentences per chunk.
+            chunk_size: Maximum number of sentences per chunk. In streaming training,
+                this is set to batch_size (default 10000) for consistency.
         
         Yields:
             List of sentences (each chunk is a list).
@@ -530,7 +550,8 @@ class Word2Vec:
         if self.sample > 0 and self.discard_probs is None:
             self._calculate_discard_probs()
         
-        self._initialize_cython_globals()
+        # Build cumulative table for negative sampling (thread-safe)
+        self._build_cum_table()
         
         # Dispatch to appropriate training path
         if is_list:
@@ -587,10 +608,6 @@ class Word2Vec:
 
         # Training loop for each epoch
         for epoch in range(epochs):
-            examples_processed_in_epoch = 0
-            batch_count = 0
-            epoch_loss = 0.0
-            
             # Use unified training loop
             epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha = \
                 self._train_epoch(
@@ -656,13 +673,10 @@ class Word2Vec:
         """
         # Read training configuration from instance attributes
         epochs = self.epochs
+        batch_size = self.batch_size
         callbacks = self.callbacks
         calculate_loss = self.calculate_loss
         total_examples = self.total_examples_hint
-        
-        # Chunk size for streaming (number of sentences per chunk)
-        # Larger chunks = fewer Cython calls but more memory
-        chunk_size = 50000  # 50K sentences per chunk
         
         # Setup for loss calculation
         total_loss = 0.0
@@ -688,7 +702,7 @@ class Word2Vec:
         min_alpha_val = self.min_alpha if self.min_alpha else start_alpha
         
         if self.verbose:
-            logger.info(f"Starting training (streaming path): {epochs} epoch(s), chunk_size={chunk_size:,}, alpha={self.alpha}")
+            logger.info(f"Starting training (streaming path): {epochs} epoch(s), batch_size={batch_size:,}, alpha={self.alpha}")
         
         # Compute sample_ints for subsampling (same as fast path)
         sample_ints = self._compute_sample_ints()
@@ -718,21 +732,18 @@ class Word2Vec:
             else:
                 progress_bar = None
             
-            # Iterate through chunks
-            for chunk in self._iter_chunks(sentences, chunk_size=chunk_size):
+            # Iterate through chunks (use batch_size as chunk size for consistency)
+            for chunk in self._iter_chunks(sentences, chunk_size=batch_size):
                 chunk_count += 1
                 
-                # Compute learning rate for this chunk based on global progress
+                # Compute learning rate range for this chunk based on global word progress
                 if decay_alpha and total_words_all_epochs > 0:
-                    progress = global_words_processed / total_words_all_epochs
-                    progress = min(progress, 1.0)
-                    chunk_alpha_start = start_alpha + (min_alpha_val - start_alpha) * progress
+                    progress_start = global_words_processed / total_words_all_epochs
+                    progress_start = min(progress_start, 1.0)
+                    chunk_alpha_start = start_alpha + (min_alpha_val - start_alpha) * progress_start
                     
-                    # Estimate words in this chunk for end alpha
-                    # Use average words per sentence from corpus stats
-                    avg_words_per_sent = self.corpus_word_count / max(1, sum(1 for _ in []))  # Can't easily compute
-                    # Rough estimate: chunk has about chunk_size * avg_sentence_length words
-                    estimated_chunk_words = len(chunk) * (self.corpus_word_count / max(1, len(chunk) * chunk_count))
+                    # Estimate words in this chunk for end alpha calculation
+                    estimated_chunk_words = sum(len(sent) for sent in chunk)
                     progress_end = min((global_words_processed + estimated_chunk_words) / total_words_all_epochs, 1.0)
                     chunk_alpha_end = start_alpha + (min_alpha_val - start_alpha) * progress_end
                 else:
@@ -740,23 +751,28 @@ class Word2Vec:
                     chunk_alpha_end = start_alpha
                 
                 # Train on this chunk
-                chunk_loss, chunk_examples_count, chunk_words_count = word2vec_c.train_epoch(
+                # LR decay within chunk is handled by Cython based on sentence progress
+                chunk_loss, chunk_examples_count, chunk_words_count, new_random_state = word2vec_c.train_sentences(
                     self.W,
                     self.W_prime,
-                    chunk,  # Pass the chunk (a list) to Cython
+                    chunk,
                     self.vocab,
                     sample_ints,
+                    self._cum_table,
                     self.sample > 0,
                     self.window,
                     self.shrink_windows,
                     chunk_alpha_start,
                     chunk_alpha_end,
-                    len(chunk) * 10,  # Rough estimate for intra-chunk LR decay
                     None,  # No callback for streaming (we handle progress in Python)
-                    chunk_size,  # callback_every_n_sentences (won't be called with None callback)
+                    batch_size,
                     self.sg,
+                    self.negative,
+                    self.cbow_mean,
+                    self._get_random_state(),
                     calculate_loss,
                 )
+                self._set_random_state(new_random_state)
                 
                 # Accumulate stats
                 epoch_loss += chunk_loss
@@ -971,10 +987,8 @@ class Word2Vec:
                 progress_bar.set_postfix_str(postfix_str)
                 progress_bar.update(batch_words)  # Update by words processed, not examples
         
-        # Callback interval: report every N sentences (tune for responsiveness vs overhead)
-        # With smaller buffer sizes (50K words), we want more frequent callbacks
-        # Aim for ~50-100 callbacks per epoch for smooth progress
-        callback_interval = max(100, min(5000, num_sentences // 50))
+        # batch_size controls how many words are processed per training batch
+        # Callback is called after each batch completes
         
         # Compute per-epoch start and end alpha for smooth linear interpolation
         # Alpha decays linearly from start_alpha to min_alpha across all epochs
@@ -988,28 +1002,29 @@ class Word2Vec:
             epoch_start_alpha = start_alpha
             epoch_end_alpha = start_alpha
         
-        # Total words expected for this epoch (for intra-epoch LR decay)
-        # Use corpus_word_count which is the exact count of in-vocab tokens
-        total_words_for_decay = self.corpus_word_count if decay_alpha else 0
-        
-        # Call the unified Cython function for the entire epoch
-        epoch_loss, examples_processed_in_epoch, words_processed = word2vec_c.train_epoch(
+        # Train all sentences for this epoch
+        # LR decays from epoch_start_alpha to epoch_end_alpha based on sentence progress
+        epoch_loss, examples_processed_in_epoch, words_processed, new_random_state = word2vec_c.train_sentences(
             self.W,
             self.W_prime,
             sentences,
             self.vocab,
             sample_ints,
+            self._cum_table,
             self.sample > 0,
             self.window,
             self.shrink_windows,
             epoch_start_alpha,
             epoch_end_alpha,
-            total_words_for_decay,
             progress_callback if calculate_loss else None,
-            callback_interval,
-            self.sg,  # sg parameter selects Skip-gram vs CBOW
-            calculate_loss,  # compute_loss parameter
+            batch_size,
+            self.sg,
+            self.negative,
+            self.cbow_mean,
+            self._get_random_state(),
+            calculate_loss,
         )
+        self._set_random_state(new_random_state)
         
         total_examples_processed += examples_processed_in_epoch
         batch_count = progress_state['batch_count']
@@ -1036,18 +1051,19 @@ class Word2Vec:
         
         return epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha
 
-    def get_vector(self, word: str, normalize: bool = False) -> Optional[np.ndarray]:
+    def get_vector(self, word: str, normalize: bool = False) -> np.ndarray:
         """
         Get the vector for a word.
         
-        Parameters
-        ----------
         Args:
             word: Input word.
             normalize: If True, return the normalized vector (unit length).
         
         Returns:
-            Word vector.
+            Word vector as numpy array of shape (vector_size,).
+        
+        Raises:
+            KeyError: If word is not in vocabulary.
         """
         if word in self.vocab:
             vector = self.W[self.vocab[word]]
@@ -1141,6 +1157,10 @@ class Word2Vec:
         """
         Save the model to a file.
         
+        Saves all model parameters, vocabulary, and trained vectors. Training-specific
+        parameters (alpha, min_alpha, epochs, etc.) are not saved as they are only
+        needed during training, not inference.
+        
         Args:
             path: Path to save the model.
         """
@@ -1148,6 +1168,8 @@ class Word2Vec:
             'vocab': self.vocab,
             'index2word': self.index2word,
             'word_counts': dict(self.word_counts),
+            'corpus_word_count': self.corpus_word_count,
+            'total_corpus_tokens': self.total_corpus_tokens,
             'vector_size': self.vector_size,
             'window': self.window,
             'min_word_count': self.min_word_count,
@@ -1200,6 +1222,11 @@ class Word2Vec:
         model.word_counts = Counter(model_data.get('word_counts', {}))
         model.W = model_data['W']
         model.W_prime = model_data['W_prime']
+        model.vocab_size = len(model.vocab)
+        
+        # Restore corpus statistics (for potential further training or analysis)
+        model.corpus_word_count = model_data.get('corpus_word_count', sum(model.word_counts.values()))
+        model.total_corpus_tokens = model_data.get('total_corpus_tokens', model.corpus_word_count)
         
         return model
 
@@ -1376,7 +1403,6 @@ class TempRefWord2Vec(Word2Vec):
         self.combined_corpus = []
         
         # Calculate vocab counts for each period before combining
-        from collections import Counter
         self.period_vocab_counts = {}
         
         for i, (corpus, label) in enumerate(zip(tagged_corpora, labels)):
@@ -1540,8 +1566,6 @@ class TempRefWord2Vec(Word2Vec):
         def current_time_str() -> str:
             return time.strftime("%H:%M:%S")
         
-        num_sentences = len(sentences)
-        
         # Ensure temporal index map is built
         if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
             self._build_temporal_index_map()
@@ -1616,8 +1640,6 @@ class TempRefWord2Vec(Word2Vec):
                 progress_bar.set_postfix_str(postfix_str)
                 progress_bar.update(batch_words)  # Update by words processed
         
-        callback_interval = max(100, min(5000, num_sentences // 50))
-        
         # Compute per-epoch start and end alpha for smooth linear interpolation
         # Alpha decays linearly from start_alpha to min_alpha across all epochs
         min_alpha_val = self.min_alpha if self.min_alpha else start_alpha
@@ -1630,29 +1652,30 @@ class TempRefWord2Vec(Word2Vec):
             epoch_start_alpha = start_alpha
             epoch_end_alpha = start_alpha
         
-        # Total words expected for this epoch (for intra-epoch LR decay)
-        # Use corpus_word_count which is the exact count of in-vocab tokens
-        total_words_for_decay = self.corpus_word_count if decay_alpha else 0
-        
-        # Call the unified Cython function for temporal training
-        epoch_loss, examples_processed_in_epoch, words_processed = word2vec_c.train_epoch_temporal(
+        # Train all sentences for this epoch with temporal mapping
+        # LR decays from epoch_start_alpha to epoch_end_alpha based on sentence progress
+        epoch_loss, examples_processed_in_epoch, words_processed, new_random_state = word2vec_c.train_sentences_temporal(
             self.W,
             self.W_prime,
             sentences,
             self.vocab,
             self.temporal_index_map,
             sample_ints,
+            self._cum_table,
             self.sample > 0,
             self.window,
             self.shrink_windows,
             epoch_start_alpha,
             epoch_end_alpha,
-            total_words_for_decay,
             progress_callback if calculate_loss else None,
-            callback_interval,
-            self.sg,  # sg parameter selects Skip-gram vs CBOW
-            calculate_loss,  # compute_loss parameter
+            batch_size,
+            self.sg,
+            self.negative,
+            self.cbow_mean,
+            self._get_random_state(),
+            calculate_loss,
         )
+        self._set_random_state(new_random_state)
         
         total_examples_processed += examples_processed_in_epoch
         batch_count = progress_state['batch_count']
@@ -1673,9 +1696,13 @@ class TempRefWord2Vec(Word2Vec):
             ex_per_sec = examples_processed_in_epoch / elapsed if elapsed > 0 else 0
             print(f"[{current_time_str()}] Epoch {epoch+1}/{epochs} completed | examples={examples_processed_in_epoch:,} | words={words_processed:,} | avg_loss={recent_avg:.6f} | {ex_per_sec:.0f} ex/s")
         
+        # Set current_alpha to the end-of-epoch value (epoch_end_alpha was computed above)
+        # This ensures correct alpha is returned even when callback wasn't used
+        current_alpha = epoch_end_alpha
+        
         return epoch_loss, examples_processed_in_epoch, batch_count, total_examples_processed, current_alpha
     
-    def train(self, sentences: Optional[List[str]] = None) -> Optional[float]:
+    def train(self, sentences: Optional[List[List[str]]] = None) -> Optional[float]:
         """
         Train the TempRefWord2Vec model using the preprocessed combined corpus.
         
@@ -1842,6 +1869,8 @@ class TempRefWord2Vec(Word2Vec):
             'vocab': self.vocab,
             'index2word': self.index2word,
             'word_counts': dict(self.word_counts),
+            'corpus_word_count': self.corpus_word_count,
+            'total_corpus_tokens': self.total_corpus_tokens,
             'vector_size': self.vector_size,
             'window': self.window,
             'min_word_count': self.min_word_count,
@@ -1943,6 +1972,11 @@ class TempRefWord2Vec(Word2Vec):
         model.word_counts = Counter(model_data.get('word_counts', {}))
         model.W = model_data['W']
         model.W_prime = model_data['W_prime']
+        model.vocab_size = len(model.vocab)
+        
+        # Restore corpus statistics
+        model.corpus_word_count = model_data.get('corpus_word_count', sum(model.word_counts.values()))
+        model.total_corpus_tokens = model_data.get('total_corpus_tokens', model.corpus_word_count)
         
         # Restore TempRefWord2Vec-specific data
         model.temporal_word_map = model_data['temporal_word_map']
