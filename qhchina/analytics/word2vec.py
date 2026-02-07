@@ -27,7 +27,7 @@ import numpy as np
 from collections import Counter
 from collections.abc import Iterator, Iterable
 from types import GeneratorType
-from typing import List, Dict, Tuple, Optional, Union, Callable
+from typing import List, Dict, Tuple, Optional, Union, Callable, Iterable
 from tqdm.auto import tqdm
 import warnings
 import time
@@ -56,10 +56,10 @@ class Word2Vec:
     - CBOW (sg=0): Each training example is (input_indices, output_idx) where inputs are context words
       and output is the center word.
     
-    Training is performed using optimized Cython routines with BLAS operations for maximum speed.
+    Training is performed using optimized Cython routines with BLAS operations.
     
     If ``sentences`` is provided at initialization, training starts immediately. Otherwise, call
-    :meth:`train` later with the sentences to train on.
+    ``train()`` later with the sentences to train on.
     
     Features:
     - CBOW and Skip-gram architectures
@@ -71,8 +71,12 @@ class Word2Vec:
     - Vocabulary size restriction with max_vocab_size parameter
     
     Args:
-        sentences (list of list of str, optional): Tokenized sentences for training. If provided,
-            training starts immediately during initialization.
+        sentences (list or iterable of list of str, optional): Tokenized sentences for training. 
+            Can be a list (fast path) or any iterable including generators (streaming path).
+            If provided, training starts immediately during initialization.
+            
+            Note: Single-use generators will only work for 1 epoch. For multi-epoch training,
+            use a list or restartable iterable.
         vector_size (int): Dimensionality of the word vectors (default: 100).
         window (int): Maximum distance between the current and predicted word (default: 5).
         min_word_count (int): Ignores all words with frequency lower than this (default: 5).
@@ -119,7 +123,7 @@ class Word2Vec:
     
     def __init__(
         self,
-        sentences: Optional[List[List[str]]] = None,
+        sentences: Optional[Iterable[List[str]]] = None,
         vector_size: int = 100,
         window: int = 5,
         min_word_count: int = 5,

@@ -1558,10 +1558,10 @@ class LDAGibbsSampler:
         
         Args:
             method: Dimensionality reduction method. Options:
-                   - 'pca': Principal Component Analysis (fast, linear)
-                   - 'tsne': t-SNE (slower, captures non-linear structure)
-                   - 'mds': Multidimensional Scaling (moderate speed)
-                   - 'umap': UMAP (requires umap-learn package, fast and effective)
+                   - 'pca': Principal Component Analysis
+                   - 'tsne': t-SNE
+                   - 'mds': Multidimensional Scaling
+                   - 'umap': UMAP (requires umap-learn package)
             n_clusters: If specified, apply k-means clustering and color by cluster instead of topic
             doc_labels: Optional list of document names/labels (same length as number of documents)
             show_labels: Whether to show document labels on the plot

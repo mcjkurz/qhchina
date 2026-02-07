@@ -1,7 +1,5 @@
 # .gitignore
 
-clean_cython.py
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
@@ -34,10 +32,6 @@ dist/
 .DS_Store
 
 # Local automation scripts (keep these local, don't commit)
-download_wheels.sh
-upload_to_pypi.sh
-release_to_pypi.sh
-make_docs.py
-make_docs.sh
+scripts/
 
 mytest/
