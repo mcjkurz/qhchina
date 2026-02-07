@@ -38,5 +38,6 @@ download_wheels.sh
 upload_to_pypi.sh
 release_to_pypi.sh
 make_docs.py
+make_docs.sh
 
 mytest/
