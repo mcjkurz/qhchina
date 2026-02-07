@@ -6,7 +6,7 @@ This script scans docs/pkg_docs/*/index.md for files with 'import_from' in their
 front matter, then generates API documentation from the specified Python modules.
 
 Usage:
-    python make_docs.py           # Generate all docs
+    python make_docs.py           # Generate all docs (writes to ../qhchina-web)
     python make_docs.py --check   # Check if docs are up-to-date (for CI)
     python make_docs.py --module preprocessing  # Generate for one module
 
@@ -531,10 +531,17 @@ def main():
                        help="Generate docs for a specific module only")
     parser.add_argument('--list-modules', action='store_true',
                        help="List available modules")
+    parser.add_argument('--docs-path', type=str,
+                       help="Path to docs directory (default: ../qhchina-web)")
     args = parser.parse_args()
     
     root_path = Path(__file__).parent
-    docs_path = root_path / 'docs'
+    if args.docs_path:
+        docs_path = Path(args.docs_path)
+        if not docs_path.is_absolute():
+            docs_path = root_path / docs_path
+    else:
+        docs_path = root_path / '..' / 'qhchina-web'
     
     # Discover all doc files with import_from in front matter
     discovered_modules = discover_doc_files(docs_path)
@@ -545,7 +552,7 @@ def main():
         return
     
     if args.list_modules:
-        print("Available modules (discovered from docs/pkg_docs/*/index.md):")
+        print(f"Available modules (discovered from {docs_path}/pkg_docs/*/index.md):")
         for name, config in sorted(discovered_modules.items()):
             imports = ', '.join(config['import_from'])
             print(f"  - {name}: {imports}")
