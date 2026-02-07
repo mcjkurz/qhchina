@@ -26,9 +26,9 @@ dist/
 .eggs/
 
 # Editor-specific files (optional, but common)
-.idea/  # IntelliJ IDEA
-.vscode/ # VS Code
-.cursor/ # Cursor AI
+.idea/
+.vscode/
+.cursor/
 
 # Macbook stuff
 .DS_Store
