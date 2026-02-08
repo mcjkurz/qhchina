@@ -8,7 +8,7 @@ THREAD SAFETY: This module is fully thread-safe. All state is passed as
 parameters to functions - there are no global mutable variables.
 
 Key optimizations:
-- Direct BLAS function calls via scipy.linalg.cython_blas
+- Raw BLAS function pointers (like Gensim) for zero-overhead calls
 - Vocabulary lookup happens inside Cython (with GIL, but no intermediate allocations)
 - Fixed-size stack-allocated buffers (like Gensim) for maximum performance
 - GIL released for actual training computations
@@ -25,8 +25,68 @@ cimport numpy as np
 from libc.string cimport memset
 from libc.math cimport exp, log
 
-# Import BLAS functions for optimized linear algebra (direct cython bindings)
-from scipy.linalg.cython_blas cimport sdot, saxpy, sscal
+# Import PyCapsule at module level for extracting raw BLAS pointers
+from cpython.pycapsule cimport PyCapsule_GetPointer
+
+# Import scipy BLAS module for extracting raw function pointers
+import scipy.linalg.blas as fblas
+
+# =============================================================================
+# BLAS Function Pointer Types and Extraction (like Gensim)
+# =============================================================================
+
+# Function pointer types for BLAS operations
+ctypedef float (*sdot_ptr)(const int *N, const float *X, const int *incX,
+                           const float *Y, const int *incY) noexcept nogil
+ctypedef void (*saxpy_ptr)(const int *N, const float *alpha, const float *X,
+                           const int *incX, float *Y, const int *incY) noexcept nogil
+ctypedef void (*sscal_ptr)(const int *N, const float *alpha, float *X,
+                           const int *incX) noexcept nogil
+ctypedef double (*dsdot_ptr)(const int *N, const float *X, const int *incX,
+                             const float *Y, const int *incY) noexcept nogil
+
+# Raw BLAS function pointers - extracted at module load for zero-overhead calls
+cdef sdot_ptr our_sdot
+cdef saxpy_ptr our_saxpy
+cdef sscal_ptr our_sscal
+
+# For detecting whether sdot returns float or double
+cdef dsdot_ptr dsdot_ptr_global
+
+# Wrapper functions for when sdot returns different types
+cdef float our_sdot_double(const int *N, const float *X, const int *incX,
+                           const float *Y, const int *incY) noexcept nogil:
+    """Wrapper when BLAS sdot returns double."""
+    return <float>dsdot_ptr_global(N, X, incX, Y, incY)
+
+cdef float our_sdot_float(const int *N, const float *X, const int *incX,
+                          const float *Y, const int *incY) noexcept nogil:
+    """Direct call when BLAS sdot returns float."""
+    return (<sdot_ptr>dsdot_ptr_global)(N, X, incX, Y, incY)
+
+# Fallback implementations when BLAS is not available
+cdef float our_sdot_noblas(const int *N, const float *X, const int *incX,
+                           const float *Y, const int *incY) noexcept nogil:
+    """Pure Cython dot product fallback."""
+    cdef int i
+    cdef float result = 0.0
+    for i in range(N[0]):
+        result += X[i * incX[0]] * Y[i * incY[0]]
+    return result
+
+cdef void our_saxpy_noblas(const int *N, const float *alpha, const float *X,
+                           const int *incX, float *Y, const int *incY) noexcept nogil:
+    """Pure Cython saxpy fallback."""
+    cdef int i
+    for i in range(N[0]):
+        Y[i * incY[0]] += alpha[0] * X[i * incX[0]]
+
+cdef void our_sscal_noblas(const int *N, const float *alpha, float *X,
+                           const int *incX) noexcept nogil:
+    """Pure Cython sscal fallback."""
+    cdef int i
+    for i in range(N[0]):
+        X[i * incX[0]] *= alpha[0]
 
 # Define C types
 ctypedef np.float32_t REAL_t
@@ -57,6 +117,60 @@ cdef REAL_t[EXP_TABLE_SIZE] EXP_TABLE
 cdef REAL_t[EXP_TABLE_SIZE] LOG_TABLE
 cdef bint _tables_initialized = False
 
+def _init_blas():
+    """
+    Initialize BLAS function pointers by extracting raw C pointers from scipy.
+    
+    Returns:
+        0 if sdot returns double
+        1 if sdot returns float  
+        2 if using pure Cython fallback (no BLAS)
+    """
+    global our_sdot, our_saxpy, our_sscal, dsdot_ptr_global
+    
+    cdef float x[1]
+    cdef float y[1]
+    cdef int size = 1
+    cdef double d_res
+    cdef float *p_res
+    cdef float expected = 0.1
+    
+    x[0] = 10.0
+    y[0] = 0.01
+    
+    # Try to extract raw function pointers from scipy BLAS
+    try:
+        # Extract raw C function pointers using PyCapsule
+        # scipy exposes these via _cpointer attribute
+        dsdot_ptr_global = <dsdot_ptr>PyCapsule_GetPointer(fblas.sdot._cpointer, NULL)
+        our_saxpy = <saxpy_ptr>PyCapsule_GetPointer(fblas.saxpy._cpointer, NULL)
+        our_sscal = <sscal_ptr>PyCapsule_GetPointer(fblas.sscal._cpointer, NULL)
+        
+        # Test whether sdot returns float or double
+        d_res = dsdot_ptr_global(&size, x, &ONE, y, &ONE)
+        p_res = <float *>&d_res
+        
+        if abs(d_res - expected) < 0.0001:
+            # sdot returns double, need wrapper
+            our_sdot = our_sdot_double
+            return 0
+        elif abs(p_res[0] - expected) < 0.0001:
+            # sdot returns float, can use directly
+            our_sdot = our_sdot_float
+            return 1
+        else:
+            # Unexpected behavior, fall back to pure Cython
+            our_sdot = our_sdot_noblas
+            our_saxpy = our_saxpy_noblas
+            our_sscal = our_sscal_noblas
+            return 2
+    except:
+        # BLAS not available, use pure Cython fallback
+        our_sdot = our_sdot_noblas
+        our_saxpy = our_saxpy_noblas
+        our_sscal = our_sscal_noblas
+        return 2
+
 cdef void _init_tables() noexcept:
     """Initialize sigmoid lookup tables (called once at module load)."""
     global _tables_initialized
@@ -72,7 +186,8 @@ cdef void _init_tables() noexcept:
     
     _tables_initialized = True
 
-# Initialize tables at module import
+# Initialize BLAS and tables at module import
+FAST_VERSION = _init_blas()
 _init_tables()
 
 
@@ -151,7 +266,7 @@ cdef inline unsigned long long train_sg_pair(
             label = <REAL_t>0.0
         
         row2 = <long long>target_index * <long long>size
-        f_dot = sdot(&size, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
+        f_dot = our_sdot(&size, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
         
         if f_dot <= -MAX_EXP or f_dot >= MAX_EXP:
             continue
@@ -168,10 +283,10 @@ cdef inline unsigned long long train_sg_pair(
                 log_e_f_dot = LOG_TABLE[<int>((f_dot_for_loss + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
                 running_loss[0] = running_loss[0] - log_e_f_dot
         
-        saxpy(&size, &g, &syn1neg[row2], &ONE, work, &ONE)
-        saxpy(&size, &g, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
+        our_saxpy(&size, &g, &syn1neg[row2], &ONE, work, &ONE)
+        our_saxpy(&size, &g, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
     
-    saxpy(&size, &ONEF, work, &ONE, &syn0[row1], &ONE)
+    our_saxpy(&size, &ONEF, work, &ONE, &syn0[row1], &ONE)
     
     return next_random
 
@@ -211,7 +326,7 @@ cdef inline unsigned long long train_cbow_pair(
     memset(neu1, 0, size * cython.sizeof(REAL_t))
     count = <REAL_t>0.0
     for m in range(context_len):
-        saxpy(&size, &ONEF, &syn0[<long long>context_indices[m] * <long long>size], &ONE, neu1, &ONE)
+        our_saxpy(&size, &ONEF, &syn0[<long long>context_indices[m] * <long long>size], &ONE, neu1, &ONE)
         count += ONEF
     
     if count < <REAL_t>0.5:
@@ -219,7 +334,7 @@ cdef inline unsigned long long train_cbow_pair(
     
     inv_count = ONEF / count
     if cbow_mean:
-        sscal(&size, &inv_count, neu1, &ONE)
+        our_sscal(&size, &inv_count, neu1, &ONE)
     
     memset(work, 0, size * cython.sizeof(REAL_t))
     
@@ -235,7 +350,7 @@ cdef inline unsigned long long train_cbow_pair(
             label = <REAL_t>0.0
         
         row2 = <long long>target_index * <long long>size
-        f_dot = sdot(&size, neu1, &ONE, &syn1neg[row2], &ONE)
+        f_dot = our_sdot(&size, neu1, &ONE, &syn1neg[row2], &ONE)
         
         if f_dot <= -MAX_EXP or f_dot >= MAX_EXP:
             continue
@@ -252,14 +367,14 @@ cdef inline unsigned long long train_cbow_pair(
                 log_e_f_dot = LOG_TABLE[<int>((f_dot_for_loss + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
                 running_loss[0] = running_loss[0] - log_e_f_dot
         
-        saxpy(&size, &g, &syn1neg[row2], &ONE, work, &ONE)
-        saxpy(&size, &g, neu1, &ONE, &syn1neg[row2], &ONE)
+        our_saxpy(&size, &g, &syn1neg[row2], &ONE, work, &ONE)
+        our_saxpy(&size, &g, neu1, &ONE, &syn1neg[row2], &ONE)
     
     if not cbow_mean:
-        sscal(&size, &inv_count, work, &ONE)
+        our_sscal(&size, &inv_count, work, &ONE)
     
     for m in range(context_len):
-        saxpy(&size, &ONEF, work, &ONE, &syn0[<long long>context_indices[m] * <long long>size], &ONE)
+        our_saxpy(&size, &ONEF, work, &ONE, &syn0[<long long>context_indices[m] * <long long>size], &ONE)
     
     return next_random
 
