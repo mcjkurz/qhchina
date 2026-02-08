@@ -40,12 +40,10 @@ cdef REAL_t ONEF = <REAL_t>1.0
 DEF EXP_TABLE_SIZE = 1000
 DEF MAX_EXP = 6.0
 
-# Maximum words per batch - fixed at compile time (like Gensim's MAX_SENTENCE_LEN)
-# This determines the size of stack-allocated buffers for training
-DEF MAX_WORDS_IN_BATCH = 10000
-
-# Export to Python so the Word2Vec class can use it
-MAX_BATCH_SIZE = MAX_WORDS_IN_BATCH
+# Maximum words per batch - fixed at compile time (10240)
+# This determines the size of stack-allocated buffers for training.
+# Batches exceeding this limit are safely truncated.
+DEF MAX_WORDS_IN_BATCH = 10240
 
 # =============================================================================
 # Sigmoid Lookup Tables (read-only, initialized once at module load)
@@ -413,8 +411,9 @@ def train_batch(
     batched by word count in Python. It uses fixed-size stack-allocated buffers
     (like Gensim) for maximum performance.
     
-    IMPORTANT: The batch should contain at most MAX_BATCH_SIZE (10000) words.
-    Python is responsible for batching by word count before calling this function.
+    IMPORTANT: The batch should contain at most MAX_WORDS_IN_BATCH (10240) words.
+    Words beyond this limit will be dropped. Python is responsible for batching 
+    by word count before calling this function.
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size)
@@ -569,8 +568,9 @@ def train_batch_temporal(
     Context words are mapped to base forms, center words keep temporal variant.
     Uses fixed-size stack-allocated buffers (like Gensim) for maximum performance.
     
-    IMPORTANT: The batch should contain at most MAX_BATCH_SIZE (10000) words.
-    Python is responsible for batching by word count before calling this function.
+    IMPORTANT: The batch should contain at most MAX_WORDS_IN_BATCH (10240) words.
+    Words beyond this limit will be dropped. Python is responsible for batching 
+    by word count before calling this function.
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size)

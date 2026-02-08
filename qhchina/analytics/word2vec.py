@@ -35,15 +35,9 @@ from .cython_ext import word2vec as word2vec_c
 
 logger = logging.getLogger("qhchina.analytics.word2vec")
 
-# Import the compile-time constant from Cython (matches Gensim's MAX_WORDS_IN_BATCH)
-MAX_BATCH_SIZE = word2vec_c.MAX_BATCH_SIZE
-
-
 __all__ = [
     'Word2Vec',
     'TempRefWord2Vec',
-    'sample_sentences_to_token_count',
-    'add_corpus_tags',
 ]
 
 
@@ -91,7 +85,9 @@ class Word2Vec:
         max_vocab_size (int): Maximum vocabulary size to keep, keeping the most frequent words.
             None means no limit (keep all words above min_word_count).
         epochs (int): Number of training iterations over the corpus (default: 1).
-        batch_size (int): Maximum words per training batch (default: 10000).
+        batch_size (int): Target number of words per training batch (default: 10240). 
+            Note that the Cython training buffer is limited to 10240 words, regardless of the batch_size parameter; 
+            words beyond this limit will be dropped from the batch, which mimics Gensim behavior.
         callbacks (list of callable, optional): Callback functions to call after each epoch.
         calculate_loss (bool): Whether to calculate and return the final loss (default: True).
         total_examples (int, optional): Total number of training examples per epoch. When provided 
@@ -137,7 +133,7 @@ class Word2Vec:
         max_vocab_size: Optional[int] = None,
         verbose: bool = False,
         epochs: int = 1,
-        batch_size: int = 10000,
+        batch_size: int = 10240,
         callbacks: Optional[List[Callable]] = None,
         calculate_loss: bool = True,
         total_examples: Optional[int] = None,
@@ -168,7 +164,6 @@ class Word2Vec:
         self.vocab = {}  # word -> index (direct mapping)
         self.index2word = []  # index -> word
         self.word_counts = Counter()  # word -> count
-        self.vocab_size = 0  # Number of words in vocabulary
         self.corpus_word_count = 0  # Token count for words IN vocabulary
         self.total_corpus_tokens = 0  # Total token count (including OOV words)
         
@@ -181,8 +176,6 @@ class Word2Vec:
         self.epochs = epochs
         if batch_size <= 0:
             raise ValueError("batch_size must be greater than 0")
-        if batch_size > MAX_BATCH_SIZE:
-            raise ValueError(f"batch_size cannot exceed {MAX_BATCH_SIZE} (compile-time limit)")
         self.batch_size = batch_size
         self.callbacks = callbacks
         self.calculate_loss = calculate_loss
@@ -252,10 +245,9 @@ class Word2Vec:
         # Compute token counts for example estimation
         self.total_corpus_tokens = sum(self.word_counts.values())  # All tokens (including OOV)
         self.corpus_word_count = sum(self.word_counts[word] for word in self.vocab)  # Vocab tokens only
-        self.vocab_size = len(self.vocab)
         
         if self.verbose:
-            logger.info(f"Vocabulary built: {self.vocab_size:,} words, {self.corpus_word_count:,} tokens in vocab, {self.total_corpus_tokens:,} total tokens")
+            logger.info(f"Vocabulary built: {len(self.vocab):,} words, {self.corpus_word_count:,} tokens in vocab, {self.total_corpus_tokens:,} total tokens")
 
     def _estimate_example_count(self, sample_ints: np.ndarray) -> int:
         """
@@ -409,13 +401,15 @@ class Word2Vec:
         Compute subsampling thresholds as uint32 integers for fast comparison in Cython.
         
         Returns numpy array where sample_ints[word_id] is the threshold value.
-        A word is kept if random_uint32 >= sample_ints[word_id].
+        In Cython, a word is kept if sample_ints[word_id] >= random_uint32.
+        
+        Higher keep probability → higher threshold → more likely to be kept.
         """
-        vocab_size = len(self.vocab)
-        sample_ints = np.zeros(vocab_size, dtype=np.uint32)
+        sample_ints = np.zeros(len(self.vocab), dtype=np.uint32)
         
         if self.sample <= 0:
-            # No subsampling - set thresholds to 0 (always keep)
+            # No subsampling - thresholds don't matter because use_subsampling=False
+            # in the Cython call, so this array won't be used for comparisons.
             return sample_ints
         
         total_words = self.corpus_word_count
@@ -430,13 +424,13 @@ class Word2Vec:
             keep_prob = np.sqrt(self.sample / word_freq) + (self.sample / word_freq)
             keep_prob = min(keep_prob, 1.0)
             
-            # Convert to uint32 threshold: word is kept if random < threshold
-            # So threshold = keep_prob * 2^32 (we use 2^32 - 1 as max)
+            # Convert to uint32 threshold: word is kept if threshold >= random
+            # So threshold = keep_prob * (2^32 - 1)
             sample_ints[idx] = min(np.uint32(keep_prob * 4294967295.0), np.uint32(4294967295))
         
         return sample_ints
     
-    def _iter_batches(self, sentences: Iterable[List[str]], batch_words: int = 10000):
+    def _iter_batches(self, sentences: Iterable[List[str]], batch_words: int = 10240):
         """
         Yield batches of sentences, batched by total word count (like Gensim).
         
@@ -446,7 +440,7 @@ class Word2Vec:
         
         Args:
             sentences: Iterable of tokenized sentences.
-            batch_words: Maximum number of words per batch (default 10000).
+            batch_words: Maximum number of words per batch (default 10240).
         
         Yields:
             List of sentences where total word count <= batch_words.
@@ -848,7 +842,7 @@ class Word2Vec:
         model = cls(
             vector_size=model_data['vector_size'],
             window=model_data['window'],
-            min_word_count=model_data.get('min_word_count', model_data.get('min_count', 5)),  # Backward compatibility
+            min_word_count=model_data['min_word_count'],
             negative=model_data['negative'],
             ns_exponent=model_data['ns_exponent'],
             cbow_mean=model_data['cbow_mean'],
@@ -860,90 +854,15 @@ class Word2Vec:
         
         model.vocab = model_data['vocab']
         model.index2word = model_data['index2word']
-        # Convert the word_counts back to a Counter
         model.word_counts = Counter(model_data.get('word_counts', {}))
         model.W = model_data['W']
         model.W_prime = model_data['W_prime']
-        model.vocab_size = len(model.vocab)
         
         # Restore corpus statistics (for potential further training or analysis)
         model.corpus_word_count = model_data.get('corpus_word_count', sum(model.word_counts.values()))
         model.total_corpus_tokens = model_data.get('total_corpus_tokens', model.corpus_word_count)
         
         return model
-
-
-# Helper functions for TempRefWord2Vec
-def sample_sentences_to_token_count(
-    corpus: List[List[str]], 
-    target_tokens: int,
-    seed: Optional[int] = None
-) -> List[List[str]]:
-    """
-    Samples sentences from a corpus until the target token count is reached.
-    
-    This function randomly selects sentences from the corpus until the total number
-    of tokens reaches or slightly exceeds the target count. This is useful for balancing
-    corpus sizes when comparing different time periods or domains.
-    
-    Args:
-        corpus (List[List[str]]): A list of sentences, where each sentence is a list 
-            of tokens.
-        target_tokens (int): The target number of tokens to sample.
-        seed (Optional[int]): Random seed for reproducibility. If None, uses global seed.
-    
-    Returns:
-        List[List[str]]: A list of sampled sentences with token count close to 
-            target_tokens.
-    """
-    rng = get_rng(resolve_seed(seed))
-    sampled_sentences = []
-    current_tokens = 0
-    sentence_indices = list(range(len(corpus)))
-    rng.shuffle(sentence_indices)
-    
-    for idx in sentence_indices:
-        sentence = corpus[idx]
-        if current_tokens + len(sentence) <= target_tokens:
-            sampled_sentences.append(sentence)
-            current_tokens += len(sentence)
-        if current_tokens >= target_tokens:
-            break
-    return sampled_sentences
-
-
-def add_corpus_tags(
-    corpora: List[List[List[str]]], 
-    labels: List[str], 
-    target_words: List[str]
-) -> List[List[List[str]]]:
-    """
-    Add corpus-specific tags to target words in all corpora at once.
-    
-    Args:
-        corpora: List of corpora (each corpus is list of tokenized sentences)
-        labels: List of corpus labels
-        target_words: List of words to tag
-    
-    Returns:
-        List of processed corpora where target words have been tagged with their corpus label
-    """
-    processed_corpora = []
-    target_words_set = set(target_words)
-    
-    for corpus, label in zip(corpora, labels):
-        processed_corpus = []
-        for sentence in corpus:
-            processed_sentence = []
-            for token in sentence:
-                if token in target_words_set:
-                    processed_sentence.append(f"{token}_{label}")
-                else:
-                    processed_sentence.append(token)
-            processed_corpus.append(processed_sentence)
-        processed_corpora.append(processed_corpus)
-    
-    return processed_corpora
 
 
 class TempRefWord2Vec(Word2Vec):
@@ -987,6 +906,76 @@ class TempRefWord2Vec(Word2Vec):
         model.most_similar("bread_1900s")  # Words similar to "bread" in the 1900s
     """
     
+    @staticmethod
+    def _sample_sentences_to_token_count(
+        corpus: List[List[str]], 
+        target_tokens: int,
+        seed: Optional[int] = None
+    ) -> List[List[str]]:
+        """
+        Sample sentences from a corpus until the target token count is reached.
+        
+        This method randomly selects sentences from the corpus until the total number
+        of tokens reaches or slightly exceeds the target count. This is useful for balancing
+        corpus sizes when comparing different time periods or domains.
+        
+        Args:
+            corpus: A list of sentences, where each sentence is a list of tokens.
+            target_tokens: The target number of tokens to sample.
+            seed: Random seed for reproducibility. If None, uses global seed.
+        
+        Returns:
+            A list of sampled sentences with token count close to target_tokens.
+        """
+        rng = get_rng(resolve_seed(seed))
+        sampled_sentences = []
+        current_tokens = 0
+        sentence_indices = list(range(len(corpus)))
+        rng.shuffle(sentence_indices)
+        
+        for idx in sentence_indices:
+            sentence = corpus[idx]
+            if current_tokens + len(sentence) <= target_tokens:
+                sampled_sentences.append(sentence)
+                current_tokens += len(sentence)
+            if current_tokens >= target_tokens:
+                break
+        return sampled_sentences
+
+    @staticmethod
+    def _add_corpus_tags(
+        corpora: List[List[List[str]]], 
+        labels: List[str], 
+        target_words: List[str]
+    ) -> List[List[List[str]]]:
+        """
+        Add corpus-specific tags to target words in all corpora at once.
+        
+        Args:
+            corpora: List of corpora (each corpus is list of tokenized sentences).
+            labels: List of corpus labels.
+            target_words: List of words to tag.
+        
+        Returns:
+            List of processed corpora where target words have been tagged with their corpus label.
+        """
+        processed_corpora = []
+        target_words_set = set(target_words)
+        
+        for corpus, label in zip(corpora, labels):
+            processed_corpus = []
+            for sentence in corpus:
+                processed_sentence = []
+                for token in sentence:
+                    if token in target_words_set:
+                        processed_sentence.append(f"{token}_{label}")
+                    else:
+                        processed_sentence.append(token)
+                processed_corpus.append(processed_sentence)
+            processed_corpora.append(processed_corpus)
+        
+        return processed_corpora
+
     def __init__(
         self,
         corpora: List[List[List[str]]],  # List of corpora, each corpus is a list of sentences
@@ -1030,13 +1019,13 @@ class TempRefWord2Vec(Word2Vec):
                 if corpus_token_counts[i] <= target_token_count:
                     balanced_corpora.append(corpus)
                 else:
-                    sampled_corpus = sample_sentences_to_token_count(corpus, target_token_count)
+                    sampled_corpus = self._sample_sentences_to_token_count(corpus, target_token_count)
                     balanced_corpora.append(sampled_corpus)
         
             # Add corpus tags to the corpora
-            tagged_corpora = add_corpus_tags(balanced_corpora, labels, targets)
+            tagged_corpora = self._add_corpus_tags(balanced_corpora, labels, targets)
         else:
-            tagged_corpora = add_corpus_tags(corpora, labels, targets)
+            tagged_corpora = self._add_corpus_tags(corpora, labels, targets)
 
         # Initialize combined corpus before using it
         self.combined_corpus = []
@@ -1060,12 +1049,6 @@ class TempRefWord2Vec(Word2Vec):
         if verbose and not all(len(corpus) == 0 for corpus in corpora):
             logger.info(f"Combined corpus: {len(self.combined_corpus)} sentences, {sum(len(s) for s in self.combined_corpus)} tokens")
         
-        # clear memory
-        del tagged_corpora
-        if balance:
-            del balanced_corpora
-            if 'sampled_corpus' in locals():
-                del sampled_corpus
         
         # Create temporal word map: maps base words to their temporal variants
         self.temporal_word_map = {}
@@ -1150,8 +1133,6 @@ class TempRefWord2Vec(Word2Vec):
             logger.warning(f"Skipped {len(skipped_base_words)} base words with no variant counts: {skipped_base_words[:5]}...")
         
         if added_base_words > 0:
-            # Update vocabulary size
-            self.vocab_size = len(self.vocab)
             # Add the base word counts to corpus total (for proper frequency normalization)
             self.corpus_word_count += total_base_count
         
@@ -1326,9 +1307,8 @@ class TempRefWord2Vec(Word2Vec):
         """
         Get the list of target words available for semantic change analysis.
         
-        Returns
-        -------
-        List of target words that were specified during model initialization
+        Returns:
+            List of target words that were specified during model initialization.
         """
         return self.targets.copy()
 
@@ -1336,9 +1316,8 @@ class TempRefWord2Vec(Word2Vec):
         """
         Get the list of time period labels used in the model.
         
-        Returns
-        -------
-        List of time period labels that were specified during model initialization
+        Returns:
+            List of time period labels that were specified during model initialization.
         """
         return self.labels.copy()
     
@@ -1346,21 +1325,15 @@ class TempRefWord2Vec(Word2Vec):
         """
         Get vocabulary counts for a specific period or all periods.
         
-        Parameters
-        ----------
-        period : str, optional
-            The period label to get vocab counts for. If None, returns all periods.
+        Args:
+            period: The period label to get vocab counts for. If None, returns all periods.
             
-        Returns
-        -------
-        Union[Dict[str, Counter], Counter]
-            If period is None: dictionary mapping period labels to Counter objects
-            If period is specified: Counter object for that specific period
+        Returns:
+            If period is None: dictionary mapping period labels to Counter objects.
+            If period is specified: Counter object for that specific period.
             
-        Raises
-        -------
-        ValueError
-            If the specified period is not found in the model
+        Raises:
+            ValueError: If the specified period is not found in the model.
         """
         if not hasattr(self, 'period_vocab_counts'):
             raise AttributeError("Vocabulary counts not available. Make sure the model has been initialized properly.")
@@ -1479,7 +1452,7 @@ class TempRefWord2Vec(Word2Vec):
             targets=targets,
             vector_size=model_data['vector_size'],
             window=model_data['window'],
-            min_word_count=model_data.get('min_word_count', model_data.get('min_count', 5)),  # Backward compatibility
+            min_word_count=model_data['min_word_count'],
             negative=model_data['negative'],
             ns_exponent=model_data['ns_exponent'],
             cbow_mean=model_data['cbow_mean'],
@@ -1496,7 +1469,6 @@ class TempRefWord2Vec(Word2Vec):
         model.word_counts = Counter(model_data.get('word_counts', {}))
         model.W = model_data['W']
         model.W_prime = model_data['W_prime']
-        model.vocab_size = len(model.vocab)
         
         # Restore corpus statistics
         model.corpus_word_count = model_data.get('corpus_word_count', sum(model.word_counts.values()))
