@@ -1154,7 +1154,6 @@ class TestWord2VecLearning:
         model.build_vocab(larger_documents)
         model._initialize_vectors()
         model._prepare_noise_distribution()
-        model._calculate_discard_probs()
         
         # Store initial vectors
         initial_vectors = model.W.copy()
