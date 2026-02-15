@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.1.4"
+version = "0.1.5"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
