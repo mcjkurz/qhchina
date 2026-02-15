@@ -65,7 +65,15 @@ extensions = [
 
 # Main setup configuration
 setup(
-    packages=find_packages(),
+    packages=find_packages(exclude=[
+        "tests", "tests.*",
+        "test", "test.*",
+        "mytest", "mytest.*",
+        "scripts", "scripts.*",
+        "venv", "venv.*",
+        "build", "build.*",
+        "dist", "dist.*",
+    ]),
     ext_modules=cythonize(
         extensions,
         compiler_directives={

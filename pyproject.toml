@@ -47,7 +47,15 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-exclude = ["tests", "test"]
+exclude = [
+    "tests", "tests.*",
+    "test", "test.*",
+    "mytest", "mytest.*",
+    "scripts", "scripts.*",
+    "venv", "venv.*",
+    "build", "build.*",
+    "dist", "dist.*",
+]
 
 [tool.setuptools]
 include-package-data = true
@@ -57,7 +65,7 @@ zip-safe = false
 "qhchina" = ["analytics/cython_ext/*.pyx", "data/**/*"]
 
 [tool.setuptools.exclude-package-data]
-"*" = ["*.c", "*.so", "*.pyd"]
+"*" = ["*.c", "*.cpp", "*.so", "*.pyd"]
 
 [tool.pytest.ini_options]
 filterwarnings = [

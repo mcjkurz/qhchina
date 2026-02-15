@@ -1,7 +1,13 @@
 name: Build Wheels
 
 on:
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: 'Publish wheels to PyPI after building'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build_wheels:
@@ -47,7 +53,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: pypa/cibuildwheel@v3.3.1
         env:
-          CIBW_ARCHS: "x86_64 arm64"
+          CIBW_ARCHS: "x86_64 arm64 universal2"
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"  # Build for Python 3.10-3.14
           
       # Upload artifacts
@@ -56,3 +62,33 @@ jobs:
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
+
+  # Publish to PyPI from GitHub's servers (fast + reliable)
+  publish:
+    name: Publish to PyPI
+    needs: build_wheels
+    if: ${{ inputs.publish_to_pypi }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for trusted publishing
+    environment: pypi
+
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: wheels-*
+          merge-multiple: true
+
+      - name: List wheels to publish
+        run: |
+          echo "Wheels to publish:"
+          ls -lh dist/*.whl
+          echo ""
+          echo "Total: $(ls dist/*.whl | wc -l) wheels"
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
