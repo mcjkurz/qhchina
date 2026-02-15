@@ -43,10 +43,10 @@ class TestFindCollocatesValidation:
             find_collocates(sample_documents, target_words=[])
     
     def test_invalid_method_raises_error(self, sample_documents):
-        """Test that invalid method raises NotImplementedError."""
+        """Test that invalid method raises ValueError."""
         from qhchina.analytics.collocations import find_collocates
         
-        with pytest.raises(NotImplementedError, match="not implemented"):
+        with pytest.raises(ValueError, match="Invalid method"):
             find_collocates(sample_documents, target_words=["我"], method="invalid")
     
     def test_horizon_with_sentence_method_raises_error(self, sample_documents):
@@ -527,6 +527,136 @@ class TestDeterministicWindowCalculations:
         assert "z" in collocates   # 1 position right in sentence 2
 
 
+class TestDeterministicStatisticsCalculations:
+    """
+    Deterministic tests that verify all collocation statistics (obs_local, obs_global,
+    exp_local, ratio_local) are calculated correctly for both sentence and window methods.
+    """
+    
+    def test_sentence_method_statistics(self):
+        """Verify all statistics are correct for sentence-based collocation."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # Controlled corpus where we can manually calculate expected values:
+        # - Total sentences: 10
+        # - Sentences with 'dog': 6  (indices 0, 2, 3, 5, 6, 7)
+        # - Sentences with 'cat': 5  (indices 1, 2, 4, 5, 7)
+        # - Sentences with both: 3   (indices 2, 5, 7)
+        sentences = [
+            ["the", "dog", "runs", "fast"],           # 0: dog only
+            ["the", "cat", "sleeps", "now"],          # 1: cat only
+            ["the", "dog", "and", "cat", "play"],     # 2: dog + cat
+            ["a", "dog", "barks", "loud"],            # 3: dog only
+            ["my", "cat", "meows", "soft"],           # 4: cat only
+            ["the", "dog", "chases", "cat"],          # 5: dog + cat
+            ["one", "dog", "sits", "here"],           # 6: dog only
+            ["dog", "meets", "cat", "today"],         # 7: dog + cat
+            ["bird", "flies", "high", "up"],          # 8: neither
+            ["fish", "swims", "deep", "down"],        # 9: neither
+        ]
+        
+        results = find_collocates(
+            sentences,
+            target_words="dog",
+            method="sentence",
+            as_dataframe=False
+        )
+        
+        cat_result = next((r for r in results if r["collocate"] == "cat"), None)
+        assert cat_result is not None, "'cat' should be found as collocate of 'dog'"
+        
+        # Expected contingency table for collocate='cat' given target='dog':
+        # a = sentences with both dog and cat = 3
+        # b = sentences with dog but NOT cat = 6 - 3 = 3
+        # c = sentences with cat but NOT dog = 5 - 3 = 2
+        # d = sentences with neither = 10 - 3 - 3 - 2 = 2
+        expected_a = 3
+        expected_c = 2
+        expected_obs_global = expected_a + expected_c  # = 5
+        expected_exp = (6 * 5) / 10  # = 3.0
+        expected_ratio = expected_a / expected_exp  # = 1.0
+        
+        assert cat_result["obs_local"] == expected_a, \
+            f"obs_local should be {expected_a}, got {cat_result['obs_local']}"
+        assert cat_result["obs_global"] == expected_obs_global, \
+            f"obs_global should be {expected_obs_global}, got {cat_result['obs_global']}"
+        assert abs(cat_result["exp_local"] - expected_exp) < 0.0001, \
+            f"exp_local should be {expected_exp}, got {cat_result['exp_local']}"
+        assert abs(cat_result["ratio_local"] - expected_ratio) < 0.0001, \
+            f"ratio_local should be {expected_ratio}, got {cat_result['ratio_local']}"
+    
+    def test_window_method_statistics(self):
+        """Verify all statistics are correct for window-based collocation."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # Controlled corpus for window method with horizon=1:
+        # 'cat' is adjacent to 'dog' (distance=1) in sentences 0 and 2 only
+        sentences = [
+            ["a", "dog", "cat", "b"],       # dog at 1, cat at 2 -> adjacent ✓
+            ["x", "dog", "y", "cat"],       # dog at 1, cat at 3 -> NOT adjacent (distance=2)
+            ["cat", "dog", "z"],            # dog at 1, cat at 0 -> adjacent ✓
+            ["m", "n", "dog", "o"],         # dog at 2, no cat
+            ["p", "cat", "q"],              # no dog, cat at 1
+        ]
+        
+        results = find_collocates(
+            sentences,
+            target_words="dog",
+            method="window",
+            horizon=1,
+            as_dataframe=False
+        )
+        
+        cat_result = next((r for r in results if r["collocate"] == "cat"), None)
+        assert cat_result is not None, "'cat' should be found as collocate of 'dog'"
+        
+        # Expected obs_local: 'cat' positions with 'dog' in window = 2
+        # (sentence 0 pos 2, sentence 2 pos 0)
+        expected_obs_local = 2
+        
+        # Expected obs_global: total 'cat' token occurrences = 4
+        # (sentence 0 pos 2, sentence 1 pos 3, sentence 2 pos 0, sentence 4 pos 1)
+        expected_obs_global = 4
+        
+        assert cat_result["obs_local"] == expected_obs_local, \
+            f"obs_local should be {expected_obs_local}, got {cat_result['obs_local']}"
+        assert cat_result["obs_global"] == expected_obs_global, \
+            f"obs_global should be {expected_obs_global}, got {cat_result['obs_global']}"
+        
+        # Verify ratio and expected are computed (exact values depend on full contingency table)
+        assert cat_result["ratio_local"] > 0, "ratio_local should be positive"
+        assert cat_result["exp_local"] > 0, "exp_local should be positive"
+    
+    def test_window_method_no_association(self):
+        """Verify ratio ~1 when there's no real association."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        # Corpus where 'filler' appears everywhere uniformly
+        # so it should have ratio close to 1 with any target
+        sentences = [
+            ["filler", "dog", "filler", "x"],
+            ["filler", "y", "dog", "filler"],
+            ["filler", "z", "filler", "dog"],
+            ["filler", "a", "filler", "b"],
+        ]
+        
+        results = find_collocates(
+            sentences,
+            target_words="dog",
+            method="window",
+            horizon=2,
+            as_dataframe=False
+        )
+        
+        filler_result = next((r for r in results if r["collocate"] == "filler"), None)
+        assert filler_result is not None, "'filler' should be found as collocate"
+        
+        # 'filler' appears uniformly, so ratio should be close to 1
+        # Allow some tolerance since small sample sizes can cause deviation
+        assert 0.5 < filler_result["ratio_local"] < 2.0, \
+            f"ratio_local for uniform 'filler' should be near 1, got {filler_result['ratio_local']}"
+
+
 class TestDeterministicCoocMatrixCalculations:
     """
     Deterministic tests that verify co-occurrence matrix window calculations.
@@ -649,7 +779,7 @@ class TestPythonCythonConsistencyDeterministic:
     def test_window_python_cython_identical_results(self):
         """Verify Python and Cython window implementations match exactly."""
         from qhchina.analytics.collocations import (
-            _calculate_collocations_window,
+            _calculate_collocations_window_python,
             _calculate_collocations_window_cython,
             CYTHON_AVAILABLE
         )
@@ -667,7 +797,7 @@ class TestPythonCythonConsistencyDeterministic:
         horizon = (2, 3)
         
         # Run both implementations
-        python_results = _calculate_collocations_window(
+        python_results = _calculate_collocations_window_python(
             sentences, target_words, horizon=horizon
         )
         cython_results = _calculate_collocations_window_cython(
@@ -696,7 +826,7 @@ class TestPythonCythonConsistencyDeterministic:
     def test_sentence_python_cython_identical_results(self):
         """Verify Python and Cython sentence implementations match exactly."""
         from qhchina.analytics.collocations import (
-            _calculate_collocations_sentence,
+            _calculate_collocations_sentence_python,
             _calculate_collocations_sentence_cython,
             CYTHON_AVAILABLE
         )
@@ -714,7 +844,7 @@ class TestPythonCythonConsistencyDeterministic:
         target_words = ["TARGET"]
         
         # Run both implementations
-        python_results = _calculate_collocations_sentence(sentences, target_words)
+        python_results = _calculate_collocations_sentence_python(sentences, target_words)
         cython_results = _calculate_collocations_sentence_cython(sentences, target_words)
         
         # Convert to comparable format

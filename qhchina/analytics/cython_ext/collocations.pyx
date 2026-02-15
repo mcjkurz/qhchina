@@ -35,6 +35,7 @@ cdef struct EncodedCorpus:
     LONG_t* offsets      # Sentence start offsets (n_sentences + 1)
     int n_sentences      # Number of sentences
     LONG_t total_tokens  # Total number of tokens
+    int max_sent_len     # Maximum sentence length (for buffer allocation)
 
 def build_vocabulary(list tokenized_sentences):
     """
@@ -67,23 +68,24 @@ def build_vocabulary(list tokenized_sentences):
     
     return word2idx, idx2word
 
-cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict word2idx, int max_sentence_length=256) except NULL:
+cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict word2idx) except NULL:
     """
     Encode corpus into compact C-level buffers (flattened tokens + offsets).
     
     This function performs all word-to-index lookups upfront and stores the result
     in contiguous C memory for maximum cache efficiency. No per-sentence allocations.
+    Also computes the maximum sentence length for buffer allocation hints.
     
     Args:
         tokenized_sentences: List of tokenized sentences (list of lists of strings)
         word2idx: Dictionary mapping words to indices
-        max_sentence_length: Maximum sentence length to process (default 256)
         
     Returns:
         EncodedCorpus*: Pointer to encoded corpus structure (caller must free)
     """
     cdef int n_sentences = len(tokenized_sentences)
     cdef int i, j, sent_len, token_idx
+    cdef int max_sent_len = 0
     cdef LONG_t estimated_tokens = 0
     cdef list sentence
     cdef str word
@@ -93,13 +95,13 @@ cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict wor
     cdef LONG_t current_offset = 0
     cdef EncodedCorpus* corpus = NULL
     
-    # Calculate precise token count for optimal reservation
+    # Calculate precise token count and max sentence length
     for i in range(n_sentences):
         sentence = tokenized_sentences[i]
         sent_len = len(sentence)
-        if sent_len > max_sentence_length:
-            sent_len = max_sentence_length
         estimated_tokens += sent_len
+        if sent_len > max_sent_len:
+            max_sent_len = sent_len
     
     # Reserve exact space needed
     offsets_vec.reserve(n_sentences + 1)
@@ -110,10 +112,6 @@ cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict wor
     for i in range(n_sentences):
         sentence = tokenized_sentences[i]
         sent_len = len(sentence)
-        
-        # Cap sentence length if needed
-        if sent_len > max_sentence_length:
-            sent_len = max_sentence_length
         
         # Convert words to indices and append to flat buffer
         for j in range(sent_len):
@@ -152,6 +150,9 @@ cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict wor
     for i in range(n_sentences + 1):
         corpus.offsets[i] = offsets_vec[i]
     
+    # Store max sentence length for buffer allocation
+    corpus.max_sent_len = max_sent_len
+    
     return corpus
 
 cdef void free_encoded_corpus(EncodedCorpus* corpus) nogil:
@@ -169,7 +170,7 @@ cdef void free_encoded_corpus(EncodedCorpus* corpus) nogil:
         free(corpus)
 
 def calculate_collocations_window(list tokenized_sentences, list target_words, 
-                                  int left_horizon=5, int right_horizon=5, int max_sentence_length=256):
+                                  int left_horizon=5, int right_horizon=5):
     """
     Window-based collocation calculation.
     
@@ -177,11 +178,10 @@ def calculate_collocations_window(list tokenized_sentences, list target_words,
     hot loops without any Python dictionary access. Uses active targets tracking.
     
     Args:
-        tokenized_sentences: List of tokenized sentences
+        tokenized_sentences: List of tokenized sentences (already preprocessed)
         target_words: List of target words
         left_horizon: Window size on the left side
         right_horizon: Window size on the right side
-        max_sentence_length: Maximum sentence length (default 256)
         
     Returns:
         tuple: (T_count, candidate_counts, token_counter, total_tokens, word2idx, idx2word, target_indices)
@@ -209,7 +209,7 @@ def calculate_collocations_window(list tokenized_sentences, list target_words,
     n_targets = len(target_indices)
     
     # Encode corpus to C-level buffers (single allocation, contiguous memory)
-    corpus = encode_corpus_to_c_buffer(tokenized_sentences, word2idx, max_sentence_length)
+    corpus = encode_corpus_to_c_buffer(tokenized_sentences, word2idx)
     
     try:
         # Calculate counts from C-level buffers (no dictionary access, active targets optimization)
@@ -221,7 +221,7 @@ def calculate_collocations_window(list tokenized_sentences, list target_words,
         # Always free the corpus memory
         free_encoded_corpus(corpus)
 
-def calculate_collocations_sentence(list tokenized_sentences, list target_words, int max_sentence_length=256):
+def calculate_collocations_sentence(list tokenized_sentences, list target_words):
     """
     Optimized sentence-based collocation calculation.
     
@@ -229,9 +229,8 @@ def calculate_collocations_sentence(list tokenized_sentences, list target_words,
     hot loops without any Python dictionary access. Uses epoch-based uniqueness detection.
     
     Args:
-        tokenized_sentences: List of tokenized sentences (list of lists of strings)
+        tokenized_sentences: List of tokenized sentences (already preprocessed)
         target_words: List of target words
-        max_sentence_length: Maximum sentence length (default 256)
         
     Returns:
         tuple: (candidate_sentences, sentences_with_token, total_sentences, word2idx, idx2word, target_indices)
@@ -265,12 +264,12 @@ def calculate_collocations_sentence(list tokenized_sentences, list target_words,
     n_targets = len(target_indices)
     
     # Encode corpus to C-level buffers (single allocation, contiguous memory)
-    corpus = encode_corpus_to_c_buffer(tokenized_sentences, word2idx, max_sentence_length)
+    corpus = encode_corpus_to_c_buffer(tokenized_sentences, word2idx)
     
     try:
         # Call optimized counting function with C-level buffers (epoch-based uniqueness)
         result = calculate_sentence_counts(
-            corpus, target_indices_array, vocab_size, max_sentence_length, word2idx, idx2word, target_indices
+            corpus, target_indices_array, vocab_size, word2idx, idx2word, target_indices
         )
         return result
     finally:
@@ -281,7 +280,6 @@ cdef calculate_sentence_counts(
     EncodedCorpus* corpus,
     INT_t[::1] target_indices,
     int vocab_size,
-    int max_sentence_length,
     dict word2idx,
     dict idx2word,
     np.ndarray[INT_t, ndim=1] target_indices_np
@@ -296,6 +294,7 @@ cdef calculate_sentence_counts(
     """
     cdef int n_targets = target_indices.shape[0]
     cdef int n_sentences = corpus.n_sentences
+    cdef int max_sent_len = corpus.max_sent_len
     cdef int s, t, i, j, token_idx, n_unique, n_targets_in_sent
     cdef LONG_t sent_start, sent_end, sent_len
     cdef char* is_target = NULL
@@ -340,10 +339,10 @@ cdef calculate_sentence_counts(
     memset(seen_epoch, 0, vocab_size * sizeof(INT_t))
     
     # Reserve space for buffers to minimize reallocations
-    # Use max_sentence_length since that's the maximum possible unique tokens in a sentence
-    unique_tokens_buffer.reserve(max_sentence_length)
-    # Reserve space for targets buffer (estimate: min of n_targets or max_sentence_length)
-    targets_in_sent_buffer.reserve(n_targets if n_targets < max_sentence_length else max_sentence_length)
+    # Use max_sent_len (computed from actual data) for optimal buffer sizing
+    unique_tokens_buffer.reserve(max_sent_len)
+    # Reserve space for targets buffer (estimate: min of n_targets or max_sent_len)
+    targets_in_sent_buffer.reserve(n_targets if n_targets < max_sent_len else max_sent_len)
     
     # Main counting loop - Process C-level encoded corpus (fully nogil!)
     with nogil:
