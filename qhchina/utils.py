@@ -5,7 +5,7 @@ This module provides common utilities used across multiple modules.
 """
 
 import logging
-from typing import Dict, List, Set, Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -15,6 +15,7 @@ logger = logging.getLogger("qhchina.utils")
 __all__ = [
     'validate_filters',
     'apply_p_value_correction',
+    'VALID_CORRECTIONS',
 ]
 
 
@@ -22,7 +23,7 @@ VALID_CORRECTIONS = ('bonferroni', 'fdr_bh')
 
 
 def apply_p_value_correction(
-    p_values: List[float],
+    p_values: list[float],
     method: str,
 ) -> np.ndarray:
     """
@@ -82,8 +83,8 @@ def apply_p_value_correction(
 
 
 def validate_filters(
-    filters: Optional[Dict[str, Any]],
-    valid_keys: Set[str],
+    filters: dict[str, Any] | None,
+    valid_keys: set[str],
     context: str = "function"
 ) -> None:
     """

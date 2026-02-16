@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-from typing import List, Dict, Any, Union, Optional, Set, Tuple
+from typing import Any
 from tqdm.auto import tqdm
 import importlib
 import importlib.util
@@ -37,8 +37,8 @@ class SegmentationWrapper:
             - excluded_pos: List or set of POS tags to exclude (converted to set internally)
         user_dict: Custom user dictionary for segmentation. Can be:
             - str: Path to a dictionary file
-            - List[str]: List of words
-            - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
+            - list[str]: List of words
+            - list[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
         sentence_end_pattern: Regular expression pattern for sentence endings (default: 
             Chinese and English punctuation).
     """
@@ -46,8 +46,8 @@ class SegmentationWrapper:
     # Valid filter keys
     VALID_FILTER_KEYS = {'stopwords', 'min_word_length', 'excluded_pos'}
     
-    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: Dict[str, Any] = None,
-                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
+    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: dict[str, Any] | None = None,
+                 user_dict: str | list[str | tuple] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         if strategy is None:
             raise ValueError("strategy cannot be None")
@@ -84,7 +84,7 @@ class SegmentationWrapper:
                 f"Valid filter keys are: {self.VALID_FILTER_KEYS}"
             )
     
-    def _get_user_dict_as_list(self) -> Optional[List[Union[str, Tuple]]]:
+    def _get_user_dict_as_list(self) -> list[str | tuple] | None:
         """Get the user dictionary as a list of words/tuples.
         
         Returns:
@@ -119,7 +119,7 @@ class SegmentationWrapper:
         
         return None
     
-    def _get_user_dict_path(self, default_freq: Optional[int] = None) -> Optional[str]:
+    def _get_user_dict_path(self, default_freq: int | None = None) -> str | None:
         """Get the user dictionary as a file path.
         
         If user_dict is already a path, returns it directly.
@@ -206,7 +206,7 @@ class SegmentationWrapper:
         self.close()
         return False
     
-    def segment(self, text: str) -> Union[List[str], List[List[str]]]:
+    def segment(self, text: str) -> list[str] | list[list[str]]:
         """Segment text into tokens based on the selected strategy.
         
         Args:
@@ -229,7 +229,7 @@ class SegmentationWrapper:
         
         return processed_results
     
-    def _split_text_by_strategy(self, text: str) -> List[str]:
+    def _split_text_by_strategy(self, text: str) -> list[str]:
         """Split text based on the selected strategy.
         
         Args:
@@ -251,7 +251,7 @@ class SegmentationWrapper:
         else:
             raise ValueError(f"Invalid strategy: {self.strategy}")
     
-    def _split_into_lines(self, text: str) -> List[str]:
+    def _split_into_lines(self, text: str) -> list[str]:
         """Split text into non-empty lines.
         
         Args:
@@ -262,7 +262,7 @@ class SegmentationWrapper:
         """
         return [line.strip() for line in text.split('\n') if line.strip()]
     
-    def _split_into_chunks(self, text: str, chunk_size: int) -> List[str]:
+    def _split_into_chunks(self, text: str, chunk_size: int) -> list[str]:
         """Split text into chunks of specified size.
         
         Args:
@@ -282,7 +282,7 @@ class SegmentationWrapper:
             
         return chunks
     
-    def _split_into_sentences(self, text: str) -> List[str]:
+    def _split_into_sentences(self, text: str) -> list[str]:
         """Split text into sentences.
         
         Args:
@@ -315,7 +315,7 @@ class SegmentationWrapper:
         
         return sentences
     
-    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+    def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all text units and return results.
         
         Args:
@@ -354,12 +354,12 @@ class SpacySegmenter(SegmentationWrapper):
     """
     
     def __init__(self, model_name: str = "zh_core_web_sm", 
-                 disable: Optional[List[str]] = None,
+                 disable: list[str] | None = None,
                  batch_size: int = 200,
-                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
+                 user_dict: str | list[str | tuple] | None = None,
                  strategy: str = "whole", 
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None,
+                 filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
                          user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
@@ -455,7 +455,7 @@ class SpacySegmenter(SegmentationWrapper):
                 and len(token.text) >= min_word_length
                 and token.text not in stopwords]
     
-    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+    def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all texts with spaCy's pipe and return results.
         
         Args:
@@ -500,8 +500,8 @@ class PKUSegmenter(SegmentationWrapper):
             - Or a path to a custom model directory
         user_dict: Custom user dictionary. Can be:
             - str: Path to a dictionary file (one word per line)
-            - List[str]: List of words
-            - List[Tuple]: List of tuples (only first element/word is used)
+            - list[str]: List of words
+            - list[Tuple]: List of tuples (only first element/word is used)
         pos_tagging: Whether to include POS tagging in segmentation.
         strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
         chunk_size: Size of chunks when using 'chunk' strategy.
@@ -514,11 +514,11 @@ class PKUSegmenter(SegmentationWrapper):
     
     def __init__(self, 
                  model_name: str = 'default',
-                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
+                 user_dict: str | list[str | tuple] | None = None,
                  pos_tagging: bool = False,
                  strategy: str = "whole",
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None,
+                 filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
                          user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
@@ -582,7 +582,7 @@ class PKUSegmenter(SegmentationWrapper):
         self._init_segmenter()
         logger.info("PKUSeg user dictionary has been reset")
     
-    def _filter_tokens(self, tokens) -> List[str]:
+    def _filter_tokens(self, tokens) -> list[str]:
         """Filter tokens based on filters."""
         min_word_length = self.filters.get('min_word_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
@@ -599,7 +599,7 @@ class PKUSegmenter(SegmentationWrapper):
                     if len(token) >= min_word_length 
                     and token not in stopwords]
     
-    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+    def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all text units with PKUSeg and return results.
         
         Args:
@@ -634,8 +634,8 @@ class JiebaSegmenter(SegmentationWrapper):
     Args:
         user_dict: Custom user dictionary for Jieba. Can be:
             - str: Path to a dictionary file
-            - List[str]: List of words
-            - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
+            - list[str]: List of words
+            - list[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
         pos_tagging: Whether to include POS tagging in segmentation.
         strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
         chunk_size: Size of chunks when using 'chunk' strategy.
@@ -647,11 +647,11 @@ class JiebaSegmenter(SegmentationWrapper):
     """
     
     def __init__(self, 
-                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
+                 user_dict: str | list[str | tuple] | None = None,
                  pos_tagging: bool = False,
                  strategy: str = "whole",
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None,
+                 filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
                          user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
@@ -744,7 +744,7 @@ class JiebaSegmenter(SegmentationWrapper):
         except Exception as e:
             logger.error(f"Failed to reset Jieba dictionary: {str(e)}")
     
-    def _filter_tokens(self, tokens) -> List[str]:
+    def _filter_tokens(self, tokens) -> list[str]:
         """Filter tokens based on filters."""
         min_word_length = self.filters.get('min_word_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
@@ -761,7 +761,7 @@ class JiebaSegmenter(SegmentationWrapper):
                     if len(token) >= min_word_length 
                     and token not in stopwords]
     
-    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+    def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all text units with Jieba and return results.
         
         Args:
@@ -831,15 +831,15 @@ class BertSegmenter(SegmentationWrapper):
                  model_name: str = None,
                  model = None,
                  tokenizer = None,
-                 tagging_scheme: Union[str, List[str]] = "be",
+                 tagging_scheme: str | list[str] = "be",
                  batch_size: int = 32,
-                 device: Optional[str] = None,
+                 device: str | None = None,
                  remove_special_tokens: bool = True,
                  max_sequence_length: int = 512,
-                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
+                 user_dict: str | list[str | tuple] | None = None,
                  strategy: str = "whole",
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None,
+                 filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         # Use max_sequence_length as chunk_size if not provided separately
         if not chunk_size and strategy == "chunk":
@@ -916,7 +916,7 @@ class BertSegmenter(SegmentationWrapper):
         self.model.eval()
         logger.info(f"Using tagging scheme: {self.labels}")
     
-    def _filter_words(self, words: List[str]) -> List[str]:
+    def _filter_words(self, words: list[str]) -> list[str]:
         """Filter words based on specified filters.
         
         Args:
@@ -932,7 +932,7 @@ class BertSegmenter(SegmentationWrapper):
                 if len(word) >= min_word_length 
                 and word not in stopwords]
     
-    def _predict_tags_batch(self, texts: List[str]) -> List[List[str]]:
+    def _predict_tags_batch(self, texts: list[str]) -> list[list[str]]:
         """Predict segmentation tags for each character in a batch of texts."""
         # Process each text to character level and store original lengths
         all_tokens = []
@@ -976,11 +976,11 @@ class BertSegmenter(SegmentationWrapper):
         
         return all_tags
     
-    def _predict_tags(self, text: str) -> List[str]:
+    def _predict_tags(self, text: str) -> list[str]:
         """Predict segmentation tags for each character in a single text."""
         return self._predict_tags_batch([text])[0]
     
-    def _merge_tokens_by_tags(self, tokens: List[str], tags: List[str]) -> List[str]:
+    def _merge_tokens_by_tags(self, tokens: list[str], tags: list[str]) -> list[str]:
         """Merge tokens based on predicted tags."""
         words = []
         current_word = ""
@@ -1066,7 +1066,7 @@ class BertSegmenter(SegmentationWrapper):
         
         return words
     
-    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+    def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all texts with BERT model and return results.
         
         Args:
@@ -1152,10 +1152,10 @@ class LLMSegmenter(SegmentationWrapper):
                  max_tokens: int = 2048,
                  retry_patience: int = 1,
                  timeout: float = 60.0,
-                 user_dict: Union[str, List[Union[str, Tuple]], None] = None,
+                 user_dict: str | list[str | tuple] | None = None,
                  strategy: str = "whole",
                  chunk_size: int = 512,
-                 filters: Dict[str, Any] = None,
+                 filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
                          user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
@@ -1192,7 +1192,7 @@ class LLMSegmenter(SegmentationWrapper):
             # Default OpenAI endpoint
             self.client = openai.OpenAI(api_key=api_key, timeout=timeout)
     
-    def _call_llm_api(self, text: str) -> List[str]:
+    def _call_llm_api(self, text: str) -> list[str]:
         """Call the LLM API with the provided text and parse the response as a list of tokens.
         
         Implements retry logic with exponential backoff.
@@ -1286,7 +1286,7 @@ class LLMSegmenter(SegmentationWrapper):
                     logger.info(f"Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
     
-    def _filter_tokens(self, tokens: List[str]) -> List[str]:
+    def _filter_tokens(self, tokens: list[str]) -> list[str]:
         """Apply filters to the tokens."""
         min_word_length = self.filters.get('min_word_length', 1)
         stopwords = set(self.filters.get('stopwords', []))
@@ -1295,7 +1295,7 @@ class LLMSegmenter(SegmentationWrapper):
                 if len(token) >= min_word_length 
                 and token not in stopwords]
     
-    def _process_all_texts(self, texts: List[str]) -> List[List[str]]:
+    def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all text units with LLM API and return results.
         
         Args:
@@ -1330,8 +1330,8 @@ def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size
         **kwargs: Additional arguments to pass to the segmenter constructor
             - user_dict: Custom user dictionary. Can be:
                 - str: Path to a dictionary file
-                - List[str]: List of words
-                - List[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
+                - list[str]: List of words
+                - list[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
                 Note: Not supported for 'bert' and 'llm' backends (will log a warning)
             - filters: Dictionary of filters to apply during segmentation
                 - min_word_length: Minimum length of tokens to include (default 1)

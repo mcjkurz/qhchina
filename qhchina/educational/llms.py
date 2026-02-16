@@ -1,6 +1,5 @@
 import logging
 import matplotlib.pyplot as plt
-from typing import Optional, List, Tuple, Union
 import numpy as np
 import pandas as pd
 
@@ -18,9 +17,9 @@ def predict_next_token(
     tokenizer, 
     k: int = 10, 
     device: str = 'cpu',
-    result: Optional[str] = "df",
+    result: str | None = "df",
     replace_special_chars: bool = True
-) -> Union[List[Tuple[str, float]], Optional[pd.DataFrame], None]:
+) -> list[tuple[str, float]] | pd.DataFrame | None:
     """
     Predicts the next token probabilities for a given input text.
     

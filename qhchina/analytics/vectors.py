@@ -1,8 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Dict, Tuple, Optional, Union, Callable, Any
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
+from typing import Any, Callable
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 
 
@@ -19,15 +17,15 @@ __all__ = [
 
 
 def project_2d(
-    vectors: Union[List[np.ndarray], Dict[str, np.ndarray], np.ndarray], 
-    labels: Optional[List[str]] = None, 
+    vectors: list[np.ndarray] | dict[str, np.ndarray] | np.ndarray, 
+    labels: list[str] | None = None, 
     method: str = 'pca', 
-    title: Optional[str] = None, 
-    color: Optional[Union[str, List[str]]] = None, 
-    figsize: Tuple[int, int] = (8, 8), 
+    title: str | None = None, 
+    color: str | list[str] | None = None, 
+    figsize: tuple[int, int] = (8, 8), 
     fontsize: int = 12, 
-    perplexity: Optional[float] = None,
-    filename: Optional[str] = None,
+    perplexity: float | None = None,
+    filename: str | None = None,
     adjust_text_labels: bool = False,
     n_neighbors: int = 15,
     min_dist: float = 0.1
@@ -66,6 +64,7 @@ def project_2d(
     vectors = np.array(vectors)
 
     if method == 'pca':
+        from sklearn.decomposition import PCA
         projector = PCA(n_components=2)
         projected_vectors = projector.fit_transform(vectors)
         explained_variance = projector.explained_variance_ratio_
@@ -74,6 +73,7 @@ def project_2d(
     elif method == 'tsne':
         if perplexity is None:
           raise ValueError("Please specify perplexity for T-SNE")
+        from sklearn.manifold import TSNE
         projector = TSNE(n_components=2, perplexity=perplexity)
         projected_vectors = projector.fit_transform(vectors)
         x_label = "Dimension 1"
@@ -122,7 +122,7 @@ def project_2d(
     plt.show()
 
 def get_bias_direction(
-    anchors: Union[Tuple[np.ndarray, np.ndarray], List[Tuple[np.ndarray, np.ndarray]]]
+    anchors: tuple[np.ndarray, np.ndarray] | list[tuple[np.ndarray, np.ndarray]]
 ) -> np.ndarray:
     """
     Compute the direction vector for measuring bias.
@@ -155,8 +155,8 @@ def get_bias_direction(
     return bias_direction / bias_norm
 
 def calculate_bias(
-    anchors: Union[Tuple[str, str], List[Tuple[str, str]]], 
-    targets: List[str], 
+    anchors: tuple[str, str] | list[tuple[str, str]], 
+    targets: list[str], 
     word_vectors: Any
 ) -> np.ndarray:
     """
@@ -187,9 +187,19 @@ def calculate_bias(
     target_vectors = [word_vectors[target] for target in targets]
     return np.array([np.dot(vec, bias_direction) for vec in target_vectors])
 
-def project_bias(x, y, targets, word_vectors,
-                    title=None, color=None, figsize=(8,8),
-                    fontsize=12, filename=None, adjust_text_labels=False, disperse_y=False):
+def project_bias(
+    x: tuple[str, str] | list[tuple[str, str]], 
+    y: tuple[str, str] | list[tuple[str, str]] | None, 
+    targets: list[str], 
+    word_vectors: Any,
+    title: str | None = None, 
+    color: str | list[str] | None = None, 
+    figsize: tuple[int, int] = (8, 8),
+    fontsize: int = 12, 
+    filename: str | None = None, 
+    adjust_text_labels: bool = False, 
+    disperse_y: bool = False
+) -> None:
     """
     Plot words on a 1D or 2D chart by projecting them onto bias axes.
     
@@ -304,9 +314,9 @@ def project_bias(x, y, targets, word_vectors,
     plt.show()
 
 def cosine_similarity(
-    v1: Union[np.ndarray, List[float]], 
-    v2: Union[np.ndarray, List[float]]
-) -> Union[float, np.ndarray]:
+    v1: np.ndarray | list[float], 
+    v2: np.ndarray | list[float]
+) -> float | np.ndarray:
     """
     Compute the cosine similarity between vectors.
     
@@ -341,9 +351,9 @@ def cosine_similarity(
 
 
 def cosine_distance(
-    v1: Union[np.ndarray, List[float]], 
-    v2: Union[np.ndarray, List[float]]
-) -> Union[float, np.ndarray]:
+    v1: np.ndarray | list[float], 
+    v2: np.ndarray | list[float]
+) -> float | np.ndarray:
     """
     Compute the cosine distance between vectors (1 - cosine_similarity).
     
@@ -363,11 +373,11 @@ def cosine_distance(
 
 def most_similar(
     target_vector: np.ndarray, 
-    vectors: Union[List[np.ndarray], np.ndarray], 
-    labels: Optional[List[str]] = None, 
-    metric: Union[str, Callable[[np.ndarray, np.ndarray], float]] = 'cosine', 
-    top_n: Optional[int] = None
-) -> List[Tuple[Union[str, int], float]]:
+    vectors: list[np.ndarray] | np.ndarray, 
+    labels: list[str] | None = None, 
+    metric: str | Callable[[np.ndarray, np.ndarray], float] = 'cosine', 
+    top_n: int | None = None
+) -> list[tuple[str | int, float]]:
     """
     Find the most similar vectors to a target vector using the specified similarity metric.
     
@@ -417,7 +427,7 @@ def most_similar(
 def align_vectors(
     source_vectors: np.ndarray, 
     target_vectors: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Align source vectors with target vectors using Procrustes analysis.
     

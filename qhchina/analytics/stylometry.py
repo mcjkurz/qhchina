@@ -17,7 +17,7 @@ Two modes for supervised learning:
 import logging
 import warnings
 from collections import Counter
-from typing import Dict, List, Tuple, Optional, Union, Callable, Any
+from typing import Callable
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -48,7 +48,7 @@ __all__ = [
 # Standalone Functions
 # =============================================================================
 
-def extract_mfw(ngram_counts: Counter, n: int = 100) -> List[str]:
+def extract_mfw(ngram_counts: Counter, n: int = 100) -> list[str]:
     """
     Extract the Most Frequent Words (MFW) from a frequency counter.
     
@@ -137,7 +137,7 @@ def eder_delta(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
     return np.sqrt(np.sum((vec_a - vec_b) ** 2) / n)
 
 
-def get_relative_frequencies(items: List[str]) -> Dict[str, float]:
+def get_relative_frequencies(items: list[str]) -> dict[str, float]:
     """
     Compute relative frequencies for a list of items (tokens or n-grams).
     
@@ -151,7 +151,7 @@ def get_relative_frequencies(items: List[str]) -> Dict[str, float]:
     return {item: count / total for item, count in counts.items()}
 
 
-def compute_yule_k(tokens: List[str]) -> float:
+def compute_yule_k(tokens: list[str]) -> float:
     """
     Compute Yule's K characteristic for vocabulary richness.
     
@@ -265,12 +265,12 @@ class Stylometry:
     def __init__(
         self,
         n_features: int = 100,
-        ngram_range: Tuple[int, int] = (1, 1),
+        ngram_range: tuple[int, int] = (1, 1),
         transform: str = 'zscore',
         distance: str = 'cosine',
         classifier: str = 'delta',
-        cull: Optional[float] = None,
-        chunk_size: Optional[int] = None,
+        cull: float | None = None,
+        chunk_size: int | None = None,
         mode: str = 'centroid',
     ):
         # Validate n_features
@@ -325,28 +325,28 @@ class Stylometry:
         self.mode = mode
         
         # Feature vocabulary learned from corpus
-        self.features: List[str] = []  # Selected n-gram features
-        self.feature_means: Optional[np.ndarray] = None  # For z-score
-        self.feature_stds: Optional[np.ndarray] = None   # For z-score
-        self.idf_weights: Optional[np.ndarray] = None    # For TF-IDF
+        self.features: list[str] = []  # Selected n-gram features
+        self.feature_means: np.ndarray | None = None  # For z-score
+        self.feature_stds: np.ndarray | None = None   # For z-score
+        self.idf_weights: np.ndarray | None = None    # For TF-IDF
         
         # Author information
-        self.authors: List[str] = []
+        self.authors: list[str] = []
         
         # Document storage - extensible structure
         # Each doc has: tokens, ngrams, ngram_freqs, yule_k, etc.
-        self._doc_features: Dict[str, Dict] = {}
+        self._doc_features: dict[str, dict] = {}
         
         # Transformed vectors for classification
-        self.document_vectors: List[np.ndarray] = []
-        self.document_labels: List[str] = []  # Author name for each document
-        self.document_ids: List[str] = []     # Unique ID for each document
+        self.document_vectors: list[np.ndarray] = []
+        self.document_labels: list[str] = []  # Author name for each document
+        self.document_ids: list[str] = []     # Unique ID for each document
         
         # Centroid mode: one vector per author
-        self.author_centroids: Dict[str, np.ndarray] = {}
+        self.author_centroids: dict[str, np.ndarray] = {}
         
         # Mapping from doc_id to index for fast lookup
-        self._doc_id_to_index: Dict[str, int] = {}
+        self._doc_id_to_index: dict[str, int] = {}
         
         # SVM model (fitted on demand)
         self._svm_model = None
@@ -357,14 +357,14 @@ class Stylometry:
     # Helper Methods
     # =========================================================================
     
-    def _get_distance_fn(self, distance: Optional[str] = None) -> Tuple[Callable, str]:
+    def _get_distance_fn(self, distance: str | None = None) -> tuple[Callable, str]:
         """Get the distance function, using provided metric or falling back to default."""
         metric = distance if distance is not None else self.distance_metric
         if metric not in self.DISTANCE_FUNCTIONS:
             raise ValueError(f"distance must be one of {list(self.DISTANCE_FUNCTIONS.keys())}, got '{metric}'")
         return self.DISTANCE_FUNCTIONS[metric], metric
     
-    def _validate_tokens(self, tokens: List[str], name: str = "tokens") -> None:
+    def _validate_tokens(self, tokens: list[str], name: str = "tokens") -> None:
         """Validate that tokens is a non-empty list of strings."""
         if not isinstance(tokens, list):
             raise TypeError(f"{name} must be a list, got {type(tokens).__name__}")
@@ -384,7 +384,7 @@ class Stylometry:
     # N-gram Extraction
     # =========================================================================
     
-    def _extract_ngrams(self, tokens: List[str]) -> List[str]:
+    def _extract_ngrams(self, tokens: list[str]) -> list[str]:
         """
         Extract n-grams from a list of tokens based on ngram_range.
         
@@ -414,7 +414,7 @@ class Stylometry:
     def _apply_culling(
         self, 
         corpus_ngram_counts: Counter, 
-        doc_ngram_sets: List[set],
+        doc_ngram_sets: list[set],
     ) -> Counter:
         """
         Remove n-grams that appear in fewer than cull% of documents.
@@ -458,8 +458,8 @@ class Stylometry:
     
     def _chunk_documents(
         self, 
-        corpus: Dict[str, List[List[str]]],
-    ) -> Dict[str, List[List[str]]]:
+        corpus: dict[str, list[list[str]]],
+    ) -> dict[str, list[list[str]]]:
         """
         Split documents into chunks of chunk_size tokens.
         
@@ -472,7 +472,7 @@ class Stylometry:
         if self.chunk_size is None:
             return corpus
         
-        chunked_corpus: Dict[str, List[List[str]]] = {}
+        chunked_corpus: dict[str, list[list[str]]] = {}
         
         for author, documents in corpus.items():
             chunks = []
@@ -511,7 +511,7 @@ class Stylometry:
     # Vector Resolution
     # =========================================================================
     
-    def _tokens_to_vector(self, tokens: List[str]) -> np.ndarray:
+    def _tokens_to_vector(self, tokens: list[str]) -> np.ndarray:
         """
         Transform raw tokens to a feature vector using fitted features and transformation.
         """
@@ -534,7 +534,7 @@ class Stylometry:
             author_vecs = [self.document_vectors[i] for i in author_indices]
             return np.mean(author_vecs, axis=0)
     
-    def _resolve_to_vector(self, query: Union[str, List[str]]) -> Tuple[np.ndarray, Optional[str]]:
+    def _resolve_to_vector(self, query: str | list[str]) -> tuple[np.ndarray, str | None]:
         """
         Resolve a query (doc_id or tokens) to a feature vector.
         
@@ -562,7 +562,7 @@ class Stylometry:
         else:
             raise TypeError(f"query must be a string (doc_id) or list of tokens, got {type(query).__name__}")
     
-    def _get_vectors_and_labels(self, level: str) -> Tuple[List[np.ndarray], List[str]]:
+    def _get_vectors_and_labels(self, level: str) -> tuple[list[np.ndarray], list[str]]:
         """Get vectors and labels for the specified level."""
         self._validate_level(level)
         
@@ -578,8 +578,8 @@ class Stylometry:
     
     def fit_transform(
         self, 
-        corpus: Union[Dict[str, List[List[str]]], List[List[str]]],
-        labels: Optional[List[str]] = None,
+        corpus: dict[str, list[list[str]]] | list[list[str]],
+        labels: list[str] | None = None,
     ) -> None:
         """
         Fit the model on a corpus and transform documents to feature vectors.
@@ -654,10 +654,10 @@ class Stylometry:
         
         # Step 2: Extract n-grams and build corpus-wide counts
         corpus_ngram_counts = Counter()
-        doc_ngram_sets: List[set] = []
+        doc_ngram_sets: list[set] = []
         
         # Temporary storage for per-document data
-        temp_doc_data: List[Dict] = []
+        temp_doc_data: list[dict] = []
         
         for author, documents in corpus.items():
             for i, tokens in enumerate(documents):
@@ -763,7 +763,7 @@ class Stylometry:
         
         self._is_fitted = True
     
-    def transform(self, tokens: List[str], warn_oov: bool = True) -> np.ndarray:
+    def transform(self, tokens: list[str], warn_oov: bool = True) -> np.ndarray:
         """
         Transform a tokenized text to a feature vector using fitted features.
         
@@ -801,9 +801,9 @@ class Stylometry:
     
     def _list_to_dict(
         self, 
-        documents: List[List[str]], 
-        labels: Optional[List[str]] = None,
-    ) -> Dict[str, List[List[str]]]:
+        documents: list[list[str]], 
+        labels: list[str] | None = None,
+    ) -> dict[str, list[list[str]]]:
         """Convert a list of documents to dict format, grouped by label."""
         if not documents:
             raise ValueError("documents cannot be empty")
@@ -814,7 +814,7 @@ class Stylometry:
         if len(labels) != len(documents):
             raise ValueError(f"labels length ({len(labels)}) must match documents length ({len(documents)})")
         
-        result: Dict[str, List[List[str]]] = {}
+        result: dict[str, list[list[str]]] = {}
         for label, doc in zip(labels, documents):
             if not isinstance(label, str):
                 raise TypeError(f"labels must be strings, got {type(label).__name__}")
@@ -830,11 +830,11 @@ class Stylometry:
     
     def predict(
         self, 
-        text: List[str],
+        text: list[str],
         k: int = 1,
-        distance: Optional[str] = None,
-        classifier: Optional[str] = None,
-    ) -> List[Tuple[str, float]]:
+        distance: str | None = None,
+        classifier: str | None = None,
+    ) -> list[tuple[str, float]]:
         """
         Predict the most likely author for a tokenized text.
         
@@ -868,10 +868,10 @@ class Stylometry:
     
     def _predict_delta(
         self, 
-        text: List[str], 
+        text: list[str], 
         k: int,
-        distance: Optional[str] = None,
-    ) -> List[Tuple[str, float]]:
+        distance: str | None = None,
+    ) -> list[tuple[str, float]]:
         """Delta (distance-based) prediction."""
         text_vector = self._tokens_to_vector(text)
         distance_fn, _ = self._get_distance_fn(distance)
@@ -892,7 +892,7 @@ class Stylometry:
             results = [(author, dist) for author, doc_id, dist in distances[:k]]
             return results
     
-    def _predict_svm(self, text: List[str], k: int) -> List[Tuple[str, float]]:
+    def _predict_svm(self, text: list[str], k: int) -> list[tuple[str, float]]:
         """SVM prediction with probability output."""
         if self._svm_model is None:
             self._fit_svm()
@@ -924,10 +924,10 @@ class Stylometry:
     
     def predict_author(
         self, 
-        text: List[str], 
+        text: list[str], 
         k: int = 1, 
-        distance: Optional[str] = None,
-        classifier: Optional[str] = None,
+        distance: str | None = None,
+        classifier: str | None = None,
     ) -> str:
         """
         Convenience method to get just the predicted author name.
@@ -957,10 +957,10 @@ class Stylometry:
     
     def predict_confidence(
         self, 
-        text: List[str], 
+        text: list[str], 
         k: int = 1,
-        classifier: Optional[str] = None,
-    ) -> List[Tuple[str, float]]:
+        classifier: str | None = None,
+    ) -> list[tuple[str, float]]:
         """
         Predict with unified confidence scores (higher = more likely).
         
@@ -996,12 +996,12 @@ class Stylometry:
     
     def bootstrap_predict(
         self,
-        text: List[str],
+        text: list[str],
         n_iter: int = 100,
         sample_ratio: float = 0.8,
-        distance: Optional[str] = None,
-        seed: Optional[int] = None,
-    ) -> Dict:
+        distance: str | None = None,
+        seed: int | None = None,
+    ) -> dict:
         """
         Bootstrap analysis for prediction robustness.
         
@@ -1023,6 +1023,26 @@ class Stylometry:
                 - 'distribution': Dict of author -> proportion of iterations
                 - 'distances': Dict of author -> (mean_distance, std_distance)
                 - 'n_iterations': Number of iterations performed
+        
+        Example:
+            # Prepare corpus with known authors
+            corpus = {'author1': [list_of_tokens1, ...], 'author2': [list_of_tokens2, ...]}
+            
+            # Fit model
+            stylo = Stylometry(n_features=500)
+            stylo.fit_transform(corpus)
+            
+            # Bootstrap analysis on disputed text
+            disputed_text = ['token1', 'token2', ...]  # flat list of tokens
+            result = stylo.bootstrap_predict(
+                disputed_text,
+                n_iter=100,       # 100 bootstrap iterations
+                sample_ratio=0.8  # use 80% of features each iteration
+            )
+            
+            print(f"Predicted author: {result['prediction']}")
+            print(f"Confidence: {result['confidence']:.1%}")
+            print(f"Vote distribution: {result['distribution']}")
         """
         if not self._is_fitted:
             raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
@@ -1044,7 +1064,7 @@ class Stylometry:
         
         # Track predictions and distances per iteration
         predictions = []
-        author_distances: Dict[str, List[float]] = {author: [] for author in self.authors}
+        author_distances: dict[str, list[float]] = {author: [] for author in self.authors}
         
         rng = np.random.default_rng(seed)
         
@@ -1117,15 +1137,15 @@ class Stylometry:
     
     def rolling_delta(
         self,
-        text: List[str],
-        reference: Optional[str] = None,
+        text: list[str],
+        reference: str | None = None,
         window: int = 5000,
         step: int = 1000,
-        distance: Optional[str] = None,
+        distance: str | None = None,
         show: bool = True,
-        figsize: Tuple[int, int] = (12, 6),
-        title: Optional[str] = None,
-        filename: Optional[str] = None,
+        figsize: tuple[int, int] = (12, 6),
+        title: str | None = None,
+        filename: str | None = None,
     ) -> pd.DataFrame:
         """
         Rolling window analysis across a long text.
@@ -1151,6 +1171,26 @@ class Stylometry:
                 - 'position': Starting token position of window
                 - 'distance': Distance to reference
                 - 'end_position': Ending token position of window
+        
+        Example:
+            # Prepare corpus with known authors
+            corpus = {'author1': [list_of_tokens1, ...], 'author2': [list_of_tokens2, ...]}
+            
+            # Fit model on known authors
+            stylo = Stylometry(n_features=500)
+            stylo.fit_transform(corpus)
+            
+            # Analyze a long disputed text for authorship changes
+            disputed_text = ['token1', 'token2', ...]  # flat list of tokens
+            results = stylo.rolling_delta(
+                disputed_text,
+                reference='author1',  # compare windows to author1's style
+                window=5000,          # 5000-token windows
+                step=1000             # slide by 1000 tokens
+            )
+            
+            # Results show distance at each position
+            print(results[['position', 'distance']])
         """
         if not self._is_fitted:
             raise RuntimeError("Model has not been fitted. Call fit_transform() first.")
@@ -1242,11 +1282,11 @@ class Stylometry:
     
     def most_similar(
         self, 
-        query: Union[str, List[str]], 
-        k: Optional[int] = None,
+        query: str | list[str], 
+        k: int | None = None,
         return_distance: bool = False,
-        distance: Optional[str] = None,
-    ) -> List[Tuple[str, float]]:
+        distance: str | None = None,
+    ) -> list[tuple[str, float]]:
         """
         Find the most similar documents to a query.
         
@@ -1285,7 +1325,7 @@ class Stylometry:
         
         return results
     
-    def _distance_to_similarity(self, dist: float, metric: Optional[str] = None) -> float:
+    def _distance_to_similarity(self, dist: float, metric: str | None = None) -> float:
         """Convert distance to similarity based on the metric."""
         metric = metric if metric is not None else self.distance_metric
         if metric == 'cosine':
@@ -1295,9 +1335,9 @@ class Stylometry:
     
     def distance(
         self, 
-        a: Union[str, List[str]], 
-        b: Union[str, List[str]],
-        distance: Optional[str] = None,
+        a: str | list[str], 
+        b: str | list[str],
+        distance: str | None = None,
     ) -> float:
         """
         Compute the distance between two documents. Lower = more similar.
@@ -1313,9 +1353,9 @@ class Stylometry:
     
     def similarity(
         self, 
-        a: Union[str, List[str]], 
-        b: Union[str, List[str]],
-        distance: Optional[str] = None,
+        a: str | list[str], 
+        b: str | list[str],
+        distance: str | None = None,
     ) -> float:
         """
         Compute the similarity between two documents. Higher = more similar.
@@ -1329,8 +1369,8 @@ class Stylometry:
     
     def _compute_distance_matrix(
         self, 
-        vectors: List[np.ndarray], 
-        distance: Optional[str] = None,
+        vectors: list[np.ndarray], 
+        distance: str | None = None,
     ) -> np.ndarray:
         """Compute pairwise distance matrix for a list of vectors."""
         from scipy.spatial.distance import cdist
@@ -1365,8 +1405,8 @@ class Stylometry:
     def distance_matrix(
         self, 
         level: str = 'document', 
-        distance: Optional[str] = None,
-    ) -> Tuple[np.ndarray, List[str]]:
+        distance: str | None = None,
+    ) -> tuple[np.ndarray, list[str]]:
         """
         Compute pairwise distance matrix from fitted data.
         
@@ -1387,8 +1427,8 @@ class Stylometry:
         self,
         method: str = 'average',
         level: str = 'document',
-        distance: Optional[str] = None,
-    ) -> Tuple[np.ndarray, List[str]]:
+        distance: str | None = None,
+    ) -> tuple[np.ndarray, list[str]]:
         """
         Perform hierarchical clustering on fitted data.
         
@@ -1497,17 +1537,17 @@ class Stylometry:
         self,
         method: str = 'pca',
         level: str = 'document',
-        figsize: Tuple[int, int] = (10, 8),
+        figsize: tuple[int, int] = (10, 8),
         show_labels: bool = True,
-        labels: Optional[List[str]] = None,
-        title: Optional[str] = None,
-        colors: Optional[Dict[str, str]] = None,
+        labels: list[str] | None = None,
+        title: str | None = None,
+        colors: dict[str, str] | None = None,
         marker_size: int = 100,
         fontsize: int = 12,
-        filename: Optional[str] = None,
+        filename: str | None = None,
         random_state: int = 42,
         show: bool = True,
-    ) -> Optional[Tuple[plt.Figure, plt.Axes]]:
+    ) -> tuple[plt.Figure, plt.Axes] | None:
         """
         Create a 2D scatter plot of documents or authors.
         
@@ -1591,7 +1631,7 @@ class Stylometry:
         vectors: np.ndarray,
         method: str,
         random_state: int,
-    ) -> Tuple[np.ndarray, Tuple[str, str]]:
+    ) -> tuple[np.ndarray, tuple[str, str]]:
         """Reduce high-dimensional vectors to 2D for visualization."""
         if method == 'pca':
             from sklearn.decomposition import PCA
@@ -1623,7 +1663,7 @@ class Stylometry:
         self,
         ax: plt.Axes,
         coords: np.ndarray,
-        doc_labels: List[str],
+        doc_labels: list[str],
         show_labels: bool,
         marker_size: int,
         fontsize: int,
@@ -1646,10 +1686,10 @@ class Stylometry:
         self,
         ax: plt.Axes,
         coords: np.ndarray,
-        doc_labels: List[str],
-        author_for_point: List[str],
-        unique_authors: List[str],
-        colors: Optional[Dict[str, str]],
+        doc_labels: list[str],
+        author_for_point: list[str],
+        unique_authors: list[str],
+        colors: dict[str, str] | None,
         show_labels: bool,
         marker_size: int,
         fontsize: int,
@@ -1687,15 +1727,15 @@ class Stylometry:
         method: str = 'average',
         level: str = 'document',
         orientation: str = 'top',
-        figsize: Tuple[int, int] = (12, 8),
-        labels: Optional[List[str]] = None,
-        title: Optional[str] = None,
+        figsize: tuple[int, int] = (12, 8),
+        labels: list[str] | None = None,
+        title: str | None = None,
         fontsize: int = 10,
-        color_threshold: Optional[float] = None,
-        filename: Optional[str] = None,
+        color_threshold: float | None = None,
+        filename: str | None = None,
         show: bool = True,
-        distance: Optional[str] = None,
-    ) -> Optional[Dict]:
+        distance: str | None = None,
+    ) -> dict | None:
         """
         Visualize hierarchical clustering as a dendrogram.
         
@@ -1765,12 +1805,12 @@ class Stylometry:
 # Corpus Comparison Functions
 # =============================================================================
 
-def compare_corpora(corpusA: Union[List[str], List[List[str]]], 
-                    corpusB: Union[List[str], List[List[str]]], 
+def compare_corpora(corpusA: list[str] | list[list[str]], 
+                    corpusB: list[str] | list[list[str]], 
                     method: str = 'fisher', 
-                    filters: Optional[Dict] = None,
-                    correction: Optional[str] = None,
-                    as_dataframe: bool = True) -> List[Dict]:
+                    filters: dict | None = None,
+                    correction: str | None = None,
+                    as_dataframe: bool = True) -> list[dict]:
     """
     Compare two corpora to identify statistically significant differences in word usage.
     
@@ -1813,7 +1853,7 @@ def compare_corpora(corpusA: Union[List[str], List[List[str]]],
         If as_dataframe is True: pandas.DataFrame containing information about each 
             word's frequency in both corpora, the p-value, and the ratio of relative 
             frequencies.
-        If as_dataframe is False: List[dict] where each dict contains information 
+        If as_dataframe is False: list[dict] where each dict contains information 
             about a word's frequency in both corpora, the p-value, and the ratio of 
             relative frequencies.
     

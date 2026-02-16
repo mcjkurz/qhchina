@@ -18,7 +18,6 @@ For module-specific RNG that doesn't affect other modules:
 """
 
 import numpy as np
-from typing import Optional
 import threading
 
 
@@ -39,7 +38,7 @@ _global_settings = {
 }
 
 
-def set_random_seed(seed: Optional[int]) -> None:
+def set_random_seed(seed: int | None) -> None:
     """
     Set the global random seed for reproducibility across all qhchina modules.
     
@@ -67,7 +66,7 @@ def set_random_seed(seed: Optional[int]) -> None:
         _global_settings['random_seed'] = seed
 
 
-def get_random_seed() -> Optional[int]:
+def get_random_seed() -> int | None:
     """
     Get the current global random seed.
     
@@ -84,7 +83,7 @@ def get_random_seed() -> Optional[int]:
         return _global_settings['random_seed']
 
 
-def get_rng(seed: Optional[int] = None) -> np.random.RandomState:
+def get_rng(seed: int | None = None) -> np.random.RandomState:
     """
     Get an isolated numpy RandomState instance.
     
@@ -113,7 +112,7 @@ def get_rng(seed: Optional[int] = None) -> np.random.RandomState:
         return np.random.RandomState()
 
 
-def resolve_seed(local_seed: Optional[int], default_seed: Optional[int] = None) -> Optional[int]:
+def resolve_seed(local_seed: int | None, default_seed: int | None = None) -> int | None:
     """
     Resolve which seed to use, with priority: local > default > global.
     

@@ -1,7 +1,6 @@
 import logging
 import shutil
 import threading
-from typing import Optional
 try:
     import matplotlib
     import matplotlib.font_manager
@@ -224,7 +223,7 @@ def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
     
     return str(MPL_FONT_PATH / font_file)
 
-def current_font() -> Optional[str]:
+def current_font() -> str | None:
     """
     Get the currently configured font name.
     

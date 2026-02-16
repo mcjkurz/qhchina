@@ -1,5 +1,5 @@
 import logging
-from typing import List, Tuple, Union, Optional, Any
+from typing import Any
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -16,11 +16,11 @@ __all__ = [
 def calculate_perplexity_of_tokens(
     model: Any, 
     tokenizer: Any, 
-    sequence: Union[str, List[str]], 
+    sequence: str | list[str], 
     context_size: int = 64, 
     verbose: bool = False, 
-    device: Optional[Any] = None
-) -> List[Tuple[str, int, float, bool]]:
+    device: Any | None = None
+) -> list[tuple[str, int, float, bool]]:
     """
     Calculate the perplexity of each token in a sequence with consistent context size.
     
@@ -124,8 +124,8 @@ def calculate_word_perplexity(
     tokenizer: Any, 
     context: str, 
     target_word: str, 
-    device: Optional[Any] = None
-) -> Tuple[float, List[Tuple[str, int, float]]]:
+    device: Any | None = None
+) -> tuple[float, list[tuple[str, int, float]]]:
     """
     Calculate the perplexity of a target word given a context.
     
@@ -217,12 +217,12 @@ def calculate_word_perplexity(
     return (avg_perplexity, token_perplexities)
 
 def visualize_perplexities(
-    perplexities: List[float], 
-    labels: List[str], 
+    perplexities: list[float], 
+    labels: list[str], 
     width: float = 14, 
     height: float = 3.5, 
     color: str = 'red', 
-    filename: Optional[str] = None
+    filename: str | None = None
 ) -> None:
     """
     Visualize perplexities with given labels.

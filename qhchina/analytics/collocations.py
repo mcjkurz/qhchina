@@ -1,6 +1,6 @@
 import logging
 from collections import Counter, defaultdict
-from typing import TYPE_CHECKING, Dict, List, Optional, Union, TypedDict, Tuple
+from typing import TypedDict
 
 import numpy as np
 import pandas as pd
@@ -9,9 +9,6 @@ from scipy.stats import fisher_exact as scipy_fisher_exact
 from tqdm.auto import tqdm
 
 from ..utils import apply_p_value_correction, VALID_CORRECTIONS
-
-if TYPE_CHECKING:
-    import matplotlib.pyplot as plt
 
 logger = logging.getLogger("qhchina.analytics.collocations")
 
@@ -54,10 +51,10 @@ class CoocMatrix:
     Internally stores data as a scipy sparse CSR matrix for memory efficiency.
     
     Attributes:
-        vocab (List[str]): List of vocabulary words in index order.
-        word_to_index (Dict[str, int]): Mapping from words to matrix indices.
-        index_to_word (Dict[int, str]): Mapping from matrix indices to words.
-        shape (Tuple[int, int]): Shape of the matrix (vocab_size, vocab_size).
+        vocab (list[str]): List of vocabulary words in index order.
+        word_to_index (dict[str, int]): Mapping from words to matrix indices.
+        index_to_word (dict[int, str]): Mapping from matrix indices to words.
+        shape (tuple[int, int]): Shape of the matrix (vocab_size, vocab_size).
         nnz (int): Number of non-zero entries.
     
     Example:
@@ -73,8 +70,8 @@ class CoocMatrix:
     def __init__(
         self, 
         matrix: sparse.csr_matrix, 
-        vocab_list: List[str], 
-        word_to_index: Dict[str, int]
+        vocab_list: list[str], 
+        word_to_index: dict[str, int]
     ):
         """
         Initialize CoocMatrix.
@@ -150,12 +147,12 @@ class CoocMatrix:
         col_idx = self._resolve_index(col_key)
         return int(self._matrix[row_idx, col_idx])
     
-    def _row_to_dict(self, row_idx: int) -> Dict[str, int]:
+    def _row_to_dict(self, row_idx: int) -> dict[str, int]:
         """Convert a matrix row to a dict of {word: count} for non-zero entries."""
         row = self._matrix.getrow(row_idx)
         return {self._i2w[col]: int(val) for col, val in zip(row.indices, row.data)}
     
-    def _col_to_dict(self, col_idx: int) -> Dict[str, int]:
+    def _col_to_dict(self, col_idx: int) -> dict[str, int]:
         """Convert a matrix column to a dict of {word: count} for non-zero entries."""
         col = self._matrix.getcol(col_idx)
         return {self._i2w[row]: int(val) for row, val in zip(col.indices, col.data)}
@@ -209,22 +206,22 @@ class CoocMatrix:
         return self._matrix
     
     @property
-    def vocab(self) -> List[str]:
+    def vocab(self) -> list[str]:
         """List of vocabulary words in index order. Returns the internal list directly."""
         return self._vocab
     
     @property
-    def word_to_index(self) -> Dict[str, int]:
+    def word_to_index(self) -> dict[str, int]:
         """Dictionary mapping words to their matrix indices. Returns the internal dict directly."""
         return self._w2i
     
     @property
-    def index_to_word(self) -> Dict[int, str]:
+    def index_to_word(self) -> dict[int, str]:
         """Dictionary mapping matrix indices to words. Returns the internal dict directly."""
         return self._i2w
     
     @property
-    def shape(self) -> Tuple[int, int]:
+    def shape(self) -> tuple[int, int]:
         """Shape of the matrix (vocab_size, vocab_size)."""
         return self._matrix.shape
     
@@ -255,7 +252,7 @@ class FilterOptions(TypedDict, total=False):
     """Type definition for filter options in collocation analysis."""
     max_p: float
     max_adjusted_p: float
-    stopwords: List[str]
+    stopwords: list[str]
     min_word_length: int
     min_exp_local: float
     max_exp_local: float
@@ -459,7 +456,7 @@ def _calculate_collocations_window_python(tokenized_sentences, target_words, hor
                         candidate_in_context[word][token] += 1
 
     return _build_results_from_counts(
-        target_words, T_count, candidate_in_context, token_counter, total_tokens, alternative
+        target_words, T_count, candidate_in_context, token_counter, total_tokens, alternative, method='window'
     )
 
 
@@ -538,28 +535,28 @@ def _calculate_collocations_sentence_python(tokenized_sentences, target_words, a
     )
 
 def find_collocates(
-    sentences: List[List[str]], 
-    target_words: Union[str, List[str]], 
+    sentences: list[list[str]], 
+    target_words: str | list[str], 
     method: str = 'window', 
-    horizon: Optional[Union[int, tuple]] = None, 
-    filters: Optional[FilterOptions] = None, 
-    correction: Optional[str] = None,
+    horizon: int | tuple | None = None, 
+    filters: FilterOptions | None = None, 
+    correction: str | None = None,
     as_dataframe: bool = True,
-    max_sentence_length: Optional[int] = 256,
+    max_sentence_length: int | None = 256,
     alternative: str = 'greater'
-) -> Union[List[Dict], pd.DataFrame]:
+) -> list[dict] | pd.DataFrame:
     """
     Find collocates for target words within a corpus of sentences.
     
     Args:
-        sentences (List[List[str]]): List of tokenized sentences, where each sentence 
+        sentences (list[list[str]]): List of tokenized sentences, where each sentence 
             is a list of tokens.
-        target_words (Union[str, List[str]]): Target word(s) to find collocates for.
+        target_words (str | list[str]): Target word(s) to find collocates for.
         method (str): Method to use for calculating collocations. Either 'window' or 
             'sentence'. 'window' uses a sliding window of specified horizon around each 
             token. 'sentence' considers whole sentences as context units (horizon not 
             applicable). Default is 'window'.
-        horizon (Optional[Union[int, tuple]]): Context window size relative to the target 
+        horizon (int | tuple | None): Context window size relative to the target 
             word. Only applicable when method='window'. Must be None when method='sentence'.
             - int: Symmetric window (e.g., 5 means 5 words on each side of target)
             - tuple: Asymmetric window (left, right) specifying how many words to look
@@ -567,14 +564,14 @@ def find_collocates(
               the RIGHT of target; (5, 0) finds collocates up to 5 words to the LEFT; 
               (2, 3) finds collocates 2 words left and 3 words right of target.
             - None: Uses default of 5 for 'window' method
-        filters (Optional[FilterOptions]): Dictionary of filters to apply to results.
+        filters (FilterOptions | None): Dictionary of filters to apply to results.
             All filters (except ``max_adjusted_p``) are applied BEFORE multiple testing 
             correction, defining the "family" of hypotheses being tested. This maximizes 
             statistical power by not correcting for collocates that were never of interest.
             
             Available filters:
             
-            - 'stopwords': List[str] - Words to exclude from results
+            - 'stopwords': list[str] - Words to exclude from results
             - 'min_word_length': int - Minimum character length for collocates
             - 'min_obs_local': int - Minimum observed local frequency
             - 'max_obs_local': int - Maximum observed local frequency
@@ -598,7 +595,7 @@ def find_collocates(
             - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).
             - None: No correction (default).
         as_dataframe (bool): If True, return results as a pandas DataFrame. Default is True.
-        max_sentence_length (Optional[int]): Maximum sentence length for preprocessing. 
+        max_sentence_length (int | None): Maximum sentence length for preprocessing. 
             Used by both 'window' and 'sentence' methods. Longer sentences will be truncated 
             to avoid memory bloat from outliers. Set to None for no limit. Default is 256.
         alternative (str): Alternative hypothesis for Fisher's exact test. Options are:
@@ -607,7 +604,7 @@ def find_collocates(
             observed differs from expected).
     
     Returns:
-        Union[List[Dict], pd.DataFrame]: Collocation results with the following fields:
+        list[dict] | pd.DataFrame: Collocation results with the following fields:
         
             - **target** (str): The target word.
             - **collocate** (str): The co-occurring word.
@@ -838,13 +835,13 @@ def find_collocates(
     return results
 
 def cooc_matrix(
-    documents: List[List[str]], 
-    horizon: Optional[Union[int, Tuple[int, int]]] = None,
+    documents: list[list[str]], 
+    horizon: int | tuple[int, int] | None = None,
     method: str = 'window',
     min_word_count: int = 1, 
     min_doc_count: int = 1, 
-    max_vocab_size: Optional[int] = None, 
-    vocab: Optional[Union[List[str], set]] = None,
+    max_vocab_size: int | None = None, 
+    vocab: list[str] | set | None = None,
     binary: bool = False,
 ) -> CoocMatrix:
     """
@@ -949,15 +946,13 @@ def cooc_matrix(
         )
     elif method == 'document':
         cooc_sparse = _cooc_document(documents, word_to_index, binary)
-    else:
-        raise ValueError(f"Invalid method: {method}. Valid methods are 'window' and 'document'.")
-    
+        
     return CoocMatrix(cooc_sparse, vocab_list, word_to_index)
 
 
 def _cooc_window(
-    documents: List[List[str]],
-    word_to_index: Dict[str, int],
+    documents: list[list[str]],
+    word_to_index: dict[str, int],
     left_horizon: int,
     right_horizon: int,
     binary: bool
@@ -1034,8 +1029,8 @@ def _cooc_window(
 
 
 def _cooc_document(
-    documents: List[List[str]],
-    word_to_index: Dict[str, int],
+    documents: list[list[str]],
+    word_to_index: dict[str, int],
     binary: bool
 ) -> sparse.csr_matrix:
     """
@@ -1091,26 +1086,26 @@ def _cooc_document(
     return cooc
 
 def plot_collocates(
-    collocates: Union[List[Dict], pd.DataFrame],
+    collocates: list[dict] | pd.DataFrame,
     x_col: str = 'ratio_local',
     y_col: str = 'p_value',
     x_scale: str = 'log',
     y_scale: str = 'log',
-    color: Optional[Union[str, List[str]]] = None,
+    color: str | list[str] | None = None,
     colormap: str = 'viridis',
-    color_by: Optional[str] = None,
-    title: Optional[str] = None,
+    color_by: str | None = None,
+    title: str | None = None,
     figsize: tuple = (10, 8),
     fontsize: int = 10,
     show_labels: bool = False,
-    label_top_n: Optional[int] = None,
+    label_top_n: int | None = None,
     alpha: float = 0.6,
     marker_size: int = 50,
     show_diagonal: bool = False,
     diagonal_color: str = 'red',
-    filename: Optional[str] = None,
-    xlabel: Optional[str] = None,
-    ylabel: Optional[str] = None
+    filename: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None
 ) -> None:
     """
     Visualize collocation results as a 2D scatter plot.
@@ -1120,7 +1115,7 @@ def plot_collocates(
     full flexibility to plot any columns with any scale type.
     
     Args:
-        collocates (Union[List[Dict], pd.DataFrame]): Output from find_collocates, 
+        collocates (list[dict] | pd.DataFrame): Output from find_collocates, 
             either as a list of dictionaries or DataFrame.
         x_col (str): Column name to plot on x-axis. Common choices: 'ratio_local', 
             'obs_local', 'exp_local', 'obs_global'. Default is 'ratio_local'.
@@ -1130,18 +1125,18 @@ def plot_collocates(
             For ratio_local, 'log' makes the scale symmetric around 1. Default is 'log'.
         y_scale (str): Scale for y-axis. Options: 'log', 'linear', 'symlog', 'logit'.
             For p_value, 'log' is recommended to visualize small values. Default is 'log'.
-        color (Optional[Union[str, List[str]]]): Color(s) for the points. Can be a single 
+        color (str | list[str] | None): Color(s) for the points. Can be a single 
             color string, list of colors, or None to use default.
         colormap (str): Matplotlib colormap to use when color_by is specified. 
             Default is 'viridis'.
-        color_by (Optional[str]): Column name to use for coloring points (e.g., 
+        color_by (str | None): Column name to use for coloring points (e.g., 
             'obs_local', 'obs_global').
-        title (Optional[str]): Title for the plot.
+        title (str | None): Title for the plot.
         figsize (tuple): Figure size as (width, height) in inches. Default is (10, 8).
         fontsize (int): Base font size for labels. Default is 10.
         show_labels (bool): Whether to show collocate text labels next to points. 
             Default is False.
-        label_top_n (Optional[int]): If specified, only label the top N points. When 
+        label_top_n (int | None): If specified, only label the top N points. When 
             color_by is set, ranks by that column; otherwise ranks by y-axis values. 
             For p_value, labels smallest (most significant) values; for other metrics, 
             labels largest values.
@@ -1150,10 +1145,10 @@ def plot_collocates(
         show_diagonal (bool): Whether to draw a diagonal reference line (y=x). Useful 
             for observed vs expected plots. Default is False.
         diagonal_color (str): Color of the diagonal reference line. Default is 'red'.
-        filename (Optional[str]): If provided, saves the figure to the specified file path.
-        xlabel (Optional[str]): Label for x-axis. If None, auto-generated from x_col 
+        filename (str | None): If provided, saves the figure to the specified file path.
+        xlabel (str | None): Label for x-axis. If None, auto-generated from x_col 
             and x_scale.
-        ylabel (Optional[str]): Label for y-axis. If None, auto-generated from y_col 
+        ylabel (str | None): Label for y-axis. If None, auto-generated from y_col 
             and y_scale.
     
     Returns:
@@ -1207,9 +1202,7 @@ def plot_collocates(
     
     fig, ax = plt.subplots(figsize=figsize)
     
-    if color is not None:
-        colors = color if isinstance(color, str) else color
-    elif color_by is not None:
+    if color_by is not None:
         if color_by not in df.columns:
             raise ValueError(f"Column '{color_by}' not found in data. Available columns: {list(df.columns)}")
         color_values = df[color_by].values
@@ -1218,10 +1211,8 @@ def plot_collocates(
         cbar = plt.colorbar(scatter, ax=ax)
         cbar.set_label(color_by, fontsize=fontsize)
     else:
-        colors = '#1f77b4'
-    
-    if color_by is None:
-        ax.scatter(x, y, c=colors, alpha=alpha, s=marker_size, 
+        point_color = color if color is not None else '#1f77b4'
+        ax.scatter(x, y, c=point_color, alpha=alpha, s=marker_size, 
                   edgecolors='black', linewidths=0.5)
     
     if show_labels:

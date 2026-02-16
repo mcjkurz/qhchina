@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from typing import List, Tuple, Dict, Optional, Union, Callable, Any
+from typing import Any
 import time
 import warnings
 from collections import defaultdict, Counter
@@ -12,9 +12,6 @@ from scipy.special import psi, polygamma
 from ..config import get_rng, resolve_seed
 
 logger = logging.getLogger("qhchina.analytics.topicmodels")
-
-# Template directory path
-_TEMPLATE_DIR = Path(__file__).parent.parent / "data" / "templates"
 
 
 __all__ = [
@@ -62,16 +59,16 @@ class LDAGibbsSampler:
     def __init__(
         self,
         n_topics: int = 10,
-        alpha: Optional[float] = None,
-        beta: Optional[float] = None,
+        alpha: float | np.ndarray | list[float] | None = None,
+        beta: float | None = None,
         iterations: int = 100,
         burnin: int = 0,
-        random_state: Optional[int] = None,
-        log_interval: Optional[int] = None,
+        random_state: int | None = None,
+        log_interval: int | None = None,
         min_word_count: int = 1,
-        max_vocab_size: Optional[int] = None,
+        max_vocab_size: int | None = None,
         min_word_length: int = 1,
-        stopwords: Optional[set] = None,
+        stopwords: set | None = None,
         estimate_alpha: int = 1
     ):
         # Validate parameters
@@ -184,7 +181,7 @@ class LDAGibbsSampler:
             logger.warning("Cython extensions not available; using slower Python fallback.")
             return False
         
-    def preprocess(self, documents: List[List[str]]) -> Tuple[List[List[int]], Dict[str, int], Dict[int, str]]:
+    def preprocess(self, documents: list[list[str]]) -> tuple[list[list[int]], dict[str, int], dict[int, str]]:
         """
         Convert token documents to word IDs and build vocabulary.
         Filter vocabulary based on min_word_count, min_word_length, stopwords, and max_vocab_size.
@@ -252,7 +249,7 @@ class LDAGibbsSampler:
 
         return docs_as_ids, word_to_id, id_to_word
     
-    def initialize(self, docs_as_ids: List[List[int]]) -> None:
+    def initialize(self, docs_as_ids: list[list[int]]) -> None:
         """
         Initialize data structures for Gibbs sampling.
         
@@ -350,9 +347,7 @@ class LDAGibbsSampler:
         n_docs = len(self.docs_tokens)
         total_iterations = self.iterations + self.burnin
         
-        if self.use_cython:
-            if hasattr(self.lda_sampler, 'seed_rng'):
-                self.lda_sampler.seed_rng(self._effective_seed)
+        # Note: Cython implementation is now thread-safe - seed is passed per-call
         
         impl_type = "Cython" if self.use_cython else "Python"
         n_iter = total_iterations if self.burnin > 0 else self.iterations
@@ -371,10 +366,12 @@ class LDAGibbsSampler:
             start_time = time.time()
             
             if self.use_cython:
+                # Generate a unique seed per iteration for reproducibility
+                iteration_seed = self._effective_seed + it if self._effective_seed is not None else None
                 self.z = self.lda_sampler.run_iteration(
                     self.n_wt, self.n_dt, self.n_t, self.z, 
                     self.docs_tokens, self.doc_lengths, self.alpha, self.beta,
-                    self.n_topics, self.vocabulary_size
+                    self.n_topics, self.vocabulary_size, seed=iteration_seed
                 )
             else:
                 for d in range(n_docs):
@@ -405,7 +402,7 @@ class LDAGibbsSampler:
                     progress_bar.set_postfix_str(f"perp={perplexity:.2f}, tok/s={tokens_per_sec:.0f}")
             
     def _compute_topic_probabilities(self, w: int, doc_topic_counts: np.ndarray, 
-                                    topic_normalizers: Optional[np.ndarray] = None) -> np.ndarray:
+                                    topic_normalizers: np.ndarray | None = None) -> np.ndarray:
         """
         Compute normalized topic probabilities for sampling.
         
@@ -477,7 +474,7 @@ class LDAGibbsSampler:
         # Ensure phi is C-contiguous after transpose: (n_topics, vocab_size)
         self.phi = np.ascontiguousarray(phi.T)
         
-    def fit(self, documents: List[List[str]]) -> None:
+    def fit(self, documents: list[list[str]]) -> None:
         """
         Fit the LDA model to the given documents.
         
@@ -560,7 +557,7 @@ class LDAGibbsSampler:
             
         return np.exp(-log_likelihood / token_count)
     
-    def get_topics(self, n_words: int = 10) -> List[List[Tuple[str, float]]]:
+    def get_topics(self, n_words: int = 10) -> list[list[tuple[str, float]]]:
         """
         Get the top words for each topic along with their probabilities.
         
@@ -580,7 +577,7 @@ class LDAGibbsSampler:
         
         return result
     
-    def get_document_topics(self, doc_id: int, sort_by_prob: bool = False) -> List[Tuple[int, float]]:
+    def get_document_topics(self, doc_id: int, sort_by_prob: bool = False) -> list[tuple[int, float]]:
         """
         Get topic distribution for a specific document.
         
@@ -605,7 +602,7 @@ class LDAGibbsSampler:
         """
         return np.mean(self.theta, axis=0)
     
-    def inference(self, new_doc: List[str], 
+    def inference(self, new_doc: list[str], 
                  inference_iterations: int = 100) -> np.ndarray:
         """
         Infer topic distribution for a new document.
@@ -631,9 +628,6 @@ class LDAGibbsSampler:
             return np.ones(self.n_topics) / self.n_topics
         
         if self.use_cython and hasattr(self.lda_sampler, 'run_inference'):
-            if hasattr(self.lda_sampler, 'seed_rng'):
-                self.lda_sampler.seed_rng(self._effective_seed)
-            
             # Convert to numpy array for Cython
             filtered_doc_array = np.array(filtered_doc, dtype=np.int32)
             
@@ -641,7 +635,8 @@ class LDAGibbsSampler:
                 self.n_wt, self.n_t, filtered_doc_array,
                 self.alpha, self.beta,
                 self.n_topics, self.vocabulary_size,
-                inference_iterations
+                inference_iterations,
+                seed=self._effective_seed
             )
         
         z_doc = self._rng.randint(0, self.n_topics, size=len(filtered_doc))
@@ -666,8 +661,8 @@ class LDAGibbsSampler:
         theta_doc = (n_dt_doc + self.alpha) / (len(filtered_doc) + alpha_sum)
         return theta_doc
     
-    def plot_topic_words(self, n_words: int = 10, figsize: Tuple[int, int] = (12, 8), 
-                        fontsize: int = 10, filename: Optional[str] = None,
+    def plot_topic_words(self, n_words: int = 10, figsize: tuple[int, int] = (12, 8), 
+                        fontsize: int = 10, filename: str | None = None,
                         separate_files: bool = False, dpi: int = 72, 
                         orientation: str = "horizontal") -> None:
         """
@@ -864,7 +859,7 @@ class LDAGibbsSampler:
         
         return model
     
-    def get_top_documents(self, topic_id: int, n_docs: int = 10) -> List[Tuple[int, float]]:
+    def get_top_documents(self, topic_id: int, n_docs: int = 10) -> list[tuple[int, float]]:
         """
         Get the top n documents for a specific topic.
         
@@ -883,7 +878,7 @@ class LDAGibbsSampler:
         
         return [(int(doc_id), float(topic_probs[doc_id])) for doc_id in top_doc_indices]
     
-    def get_topic_words(self, topic_id: int, n_words: int = 10) -> List[Tuple[str, float]]:
+    def get_topic_words(self, topic_id: int, n_words: int = 10) -> list[tuple[str, float]]:
         """
         Get the top n words for a specific topic.
         
@@ -1020,7 +1015,7 @@ class LDAGibbsSampler:
         
         return self._compute_distribution_similarity(self.theta[doc_i], self.theta[doc_j], metric)
     
-    def document_similarity_matrix(self, doc_ids: Optional[List[int]] = None, 
+    def document_similarity_matrix(self, doc_ids: list[int] | None = None, 
                                    metric: str = 'jsd') -> np.ndarray:
         """
         Calculate pairwise similarity/distance between documents.
@@ -1052,7 +1047,7 @@ class LDAGibbsSampler:
         
         return sim_matrix
     
-    def _compute_word_cooccurrence(self, window_size: int = 10) -> Tuple[Dict[int, int], Dict[Tuple[int, int], int]]:
+    def _compute_word_cooccurrence(self, window_size: int = 10) -> tuple[dict[int, int], dict[tuple[int, int], int]]:
         """
         Compute word occurrence and co-occurrence counts from the corpus.
         
@@ -1112,7 +1107,7 @@ class LDAGibbsSampler:
         
         return dict(word_doc_count), dict(word_pair_doc_count)
     
-    def coherence_umass(self, n_words: int = 10, eps: float = 1e-12) -> Tuple[float, List[float]]:
+    def coherence_umass(self, n_words: int = 10, eps: float = 1e-12) -> tuple[float, list[float]]:
         """
         Calculate UMass topic coherence (Mimno et al., 2011).
         
@@ -1172,7 +1167,7 @@ class LDAGibbsSampler:
         return avg_coherence, topic_coherences
     
     def coherence_npmi(self, n_words: int = 10, window_size: int = 10, 
-                       eps: float = 1e-12) -> Tuple[float, List[float]]:
+                       eps: float = 1e-12) -> tuple[float, list[float]]:
         """
         Calculate NPMI (Normalized Pointwise Mutual Information) topic coherence.
         
@@ -1234,7 +1229,7 @@ class LDAGibbsSampler:
         return avg_coherence, topic_coherences
     
     def coherence(self, method: str = 'umass', n_words: int = 10, 
-                  window_size: Optional[int] = None, **kwargs) -> Tuple[float, List[float]]:
+                  window_size: int | None = None, **kwargs) -> tuple[float, list[float]]:
         """
         Calculate topic coherence using the specified method.
         
@@ -1271,7 +1266,7 @@ class LDAGibbsSampler:
         else:
             raise ValueError(f"Unknown coherence method: {method}. Use 'umass' or 'npmi'")
     
-    def evaluate(self, n_words: int = 10, verbose: bool = True) -> Dict[str, Any]:
+    def evaluate(self, n_words: int = 10, verbose: bool = True) -> dict[str, Any]:
         """
         Comprehensive evaluation of the topic model.
         
@@ -1326,14 +1321,14 @@ class LDAGibbsSampler:
     @classmethod
     def train_multiple(
         cls,
-        documents: List[List[str]],
+        documents: list[list[str]],
         n_runs: int = 5,
         n_topics: int = 10,
-        random_seeds: Optional[List[int]] = None,
+        random_seeds: list[int] | None = None,
         return_all_models: bool = False,
         verbose: bool = True,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train multiple LDA models with different random seeds and analyze robustness.
         
@@ -1457,7 +1452,7 @@ class LDAGibbsSampler:
         return results
     
     @staticmethod
-    def _align_topics(model1: 'LDAGibbsSampler', model2: 'LDAGibbsSampler') -> Tuple[List[Tuple[int, int]], float]:
+    def _align_topics(model1: 'LDAGibbsSampler', model2: 'LDAGibbsSampler') -> tuple[list[tuple[int, int]], float]:
         """
         Align topics between two models using the Hungarian algorithm.
         
@@ -1510,25 +1505,25 @@ class LDAGibbsSampler:
     def visualize_documents(
         self,
         method: str = 'pca',
-        n_clusters: Optional[int] = None,
-        doc_labels: Optional[List[str]] = None,
+        n_clusters: int | None = None,
+        doc_labels: list[str] | None = None,
         show_labels: bool = False,
         label_strategy: str = 'auto',
         use_adjusttext: bool = True,
-        max_labels: Optional[int] = None,
-        figsize: Optional[Tuple[int, int]] = None,
+        max_labels: int | None = None,
+        figsize: tuple[int, int] | None = None,
         dpi: int = 150,
         alpha: float = 0.7,
         size: float = 50,
         cmap: str = 'tab10',
-        title: Optional[str] = None,
-        filename: Optional[str] = None,
+        title: str | None = None,
+        filename: str | None = None,
         format: str = 'static',
-        random_state: Optional[int] = None,
-        highlight: Optional[Union[int, List[int]]] = None,
+        random_state: int | None = None,
+        highlight: int | list[int] | None = None,
         n_topic_words: int = 4,
         **kwargs
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         """
         Visualize documents in 2D space using dimensionality reduction.
         
@@ -1778,20 +1773,20 @@ class LDAGibbsSampler:
         self,
         coords_2d: np.ndarray,
         colors: np.ndarray,
-        doc_labels: List[str],
-        labels_to_show: List[int],
+        doc_labels: list[str],
+        labels_to_show: list[int],
         method: str,
         color_label: str,
         use_adjusttext: bool,
-        figsize: Tuple[int, int],
+        figsize: tuple[int, int],
         dpi: int,
         alpha: float,
         size: float,
         cmap: str,
-        title: Optional[str],
-        filename: Optional[str],
-        extra_info: Dict[str, Any],
-        highlight: Optional[List[int]],
+        title: str | None,
+        filename: str | None,
+        extra_info: dict[str, Any],
+        highlight: list[int] | None,
         n_topic_words: int = 4
     ) -> np.ndarray:
         """Create static matplotlib scatter plot."""
@@ -1907,13 +1902,13 @@ class LDAGibbsSampler:
         self,
         coords_2d: np.ndarray,
         colors: np.ndarray,
-        doc_labels: List[str],
+        doc_labels: list[str],
         method: str,
         color_label: str,
-        title: Optional[str],
-        filename: Optional[str],
-        extra_info: Dict[str, Any],
-        highlight: Optional[List[int]],
+        title: str | None,
+        filename: str | None,
+        extra_info: dict[str, Any],
+        highlight: list[int] | None,
         n_topic_words: int = 4,
         size: float = 50
     ) -> None:
@@ -1991,7 +1986,8 @@ class LDAGibbsSampler:
             canvas_width, canvas_height = 2000, 1600
         
         # Load HTML template
-        template_path = _TEMPLATE_DIR / "document_visualization.html"
+        template_dir = Path(__file__).parent.parent / "data" / "templates"
+        template_path = template_dir / "document_visualization.html"
         with open(template_path, 'r', encoding='utf-8') as f:
             html_template = f.read()
         

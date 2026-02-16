@@ -679,12 +679,6 @@ cdef _calculate_cooc_window_counts(
         row_arr[idx] = row_vec[idx]
         col_arr[idx] = col_vec[idx]
     
-    if binary:
-        # For binary mode, all data values are 1; scipy will overwrite duplicates
-        # (since data[i] = data[j] = 1, the result is still 1)
-        data_arr = np.ones(n_pairs, dtype=np.int64)
-    else:
-        # For count mode, all data values are 1; scipy will SUM duplicates
-        data_arr = np.ones(n_pairs, dtype=np.int64)
+    data_arr = np.ones(n_pairs, dtype=np.int64)
     
     return row_arr, col_arr, data_arr

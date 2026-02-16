@@ -26,7 +26,7 @@ Features:
 import logging
 import numpy as np
 from collections import Counter
-from typing import List, Dict, Tuple, Optional, Union, Callable, Iterable
+from collections.abc import Callable, Iterable
 from tqdm.auto import tqdm
 import time
 from .vectors import cosine_similarity
@@ -123,7 +123,7 @@ class Word2Vec:
     
     def __init__(
         self,
-        sentences: Optional[Iterable[List[str]]] = None,
+        sentences: Iterable[list[str]] | None = None,
         vector_size: int = 100,
         window: int = 5,
         min_word_count: int = 5,
@@ -131,19 +131,55 @@ class Word2Vec:
         ns_exponent: float = 0.75,
         cbow_mean: bool = True,
         sg: int = 0,
-        seed: int = 1,
+        seed: int | None = None,
         alpha: float = 0.025,
-        min_alpha: Optional[float] = None,
+        min_alpha: float | None = None,
         sample: float = 1e-3,
         shrink_windows: bool = True,
-        max_vocab_size: Optional[int] = None,
+        max_vocab_size: int | None = None,
         verbose: bool = False,
         epochs: int = 1,
         batch_size: int = 10240,
-        callbacks: Optional[List[Callable]] = None,
+        callbacks: list[Callable] | None = None,
         calculate_loss: bool = True,
-        total_examples: Optional[int] = None,
+        total_examples: int | None = None,
+        _skip_init: bool = False,
     ):
+        # _skip_init is used by load() to create an empty shell that will be populated
+        # with saved state. This avoids unnecessary initialization and training.
+        if _skip_init:
+            self.verbose = verbose
+            self.vector_size = vector_size
+            self.window = window
+            self.min_word_count = min_word_count
+            self.negative = negative
+            self.ns_exponent = ns_exponent
+            self.cbow_mean = cbow_mean
+            self.sg = sg
+            self.seed = seed
+            self.alpha = alpha
+            self.min_alpha = min_alpha
+            self.sample = sample
+            self.shrink_windows = shrink_windows
+            self.max_vocab_size = max_vocab_size
+            self.dtype = np.float32
+            self.epochs = epochs
+            self.batch_size = batch_size
+            self.callbacks = callbacks
+            self.calculate_loss = calculate_loss
+            self.total_examples_hint = total_examples
+            # Initialize empty structures - will be populated by load()
+            self.vocab = {}
+            self.index2word = []
+            self.word_counts = Counter()
+            self.corpus_word_count = 0
+            self.total_corpus_tokens = 0
+            self.W = None
+            self.W_prime = None
+            self.noise_distribution = None
+            self._rng = get_rng(resolve_seed(seed))
+            return
+        
         self.verbose = verbose
         self.vector_size = vector_size
         self.window = window
@@ -205,7 +241,7 @@ class Word2Vec:
         """
         return self
 
-    def build_vocab(self, sentences: Iterable[List[str]]) -> None:
+    def build_vocab(self, sentences: Iterable[list[str]]) -> None:
         """
         Build vocabulary from sentences.
         
@@ -326,20 +362,13 @@ class Word2Vec:
         if self.verbose:
             logger.info(f"Initializing vectors: 2 matrices of shape ({vocab_size:,}, {self.vector_size})...")
         
-        # Initialize input and output matrices
-        # Using Xavier/Glorot initialization for better convergence
-        # Range is [-0.5/dim, 0.5/dim]
+        # Initialize input and output matrices with Xavier/Glorot initialization
         bound = 0.5 / self.vector_size
         self.W = self._rng.uniform(
-            low=-bound, 
-            high=bound, 
-            size=(vocab_size, self.vector_size)
+            low=-bound, high=bound, size=(vocab_size, self.vector_size)
         ).astype(self.dtype)
-        
         self.W_prime = self._rng.uniform(
-            low=-bound, 
-            high=bound, 
-            size=(vocab_size, self.vector_size)
+            low=-bound, high=bound, size=(vocab_size, self.vector_size)
         ).astype(self.dtype)
 
     def _prepare_noise_distribution(self) -> None:
@@ -393,9 +422,17 @@ class Word2Vec:
         return self._cum_table
     
     def _get_random_state(self) -> int:
-        """Get current random state for training."""
+        """Get current random state for training.
+        
+        Returns an integer seed for the Cython training code. If seed is None,
+        generates a random seed using the RNG.
+        """
         if not hasattr(self, '_random_state'):
-            self._random_state = self.seed
+            if self.seed is not None:
+                self._random_state = self.seed
+            else:
+                # Generate random seed from RNG when no seed was provided
+                self._random_state = self._rng.randint(0, 2**32 - 1)
         return self._random_state
     
     def _set_random_state(self, state: int) -> None:
@@ -436,7 +473,7 @@ class Word2Vec:
         
         return sample_ints
     
-    def _iter_batches(self, sentences: Iterable[List[str]], batch_words: int = 10240):
+    def _iter_batches(self, sentences: Iterable[list[str]], batch_words: int = 10240):
         """
         Yield batches of sentences, batched by total word count (like Gensim).
         
@@ -475,11 +512,11 @@ class Word2Vec:
         
     def _train_batch(
         self,
-        batch: List[List[str]],
+        batch: list[list[str]],
         sample_ints: np.ndarray,
         alpha: float,
         calculate_loss: bool
-    ) -> Tuple[float, int, int, int]:
+    ) -> tuple[float, int, int, int]:
         """
         Train on a single batch of sentences. Override in subclasses for different training logic.
         
@@ -510,7 +547,7 @@ class Word2Vec:
             calculate_loss,
         )
 
-    def train(self, sentences: Iterable[List[str]]) -> Optional[float]:
+    def train(self, sentences: Iterable[list[str]]) -> float | None:
         """
         Train word2vec model on given sentences.
         
@@ -742,7 +779,7 @@ class Word2Vec:
         """
         return word in self.vocab
     
-    def most_similar(self, word: str, topn: int = 10) -> List[Tuple[str, float]]:
+    def most_similar(self, word: str, topn: int = 10) -> list[tuple[str, float]]:
         """
         Find the topn most similar words to the given word.
         
@@ -845,6 +882,7 @@ class Word2Vec:
         sample = model_data.get('sample', 1e-3)
         max_vocab_size = model_data.get('max_vocab_size', None)
         
+        # Create model with _skip_init to avoid unnecessary initialization
         model = cls(
             vector_size=model_data['vector_size'],
             window=model_data['window'],
@@ -856,8 +894,10 @@ class Word2Vec:
             sample=sample,
             shrink_windows=shrink_windows,
             max_vocab_size=max_vocab_size,
+            _skip_init=True,
         )
         
+        # Restore saved state
         model.vocab = model_data['vocab']
         model.index2word = model_data['index2word']
         model.word_counts = Counter(model_data.get('word_counts', {}))
@@ -883,10 +923,10 @@ class TempRefWord2Vec(Word2Vec):
     creates temporal references for specified target words.
     
     Args:
-        corpora (List[List[List[str]]]): List of corpora, each corpus is a list of sentences 
+        corpora (list[list[list[str]]]): List of corpora, each corpus is a list of sentences 
             for a time period.
-        labels (List[str]): Labels for each corpus (e.g., time periods like "1800s", "1900s").
-        targets (List[str]): List of target words to trace semantic change.
+        labels (list[str]): Labels for each corpus (e.g., time periods like "1800s", "1900s").
+        targets (list[str]): List of target words to trace semantic change.
         balance (bool): Whether to balance the corpora to equal sizes (default: True).
         **kwargs: Arguments passed to Word2Vec parent class (vector_size, window, sg, etc.).
     
@@ -914,10 +954,10 @@ class TempRefWord2Vec(Word2Vec):
     
     @staticmethod
     def _sample_sentences_to_token_count(
-        corpus: List[List[str]], 
+        corpus: list[list[str]], 
         target_tokens: int,
-        seed: Optional[int] = None
-    ) -> List[List[str]]:
+        seed: int | None = None
+    ) -> list[list[str]]:
         """
         Sample sentences from a corpus until the target token count is reached.
         
@@ -950,10 +990,10 @@ class TempRefWord2Vec(Word2Vec):
 
     @staticmethod
     def _add_corpus_tags(
-        corpora: List[List[List[str]]], 
-        labels: List[str], 
-        target_words: List[str]
-    ) -> List[List[List[str]]]:
+        corpora: list[list[list[str]]], 
+        labels: list[str], 
+        target_words: list[str]
+    ) -> list[list[list[str]]]:
         """
         Add corpus-specific tags to target words in all corpora at once.
         
@@ -984,12 +1024,26 @@ class TempRefWord2Vec(Word2Vec):
 
     def __init__(
         self,
-        corpora: List[List[List[str]]],  # List of corpora, each corpus is a list of sentences
-        labels: List[str],               # Labels for each corpus (e.g., time periods)
-        targets: List[str],              # Target words to trace semantic change
+        corpora: list[list[list[str]]],  # List of corpora, each corpus is a list of sentences
+        labels: list[str],               # Labels for each corpus (e.g., time periods)
+        targets: list[str],              # Target words to trace semantic change
         balance: bool = True,            # Whether to balance the corpora
+        _skip_init: bool = False,        # Used by load() to skip normal initialization
         **kwargs                         # Parameters passed to Word2Vec parent class
     ):
+        # _skip_init is used by load() to create an empty shell that will be populated
+        # with saved state. This avoids unnecessary corpus processing and training.
+        if _skip_init:
+            self.labels = labels
+            self.targets = targets
+            self.combined_corpus = []
+            self.period_vocab_counts = {}
+            self.temporal_word_map = {}
+            self.reverse_temporal_map = {}
+            # Initialize parent with _skip_init to avoid training
+            super().__init__(_skip_init=True, **kwargs)
+            return
+        
         # Check that corpora and labels have the same length
         if len(corpora) != len(labels):
             raise ValueError(f"Number of corpora ({len(corpora)}) must match number of labels ({len(labels)})")
@@ -1075,7 +1129,7 @@ class TempRefWord2Vec(Word2Vec):
         if self.combined_corpus:
             self.train()
     
-    def build_vocab(self, sentences: List[List[str]]) -> None:
+    def build_vocab(self, sentences: list[list[str]]) -> None:
         """
         Extends the parent build_vocab method to handle temporal word variants.
         Explicitly adds base words to the vocabulary even if they don't appear in the corpus.
@@ -1172,11 +1226,11 @@ class TempRefWord2Vec(Word2Vec):
     
     def _train_batch(
         self,
-        batch: List[List[str]],
+        batch: list[list[str]],
         sample_ints: np.ndarray,
         alpha: float,
         calculate_loss: bool
-    ) -> Tuple[float, int, int, int]:
+    ) -> tuple[float, int, int, int]:
         """
         Train on a single batch using temporal-aware training.
         
@@ -1213,7 +1267,7 @@ class TempRefWord2Vec(Word2Vec):
             calculate_loss,
         )
     
-    def train(self, sentences: Optional[List[List[str]]] = None) -> Optional[float]:
+    def train(self, sentences: list[list[str]] | None = None) -> float | None:
         """
         Train the TempRefWord2Vec model using the preprocessed combined corpus.
         
@@ -1237,7 +1291,7 @@ class TempRefWord2Vec(Word2Vec):
         # Call the parent's train method with our combined corpus
         return super().train(sentences=self.combined_corpus)
 
-    def calculate_semantic_change(self, target_word: str, labels: Optional[List[str]] = None) -> Dict[str, List[Tuple[str, float]]]:
+    def calculate_semantic_change(self, target_word: str, labels: list[str] | None = None) -> dict[str, list[tuple[str, float]]]:
         """
         Calculate semantic change by comparing cosine similarities across time periods.
         
@@ -1309,7 +1363,7 @@ class TempRefWord2Vec(Word2Vec):
         
         return results
 
-    def get_available_targets(self) -> List[str]:
+    def get_available_targets(self) -> list[str]:
         """
         Get the list of target words available for semantic change analysis.
         
@@ -1318,7 +1372,7 @@ class TempRefWord2Vec(Word2Vec):
         """
         return self.targets.copy()
 
-    def get_time_labels(self) -> List[str]:
+    def get_time_labels(self) -> list[str]:
         """
         Get the list of time period labels used in the model.
         
@@ -1327,7 +1381,7 @@ class TempRefWord2Vec(Word2Vec):
         """
         return self.labels.copy()
     
-    def get_period_vocab_counts(self, period: Optional[str] = None) -> Union[Dict[str, Counter], Counter]:
+    def get_period_vocab_counts(self, period: str | None = None) -> dict[str, Counter] | Counter:
         """
         Get vocabulary counts for a specific period or all periods.
         
@@ -1442,18 +1496,15 @@ class TempRefWord2Vec(Word2Vec):
         labels = model_data['labels']
         targets = model_data['targets']
         
-        # Create a dummy corpus for initialization (we don't save the actual corpus)
-        # The model will be fully restored from saved vectors and vocab
-        dummy_corpora = [[] for _ in labels]
-        
         # Get base model parameters with defaults
         shrink_windows = model_data.get('shrink_windows', False)
         sample = model_data.get('sample', 1e-3)
         max_vocab_size = model_data.get('max_vocab_size', None)
         
-        # Create model instance with dummy data (will be overwritten)
+        # Create model instance with _skip_init to avoid unnecessary initialization
+        # Dummy corpora are still passed for interface consistency but won't be processed
         model = cls(
-            corpora=dummy_corpora,
+            corpora=[],  # Empty - won't be used with _skip_init
             labels=labels,
             targets=targets,
             vector_size=model_data['vector_size'],
@@ -1466,7 +1517,7 @@ class TempRefWord2Vec(Word2Vec):
             sample=sample,
             shrink_windows=shrink_windows,
             max_vocab_size=max_vocab_size,
-            balance=False  # Don't balance dummy corpora
+            _skip_init=True,
         )
         
         # Restore saved model state
