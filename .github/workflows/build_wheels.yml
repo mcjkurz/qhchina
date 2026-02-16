@@ -10,6 +10,32 @@ on:
         default: false
 
 jobs:
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
   build_wheels:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -24,7 +50,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install build dependencies
         run: |
@@ -36,25 +62,25 @@ jobs:
         if: runner.os == 'Linux'
         uses: pypa/cibuildwheel@v3.3.1
         env:
-          CIBW_ARCHS: "x86_64"  # Only build 64-bit wheels
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"  # Build for Python 3.10-3.14
-          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"  # Skip musl and 32-bit builds
+          CIBW_ARCHS: "x86_64 aarch64"
+          CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
+          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"
 
       # Windows builds
       - name: Build Windows wheels
         if: runner.os == 'Windows'
         uses: pypa/cibuildwheel@v3.3.1
         env:
-          CIBW_ARCHS: "AMD64"  # Only build 64-bit wheels
-          CIBW_BUILD: "cp310-win* cp311-win* cp312-win* cp313-win* cp314-win*"  # Build for Python 3.10-3.14
+          CIBW_ARCHS: "AMD64"
+          CIBW_BUILD: "cp311-win* cp312-win* cp313-win* cp314-win*"
           
       # macOS builds
       - name: Build macOS wheels
         if: runner.os == 'macOS'
         uses: pypa/cibuildwheel@v3.3.1
         env:
-          CIBW_ARCHS: "x86_64 arm64 universal2"
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"  # Build for Python 3.10-3.14
+          CIBW_ARCHS: "universal2"
+          CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
           
       # Upload artifacts
       - name: Upload wheels
@@ -63,17 +89,20 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
 
-  # Publish to PyPI from GitHub's servers (fast + reliable)
+  # Publish to PyPI and create GitHub Release
   publish:
     name: Publish to PyPI
-    needs: build_wheels
+    needs: [build_sdist, build_wheels]
     if: ${{ inputs.publish_to_pypi }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # Required for trusted publishing
+      contents: write  # Required for creating GitHub releases
     environment: pypi
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v4
         with:
@@ -81,14 +110,43 @@ jobs:
           pattern: wheels-*
           merge-multiple: true
 
-      - name: List wheels to publish
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: List packages to publish
         run: |
-          echo "Wheels to publish:"
-          ls -lh dist/*.whl
+          echo "Packages to publish:"
+          ls -lh dist/
           echo ""
-          echo "Total: $(ls dist/*.whl | wc -l) wheels"
+          echo "Total: $(ls dist/ | wc -l) packages"
+
+      - name: Get version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(grep -E '^version = "' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: |
+            ## qhchina v${{ steps.version.outputs.version }}
+
+            **Install:**
+            ```
+            pip install qhchina==${{ steps.version.outputs.version }}
+            ```
+
+            **PyPI:** https://pypi.org/project/qhchina/${{ steps.version.outputs.version }}/
+          generate_release_notes: true
