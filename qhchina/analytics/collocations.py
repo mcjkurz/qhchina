@@ -842,7 +842,7 @@ def find_collocates(
 
 def cooc_matrix(
     documents: List[List[str]], 
-    horizon: Union[int, Tuple[int, int]] = 5,
+    horizon: Optional[Union[int, Tuple[int, int]]] = None,
     method: str = 'window',
     min_word_count: int = 1, 
     min_doc_count: int = 1, 
@@ -861,7 +861,9 @@ def cooc_matrix(
     
     Args:
         documents: List of tokenized documents, where each document is a list of tokens.
-        horizon: Context window size relative to each word. Only used for method='window'.
+        horizon: Context window size relative to each word. Only applicable for method='window'.
+            If not provided, defaults to 5 for window method. Must not be provided for 
+            method='document'.
             - int: Symmetric window (e.g., 5 means 5 words on each side)
             - tuple: Asymmetric window (left, right), e.g., (0, 5) for right-only context
         method: Method for calculating co-occurrences:
@@ -901,6 +903,18 @@ def cooc_matrix(
     if method not in ('window', 'document'):
         raise ValueError("method must be 'window' or 'document'")
     
+    # Validate horizon parameter based on method
+    if method == 'document':
+        if horizon is not None:
+            raise ValueError(
+                "The 'horizon' parameter is not applicable when method='document'. "
+                "Document-based co-occurrence uses entire documents as context units. "
+                "Please remove the 'horizon' argument or use method='window'."
+            )
+    elif method == 'window':
+        if horizon is None:
+            horizon = 5  # Default value for window method
+    
     # Build vocabulary
     if vocab is not None:
         # User-provided vocabulary: use exactly as given, no filtering
@@ -925,14 +939,13 @@ def cooc_matrix(
     
     word_to_index = {word: i for i, word in enumerate(vocab_list)}
     
-    # Normalize horizon
-    if isinstance(horizon, int):
-        left_horizon, right_horizon = horizon, horizon
-    else:
-        left_horizon, right_horizon = horizon[0], horizon[1]
-    
     # Calculate co-occurrences
     if method == 'window':
+        # Normalize horizon for window method
+        if isinstance(horizon, int):
+            left_horizon, right_horizon = horizon, horizon
+        else:
+            left_horizon, right_horizon = horizon[0], horizon[1]
         cooc_sparse = _cooc_window(
             documents, word_to_index, left_horizon, right_horizon, binary
         )
