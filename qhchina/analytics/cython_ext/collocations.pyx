@@ -24,6 +24,9 @@ cimport numpy as np
 from libc.stdlib cimport malloc, free
 from libc.string cimport memset
 from libcpp.vector cimport vector
+from libcpp.unordered_map cimport unordered_map
+from libcpp.pair cimport pair
+from libc.stdint cimport int64_t
 
 # Define C-level types for better performance
 ctypedef np.int32_t INT_t
@@ -68,7 +71,7 @@ def build_vocabulary(list tokenized_sentences):
     
     return word2idx, idx2word
 
-cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict word2idx) except NULL:
+cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict word2idx, bint keep_oov=False) except NULL:
     """
     Encode corpus into compact C-level buffers (flattened tokens + offsets).
     
@@ -79,6 +82,8 @@ cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict wor
     Args:
         tokenized_sentences: List of tokenized sentences (list of lists of strings)
         word2idx: Dictionary mapping words to indices
+        keep_oov: If True, OOV words are kept as -1 sentinel values to preserve
+                  positional distances. If False (default), OOV words are skipped.
         
     Returns:
         EncodedCorpus*: Pointer to encoded corpus structure (caller must free)
@@ -117,7 +122,12 @@ cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict wor
         for j in range(sent_len):
             word = sentence[j]
             token_idx = word2idx_get(word, -1)
-            if token_idx >= 0:
+            if keep_oov:
+                # Keep all tokens, OOV words get -1 sentinel value
+                tokens_vec.push_back(token_idx)
+                current_offset += 1
+            elif token_idx >= 0:
+                # Skip OOV words
                 tokens_vec.push_back(token_idx)
                 current_offset += 1
         
@@ -548,3 +558,133 @@ cdef calculate_window_counts(
     
     # Return the arrays directly (no sparse-to-dense conversion needed)
     return T_count_arr, candidate_counts_arr, token_counter_arr, total_tokens
+
+
+# =============================================================================
+# Co-occurrence Matrix Functions
+# =============================================================================
+
+def calculate_cooc_matrix_window(list documents, dict word_to_index, 
+                                  int left_horizon=5, int right_horizon=5,
+                                  bint binary=False):
+    """
+    Cython-accelerated window-based co-occurrence matrix calculation.
+    
+    This function preserves word distances by keeping OOV words as sentinel values
+    during encoding. OOV words occupy their positions but are skipped for counting,
+    ensuring that distances between vocabulary words are accurate.
+    
+    Args:
+        documents: List of tokenized documents (list of lists of strings)
+        word_to_index: Dictionary mapping vocabulary words to indices
+        left_horizon: Window size on the left side
+        right_horizon: Window size on the right side
+        binary: If True, count co-occurrences as binary (0/1). Default False.
+        
+    Returns:
+        tuple: (row_indices, col_indices, data_values) - COO format sparse matrix data
+            All are numpy arrays ready for scipy.sparse.coo_matrix construction.
+    """
+    cdef EncodedCorpus* corpus = NULL
+    cdef int vocab_size = len(word_to_index)
+    
+    if vocab_size == 0:
+        return np.array([], dtype=np.int32), np.array([], dtype=np.int32), np.array([], dtype=np.int64)
+    
+    # Encode corpus with keep_oov=True to preserve distances
+    corpus = encode_corpus_to_c_buffer(documents, word_to_index, keep_oov=True)
+    
+    try:
+        return _calculate_cooc_window_counts(
+            corpus, vocab_size, left_horizon, right_horizon, binary
+        )
+    finally:
+        free_encoded_corpus(corpus)
+
+
+cdef _calculate_cooc_window_counts(
+    EncodedCorpus* corpus,
+    int vocab_size,
+    int left_horizon,
+    int right_horizon,
+    bint binary
+):
+    """
+    Core co-occurrence counting logic for window method.
+    
+    Processes corpus with OOV sentinel values (-1). Sentinels occupy positions
+    (preserving distances) but are skipped for co-occurrence counting.
+    
+    Strategy: Collect all (row, col) pairs into C++ vectors with nogil, then
+    let the caller use scipy's COO->CSR conversion which efficiently sums duplicates.
+    This is faster than maintaining a hash map because:
+    1. Vector push_back is O(1) amortized, hash map insert is O(1) average but with
+       higher constant factor due to hashing and collision handling
+    2. scipy's sparse matrix construction uses optimized C code for duplicate summing
+    """
+    cdef int n_docs = corpus.n_sentences
+    cdef int i, j, s, start, end, center_idx, context_idx
+    cdef LONG_t doc_start, doc_end, doc_len
+    
+    # Use C++ vectors for fast pair collection - fully nogil compatible
+    cdef vector[INT_t] row_vec
+    cdef vector[INT_t] col_vec
+    
+    # Estimate capacity: ~10 pairs per token on average (window of 5 each side)
+    cdef LONG_t estimated_pairs = corpus.total_tokens * (left_horizon + right_horizon)
+    row_vec.reserve(estimated_pairs)
+    col_vec.reserve(estimated_pairs)
+    
+    # Main counting loop - fully nogil!
+    with nogil:
+        for s in range(n_docs):
+            doc_start = corpus.offsets[s]
+            doc_end = corpus.offsets[s + 1]
+            doc_len = doc_end - doc_start
+            
+            # Process each position in document
+            for i in range(<int>doc_len):
+                center_idx = corpus.tokens[doc_start + i]
+                
+                # Skip OOV center words (sentinel = -1)
+                if center_idx < 0:
+                    continue
+                
+                # Define window bounds
+                start = i - left_horizon if i >= left_horizon else 0
+                end = i + right_horizon + 1 if i + right_horizon + 1 <= <int>doc_len else <int>doc_len
+                
+                # Collect co-occurrence pairs in window
+                for j in range(start, end):
+                    if j != i:
+                        context_idx = corpus.tokens[doc_start + j]
+                        
+                        # Skip OOV context words (sentinel = -1)
+                        if context_idx < 0:
+                            continue
+                        
+                        # For non-binary mode, we collect all pairs
+                        # scipy will sum duplicates during CSR conversion
+                        row_vec.push_back(center_idx)
+                        col_vec.push_back(context_idx)
+    
+    # Convert C++ vectors to NumPy arrays
+    cdef LONG_t n_pairs = row_vec.size()
+    cdef np.ndarray[INT_t, ndim=1] row_arr = np.empty(n_pairs, dtype=np.int32)
+    cdef np.ndarray[INT_t, ndim=1] col_arr = np.empty(n_pairs, dtype=np.int32)
+    cdef np.ndarray[LONG_t, ndim=1] data_arr
+    
+    cdef LONG_t idx
+    for idx in range(n_pairs):
+        row_arr[idx] = row_vec[idx]
+        col_arr[idx] = col_vec[idx]
+    
+    if binary:
+        # For binary mode, all data values are 1; scipy will overwrite duplicates
+        # (since data[i] = data[j] = 1, the result is still 1)
+        data_arr = np.ones(n_pairs, dtype=np.int64)
+    else:
+        # For count mode, all data values are 1; scipy will SUM duplicates
+        data_arr = np.ones(n_pairs, dtype=np.int64)
+    
+    return row_arr, col_arr, data_arr

@@ -1,13 +1,17 @@
 import logging
 from collections import Counter, defaultdict
+from typing import TYPE_CHECKING, Dict, List, Optional, Union, TypedDict, Tuple
+
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
-from typing import Dict, List, Optional, Union, TypedDict, Tuple, Any
-import matplotlib.pyplot as plt
-
+from scipy import sparse
 from scipy.stats import fisher_exact as scipy_fisher_exact
+from tqdm.auto import tqdm
+
 from ..utils import apply_p_value_correction, VALID_CORRECTIONS
+
+if TYPE_CHECKING:
+    import matplotlib.pyplot as plt
 
 logger = logging.getLogger("qhchina.analytics.collocations")
 
@@ -17,18 +21,238 @@ __all__ = [
     'cooc_matrix',
     'plot_collocates',
     'FilterOptions',
+    'CoocMatrix',
 ]
 
 try:
     from .cython_ext.collocations import (
         calculate_collocations_window,
-        calculate_collocations_sentence
+        calculate_collocations_sentence,
+        calculate_cooc_matrix_window
     )
     CYTHON_AVAILABLE = True
 except ImportError:
     CYTHON_AVAILABLE = False
     calculate_collocations_window = None
     calculate_collocations_sentence = None
+    calculate_cooc_matrix_window = None
+    logger.warning("Cython extensions not available; using slower Python fallback.")
+
+
+# =============================================================================
+# CoocMatrix Class - Vocabulary-aware co-occurrence matrix
+# =============================================================================
+
+class CoocMatrix:
+    """
+    A vocabulary-aware co-occurrence matrix with intuitive indexing.
+    
+    Supports flexible indexing by word strings or integer indices:
+        matrix["word1", "word2"]  → single count (int)
+        matrix[132, 5234]         → single count (int)
+        matrix["word1"]           → row as dict {word: count}
+        matrix["word1", :]        → row as dict {word: count}
+        matrix[:, "word2"]        → column as dict {word: count}
+    
+    Internally stores data as a scipy sparse CSR matrix for memory efficiency.
+    
+    Attributes:
+        vocab (List[str]): List of vocabulary words in index order.
+        word_to_index (Dict[str, int]): Mapping from words to matrix indices.
+        index_to_word (Dict[int, str]): Mapping from matrix indices to words.
+        shape (Tuple[int, int]): Shape of the matrix (vocab_size, vocab_size).
+        nnz (int): Number of non-zero entries.
+    
+    Example:
+        >>> matrix = cooc_matrix(documents, horizon=5)
+        >>> matrix["fox", "dog"]
+        42
+        >>> matrix["fox"]
+        {'quick': 10, 'brown': 8, 'dog': 42, ...}
+        >>> df = matrix.to_dataframe()
+        >>> arr = matrix.to_dense()
+    """
+    
+    def __init__(
+        self, 
+        matrix: sparse.csr_matrix, 
+        vocab_list: List[str], 
+        word_to_index: Dict[str, int]
+    ):
+        """
+        Initialize CoocMatrix.
+        
+        Args:
+            matrix: scipy CSR sparse matrix containing co-occurrence counts.
+            vocab_list: List of vocabulary words in index order.
+            word_to_index: Dictionary mapping words to their matrix indices.
+        """
+        self._matrix = matrix
+        self._vocab = vocab_list
+        self._w2i = word_to_index
+        self._i2w = {i: w for w, i in word_to_index.items()}
+    
+    def _resolve_index(self, key) -> int:
+        """Convert a word string or int to a matrix index."""
+        if isinstance(key, str):
+            if key not in self._w2i:
+                raise KeyError(f"Word '{key}' not in vocabulary")
+            return self._w2i[key]
+        elif isinstance(key, (int, np.integer)):
+            if key < 0 or key >= len(self._vocab):
+                raise IndexError(f"Index {key} out of range [0, {len(self._vocab)})")
+            return int(key)
+        else:
+            raise TypeError(f"Index must be str or int, got {type(key).__name__}")
+    
+    def __getitem__(self, key):
+        """
+        Flexible indexing for co-occurrence lookups.
+        
+        Args:
+            key: Can be:
+                - (word1, word2) or (idx1, idx2): Returns single count
+                - word or idx: Returns row as dict
+                - (word, slice) or (slice, word): Returns row/column as dict
+        
+        Returns:
+            int for single cell lookup, dict for row/column lookup.
+        
+        Examples:
+            >>> matrix["fox", "dog"]      # Single count
+            42
+            >>> matrix["fox"]             # Row as dict
+            {'quick': 10, 'brown': 8, ...}
+            >>> matrix["fox", :]          # Same as above
+            >>> matrix[:, "dog"]          # Column as dict
+        """
+        # Handle single key (row lookup)
+        if not isinstance(key, tuple):
+            row_idx = self._resolve_index(key)
+            return self._row_to_dict(row_idx)
+        
+        # Handle tuple key
+        if len(key) != 2:
+            raise IndexError("Index must be a single key or a pair (row, col)")
+        
+        row_key, col_key = key
+        
+        # Handle slice cases
+        if isinstance(row_key, slice) and row_key == slice(None):
+            # [:, col] - column lookup
+            col_idx = self._resolve_index(col_key)
+            return self._col_to_dict(col_idx)
+        
+        if isinstance(col_key, slice) and col_key == slice(None):
+            # [row, :] - row lookup
+            row_idx = self._resolve_index(row_key)
+            return self._row_to_dict(row_idx)
+        
+        # Both are concrete indices - single cell lookup
+        row_idx = self._resolve_index(row_key)
+        col_idx = self._resolve_index(col_key)
+        return int(self._matrix[row_idx, col_idx])
+    
+    def _row_to_dict(self, row_idx: int) -> Dict[str, int]:
+        """Convert a matrix row to a dict of {word: count} for non-zero entries."""
+        row = self._matrix.getrow(row_idx)
+        return {self._i2w[col]: int(val) for col, val in zip(row.indices, row.data)}
+    
+    def _col_to_dict(self, col_idx: int) -> Dict[str, int]:
+        """Convert a matrix column to a dict of {word: count} for non-zero entries."""
+        col = self._matrix.getcol(col_idx)
+        return {self._i2w[row]: int(val) for row, val in zip(col.indices, col.data)}
+    
+    def get(self, row_key, col_key, default: int = 0) -> int:
+        """
+        Get a co-occurrence count with a default value for missing pairs.
+        
+        Args:
+            row_key: Row word or index.
+            col_key: Column word or index.
+            default: Value to return if the pair is not found or out of vocabulary.
+        
+        Returns:
+            Co-occurrence count, or default if not found.
+        """
+        try:
+            return self[row_key, col_key]
+        except (KeyError, IndexError):
+            return default
+    
+    def to_dense(self) -> np.ndarray:
+        """
+        Convert to a dense NumPy array.
+        
+        Warning: This may use significant memory for large vocabularies.
+        
+        Returns:
+            2D numpy array of shape (vocab_size, vocab_size).
+        """
+        return self._matrix.toarray()
+    
+    def to_dataframe(self) -> pd.DataFrame:
+        """
+        Convert to a pandas DataFrame with word labels.
+        
+        Warning: This may use significant memory for large vocabularies.
+        
+        Returns:
+            DataFrame with vocabulary words as both index and columns.
+        """
+        return pd.DataFrame(
+            self._matrix.toarray(),
+            index=self._vocab,
+            columns=self._vocab
+        )
+    
+    @property
+    def sparse(self) -> sparse.csr_matrix:
+        """Access the underlying scipy sparse CSR matrix."""
+        return self._matrix
+    
+    @property
+    def vocab(self) -> List[str]:
+        """List of vocabulary words in index order. Returns the internal list directly."""
+        return self._vocab
+    
+    @property
+    def word_to_index(self) -> Dict[str, int]:
+        """Dictionary mapping words to their matrix indices. Returns the internal dict directly."""
+        return self._w2i
+    
+    @property
+    def index_to_word(self) -> Dict[int, str]:
+        """Dictionary mapping matrix indices to words. Returns the internal dict directly."""
+        return self._i2w
+    
+    @property
+    def shape(self) -> Tuple[int, int]:
+        """Shape of the matrix (vocab_size, vocab_size)."""
+        return self._matrix.shape
+    
+    @property
+    def nnz(self) -> int:
+        """Number of non-zero entries in the matrix."""
+        return self._matrix.nnz
+    
+    def __len__(self) -> int:
+        """Return vocabulary size."""
+        return len(self._vocab)
+    
+    def __contains__(self, word: str) -> bool:
+        """Check if a word is in the vocabulary."""
+        return word in self._w2i
+    
+    def __repr__(self) -> str:
+        return (
+            f"CoocMatrix(vocab_size={len(self._vocab)}, "
+            f"nnz={self._matrix.nnz}, "
+            f"density={self._matrix.nnz / (len(self._vocab)**2):.2%})"
+        )
+    
+    def __str__(self) -> str:
+        return self.__repr__()
 
 class FilterOptions(TypedDict, total=False):
     """Type definition for filter options in collocation analysis."""
@@ -82,7 +306,7 @@ def _compute_collocation_result(target, candidate, a, b, c, d, alternative='grea
         "exp_local": expected,
         "obs_local": int(a),
         "ratio_local": ratio,
-        "obs_global": int(a + c), # near and ~near 
+        "obs_global": int(a + c), 
         "p_value": p_value,
     }
 
@@ -386,8 +610,17 @@ def find_collocates(
             observed differs from expected).
     
     Returns:
-        Union[List[Dict], pd.DataFrame]: List of dictionaries or DataFrame containing 
-            collocation statistics.
+        Union[List[Dict], pd.DataFrame]: Collocation results with the following fields:
+        
+            - **target** (str): The target word.
+            - **collocate** (str): The co-occurring word.
+            - **obs_local** (int): Observed co-occurrence count (contexts where both appear).
+            - **exp_local** (float): Expected co-occurrence count under independence.
+            - **ratio_local** (float): Ratio of observed to expected (obs_local / exp_local).
+              Values > 1 indicate attraction, < 1 indicate repulsion.
+            - **obs_global** (int): Total occurrences of the collocate in the corpus.
+            - **p_value** (float): P-value from Fisher's exact test.
+            - **adjusted_p_value** (float, optional): Present only if ``correction`` is set.
     """
     if not sentences:
         raise ValueError("sentences cannot be empty")
@@ -468,6 +701,7 @@ def find_collocates(
                 sentences, target_words, alternative=alternative
             )
     else:
+        logger.debug("Using pure Python fallback for find_collocates (Cython not available)")
         if method == 'window':
             results = _calculate_collocations_window_python(
                 sentences, target_words, horizon=horizon, alternative=alternative
@@ -494,72 +728,92 @@ def find_collocates(
         if invalid_keys:
             raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_keys}")
         
+        # Validate and extract filter values upfront
+        stopwords_set = None
         if 'stopwords' in filters:
             stopwords = filters['stopwords']
             if not isinstance(stopwords, (list, set)):
                 raise ValueError("stopwords must be a list or set of strings")
             stopwords_set = set(stopwords)
-            results = [result for result in results if result["collocate"] not in stopwords_set]
         
-        if 'min_word_length' in filters:
-            min_word_length = filters['min_word_length']
+        min_word_length = filters.get('min_word_length')
+        if min_word_length is not None:
             if not isinstance(min_word_length, int) or min_word_length < 1:
                 raise ValueError("min_word_length must be a positive integer")
-            results = [result for result in results if len(result["collocate"]) >= min_word_length]
         
-        if 'min_obs_local' in filters:
-            min_obs = filters['min_obs_local']
-            if not isinstance(min_obs, int) or min_obs < 0:
+        min_obs_local = filters.get('min_obs_local')
+        if min_obs_local is not None:
+            if not isinstance(min_obs_local, int) or min_obs_local < 0:
                 raise ValueError("min_obs_local must be a non-negative integer")
-            results = [result for result in results if result["obs_local"] >= min_obs]
         
-        if 'max_obs_local' in filters:
-            max_obs = filters['max_obs_local']
-            if not isinstance(max_obs, int) or max_obs < 0:
+        max_obs_local = filters.get('max_obs_local')
+        if max_obs_local is not None:
+            if not isinstance(max_obs_local, int) or max_obs_local < 0:
                 raise ValueError("max_obs_local must be a non-negative integer")
-            results = [result for result in results if result["obs_local"] <= max_obs]
         
-        if 'min_obs_global' in filters:
-            min_global = filters['min_obs_global']
-            if not isinstance(min_global, int) or min_global < 0:
+        min_obs_global = filters.get('min_obs_global')
+        if min_obs_global is not None:
+            if not isinstance(min_obs_global, int) or min_obs_global < 0:
                 raise ValueError("min_obs_global must be a non-negative integer")
-            results = [result for result in results if result["obs_global"] >= min_global]
         
-        if 'max_obs_global' in filters:
-            max_global = filters['max_obs_global']
-            if not isinstance(max_global, int) or max_global < 0:
+        max_obs_global = filters.get('max_obs_global')
+        if max_obs_global is not None:
+            if not isinstance(max_obs_global, int) or max_obs_global < 0:
                 raise ValueError("max_obs_global must be a non-negative integer")
-            results = [result for result in results if result["obs_global"] <= max_global]
         
-        if 'min_exp_local' in filters:
-            min_exp = filters['min_exp_local']
-            if not isinstance(min_exp, (int, float)) or min_exp < 0:
+        min_exp_local = filters.get('min_exp_local')
+        if min_exp_local is not None:
+            if not isinstance(min_exp_local, (int, float)) or min_exp_local < 0:
                 raise ValueError("min_exp_local must be a non-negative number")
-            results = [result for result in results if result["exp_local"] >= min_exp]
         
-        if 'max_exp_local' in filters:
-            max_exp = filters['max_exp_local']
-            if not isinstance(max_exp, (int, float)) or max_exp < 0:
+        max_exp_local = filters.get('max_exp_local')
+        if max_exp_local is not None:
+            if not isinstance(max_exp_local, (int, float)) or max_exp_local < 0:
                 raise ValueError("max_exp_local must be a non-negative number")
-            results = [result for result in results if result["exp_local"] <= max_exp]
         
-        if 'min_ratio_local' in filters:
-            min_ratio = filters['min_ratio_local']
-            if not isinstance(min_ratio, (int, float)) or min_ratio < 0:
+        min_ratio_local = filters.get('min_ratio_local')
+        if min_ratio_local is not None:
+            if not isinstance(min_ratio_local, (int, float)) or min_ratio_local < 0:
                 raise ValueError("min_ratio_local must be a non-negative number")
-            results = [result for result in results if result["ratio_local"] >= min_ratio]
         
-        if 'max_ratio_local' in filters:
-            max_ratio = filters['max_ratio_local']
-            if not isinstance(max_ratio, (int, float)) or max_ratio < 0:
+        max_ratio_local = filters.get('max_ratio_local')
+        if max_ratio_local is not None:
+            if not isinstance(max_ratio_local, (int, float)) or max_ratio_local < 0:
                 raise ValueError("max_ratio_local must be a non-negative number")
-            results = [result for result in results if result["ratio_local"] <= max_ratio]
         
-        if 'max_p' in filters:
-            max_p = filters['max_p']
+        max_p = filters.get('max_p')
+        if max_p is not None:
             if not isinstance(max_p, (int, float)) or max_p < 0 or max_p > 1:
                 raise ValueError("max_p must be a number between 0 and 1")
-            results = [result for result in results if result["p_value"] <= max_p]
+        
+        # Single-pass filtering
+        def passes_filters(r):
+            collocate = r["collocate"]
+            if stopwords_set is not None and collocate in stopwords_set:
+                return False
+            if min_word_length is not None and len(collocate) < min_word_length:
+                return False
+            if min_obs_local is not None and r["obs_local"] < min_obs_local:
+                return False
+            if max_obs_local is not None and r["obs_local"] > max_obs_local:
+                return False
+            if min_obs_global is not None and r["obs_global"] < min_obs_global:
+                return False
+            if max_obs_global is not None and r["obs_global"] > max_obs_global:
+                return False
+            if min_exp_local is not None and r["exp_local"] < min_exp_local:
+                return False
+            if max_exp_local is not None and r["exp_local"] > max_exp_local:
+                return False
+            if min_ratio_local is not None and r["ratio_local"] < min_ratio_local:
+                return False
+            if max_ratio_local is not None and r["ratio_local"] > max_ratio_local:
+                return False
+            if max_p is not None and r["p_value"] > max_p:
+                return False
+            return True
+        
+        results = [r for r in results if passes_filters(r)]
 
     # =========================================================================
     # STAGE 2: Multiple testing correction (based on filtered hypothesis count)
@@ -588,179 +842,242 @@ def find_collocates(
 
 def cooc_matrix(
     documents: List[List[str]], 
-    method: str = 'window', 
-    horizon: Optional[Union[int, Tuple[int, int]]] = None, 
-    min_abs_count: int = 1, 
+    horizon: Union[int, Tuple[int, int]] = 5,
+    method: str = 'window',
+    min_word_count: int = 1, 
     min_doc_count: int = 1, 
-    vocab_size: Optional[int] = None, 
-    binary: bool = False, 
-    as_dataframe: bool = True, 
-    vocab: Optional[Union[List[str], set]] = None, 
-    use_sparse: bool = False
-) -> Union[pd.DataFrame, Tuple[np.ndarray, Dict[str, int]]]:
+    max_vocab_size: Optional[int] = None, 
+    vocab: Optional[Union[List[str], set]] = None,
+    binary: bool = False,
+) -> CoocMatrix:
     """
     Calculate a co-occurrence matrix from a list of documents.
     
+    Returns a CoocMatrix object with intuitive vocabulary-aware indexing:
+        matrix["word1", "word2"]  → single count
+        matrix["word1"]           → row as dict {word: count}
+        matrix.to_dataframe()     → pandas DataFrame
+        matrix.to_dense()         → numpy array
+    
     Args:
-        documents (list): List of tokenized documents, where each document is a list of tokens.
-        method (str): Method to use for calculating co-occurrences. Either 'window' or 
-            'document'. Default is 'window'.
-        horizon (Optional[Union[int, tuple]]): Context window size relative to each word. 
-            Only applicable when method='window'. Must be None when method='document'.
+        documents: List of tokenized documents, where each document is a list of tokens.
+        horizon: Context window size relative to each word. Only used for method='window'.
             - int: Symmetric window (e.g., 5 means 5 words on each side)
-            - tuple: Asymmetric window (left, right) specifying words on each side:
-              (0, 5) counts co-occurrences with words up to 5 positions to the RIGHT;
-              (5, 0) counts co-occurrences with words up to 5 positions to the LEFT.
-            - None: Uses default of 5 for 'window' method
-        min_abs_count (int): Minimum absolute count for a word to be included in the 
-            vocabulary. Default is 1.
-        min_doc_count (int): Minimum number of documents a word must appear in to be 
-            included. Default is 1.
-        vocab_size (int, optional): Maximum size of the vocabulary. Words are sorted by 
-            frequency.
-        binary (bool): If True, count co-occurrences as binary (0/1) rather than 
-            frequencies. Default is False.
-        as_dataframe (bool): If True, return the co-occurrence matrix as a pandas 
-            DataFrame. Default is True.
-        vocab (list or set, optional): Predefined vocabulary to use. Words will still be 
-            filtered by min_abs_count and min_doc_count. If vocab_size is also provided, 
-            only the top vocab_size words will be kept.
-        use_sparse (bool): If True, use a sparse matrix representation for better memory 
-            efficiency with large vocabularies. Default is False.
+            - tuple: Asymmetric window (left, right), e.g., (0, 5) for right-only context
+        method: Method for calculating co-occurrences:
+            - 'window': Count within sliding window (default, uses horizon)
+            - 'document': Bag-of-words within each document (ignores horizon)
+        min_word_count: Minimum total count for a word to be included in auto-generated
+            vocabulary. Ignored if vocab is provided. Default 1.
+        min_doc_count: Minimum number of documents a word must appear in to be included
+            in auto-generated vocabulary. Ignored if vocab is provided. Default 1.
+        max_vocab_size: Maximum vocabulary size (most frequent words kept). Only applies
+            to auto-generated vocabulary. Ignored if vocab is provided. Default None.
+        vocab: Predefined vocabulary to use. If provided, this vocabulary is used exactly
+            as given without any filtering (min_word_count, min_doc_count, and max_vocab_size
+            are ignored). Words in vocab that don't appear in documents will still be
+            included in the matrix (with zero counts).
+        binary: If True, count co-occurrences as binary (0/1). Default False.
     
     Returns:
-        If as_dataframe=True: pandas DataFrame with rows and columns labeled by vocabulary.
-        If as_dataframe=False and use_sparse=False: tuple of (numpy array, word_to_index 
-            dictionary).
-        If as_dataframe=False and use_sparse=True: tuple of (scipy sparse matrix, 
-            word_to_index dictionary).
+        CoocMatrix: A vocabulary-aware co-occurrence matrix object.
+    
+    Example:
+        >>> matrix = cooc_matrix(documents, horizon=5)
+        >>> matrix["fox", "dog"]      # Get count for word pair
+        42
+        >>> matrix["fox"]             # Get all co-occurrences for "fox"
+        {'quick': 10, 'brown': 8, 'dog': 42, ...}
+        >>> df = matrix.to_dataframe()  # Convert to DataFrame if needed
+        
+        >>> # With predefined vocabulary (no filtering applied)
+        >>> matrix = cooc_matrix(documents, vocab=["fox", "dog", "cat"])
     """
+    # Validation
     if not documents:
         raise ValueError("documents cannot be empty")
     if not all(isinstance(doc, list) for doc in documents):
         raise ValueError("documents must be a list of lists (tokenized documents)")
-    
     if method not in ('window', 'document'):
         raise ValueError("method must be 'window' or 'document'")
     
-    # Validate horizon parameter based on method
-    if method == 'document':
-        if horizon is not None:
-            raise ValueError(
-                "The 'horizon' parameter is not applicable when method='document'. "
-                "Document-based co-occurrence uses entire documents as context units. "
-                "Please remove the 'horizon' argument or use method='window'."
-            )
-    elif method == 'window':
-        if horizon is None:
-            horizon = 5  # Default value for window method
-    
-    if use_sparse:
-        from scipy import sparse
-    
-    word_counts = Counter()
-    document_counts = Counter()
-    for document in documents:
-        word_counts.update(document)
-        document_counts.update(set(document))
-    
-    filtered_vocab = {word for word, count in word_counts.items() 
-                     if count >= min_abs_count and document_counts[word] >= min_doc_count}
-    
+    # Build vocabulary
     if vocab is not None:
-        vocab = set(vocab)
-        filtered_vocab = filtered_vocab.intersection(vocab)
+        # User-provided vocabulary: use exactly as given, no filtering
+        vocab_list = sorted(set(vocab))
+    else:
+        # Auto-generate vocabulary with filtering
+        word_counts = Counter()
+        document_counts = Counter()
+        for document in documents:
+            word_counts.update(document)
+            document_counts.update(set(document))
+        
+        filtered_vocab = {word for word, count in word_counts.items() 
+                         if count >= min_word_count and document_counts[word] >= min_doc_count}
+        
+        if max_vocab_size and len(filtered_vocab) > max_vocab_size:
+            filtered_vocab = set(sorted(filtered_vocab, 
+                                       key=lambda word: word_counts[word], 
+                                       reverse=True)[:max_vocab_size])
+        
+        vocab_list = sorted(filtered_vocab)
     
-    if vocab_size and len(filtered_vocab) > vocab_size:
-        filtered_vocab = set(sorted(filtered_vocab, 
-                                   key=lambda word: word_counts[word], 
-                                   reverse=True)[:vocab_size])
-    
-    vocab_list = sorted(filtered_vocab)
     word_to_index = {word: i for i, word in enumerate(vocab_list)}
     
-    filtered_documents = [[word for word in document if word in word_to_index] 
-                         for document in documents]
+    # Normalize horizon
+    if isinstance(horizon, int):
+        left_horizon, right_horizon = horizon, horizon
+    else:
+        left_horizon, right_horizon = horizon[0], horizon[1]
     
-    cooc_dict = defaultdict(int)
-
-    def update_cooc(word1_idx, word2_idx, count=1):
-        if binary:
-            cooc_dict[(word1_idx, word2_idx)] = 1
-        else:
-            cooc_dict[(word1_idx, word2_idx)] += count
-
+    # Calculate co-occurrences
     if method == 'window':
-        # Normalize horizon to (left, right) tuple
-        # User specifies (left, right) relative to each word - no swap needed here
-        # because we directly iterate over center words and look at their context
-        if isinstance(horizon, int):
-            left_horizon, right_horizon = horizon, horizon
-        else:
-            left_horizon, right_horizon = horizon[0], horizon[1]
+        cooc_sparse = _cooc_window(
+            documents, word_to_index, left_horizon, right_horizon, binary
+        )
+    elif method == 'document':
+        cooc_sparse = _cooc_document(documents, word_to_index, binary)
+    else:
+        raise ValueError(f"Invalid method: {method}. Valid methods are 'window' and 'document'.")
+    
+    return CoocMatrix(cooc_sparse, vocab_list, word_to_index)
+
+
+def _cooc_window(
+    documents: List[List[str]],
+    word_to_index: Dict[str, int],
+    left_horizon: int,
+    right_horizon: int,
+    binary: bool
+) -> sparse.csr_matrix:
+    """
+    Calculate window-based co-occurrences.
+    
+    Uses Cython acceleration when available, otherwise falls back to pure Python.
+    Words not in word_to_index (OOV) are skipped for counting but preserve positional
+    distances between vocabulary words.
+    
+    Args:
+        documents: List of tokenized documents.
+        word_to_index: Mapping from vocabulary words to matrix indices.
+        left_horizon: Number of positions to look left.
+        right_horizon: Number of positions to look right.
+        binary: If True, count presence (0/1) rather than frequency.
+    
+    Returns:
+        Sparse CSR matrix of co-occurrence counts.
+    """
+    vocab_size = len(word_to_index)
+    
+    if CYTHON_AVAILABLE and calculate_cooc_matrix_window is not None:
+        # Fast Cython path
+        row_indices, col_indices, data_values = calculate_cooc_matrix_window(
+            documents, word_to_index, left_horizon, right_horizon, binary
+        )
         
-        for document in filtered_documents:
+        if len(row_indices) == 0:
+            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
+        
+        # tocsr() sums duplicate entries automatically
+        cooc_sparse = sparse.coo_matrix(
+            (data_values, (row_indices, col_indices)), shape=(vocab_size, vocab_size), dtype=np.int64
+        ).tocsr()
+        
+        # For binary mode, reset summed duplicates back to 1
+        if binary:
+            cooc_sparse.data = np.ones_like(cooc_sparse.data)
+        
+        return cooc_sparse
+    
+    else:
+        # Python fallback - preserves distances by keeping OOV positions
+        logger.debug("Using pure Python fallback for cooc_matrix (Cython not available)")
+        cooc_dict = defaultdict(int)
+        
+        for document in documents:
             for i, word1 in enumerate(document):
+                if word1 not in word_to_index:
+                    continue
                 idx1 = word_to_index[word1]
                 start = max(0, i - left_horizon)
                 end = min(len(document), i + right_horizon + 1)
-
+                
                 for j in range(start, end):
                     if j != i:
-                        idx2 = word_to_index[document[j]]
-                        update_cooc(idx1, idx2, 1)
-
-    elif method == 'document':
-        for document in filtered_documents:
-            doc_word_counts = Counter(document)
-            for word1 in doc_word_counts:
-                idx1 = word_to_index[word1]
-                for word2 in doc_word_counts:
-                    if word2 != word1:
-                        idx2 = word_to_index[word2]
-                        update_cooc(idx1, idx2, doc_word_counts[word2])
-
-    n = len(vocab_list)
-
-    if use_sparse:
+                        word2 = document[j]
+                        if word2 in word_to_index:
+                            idx2 = word_to_index[word2]
+                            if binary:
+                                cooc_dict[(idx1, idx2)] = 1
+                            else:
+                                cooc_dict[(idx1, idx2)] += 1
+        
         if not cooc_dict:
-            # Return empty sparse matrix
-            cooc_matrix_array = sparse.coo_matrix((n, n)).tocsr()
-        else:
-            row_indices, col_indices, data_values = zip(*((i, j, count) for (i, j), count in cooc_dict.items()))
-            cooc_matrix_array = sparse.coo_matrix((data_values, (row_indices, col_indices)), shape=(n, n)).tocsr()
-    else:
-        cooc_matrix_array = np.zeros((n, n))
-        for (i, j), count in cooc_dict.items():
-            cooc_matrix_array[i, j] = count
+            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
+        
+        rows, cols, data = zip(*((i, j, c) for (i, j), c in cooc_dict.items()))
+        return sparse.coo_matrix(
+            (data, (rows, cols)), shape=(vocab_size, vocab_size), dtype=np.int64
+        ).tocsr()
+
+
+def _cooc_document(
+    documents: List[List[str]],
+    word_to_index: Dict[str, int],
+    binary: bool
+) -> sparse.csr_matrix:
+    """
+    Calculate document-based (bag-of-words) co-occurrences using matrix multiplication.
     
-    del cooc_dict
+    Each document is treated as a bag of words. Two words co-occur if they appear
+    in the same document, regardless of their positions. Uses efficient sparse
+    matrix multiplication: cooc = X @ X.T where X is the term-document matrix.
     
-    if as_dataframe:
-        if use_sparse:
-            # Warn user about converting sparse to dense
-            import warnings
-            warnings.warn(
-                "Converting sparse matrix to dense DataFrame. This defeats the purpose of "
-                "use_sparse=True and may cause memory issues for large vocabularies. "
-                "Consider using as_dataframe=False to keep the sparse matrix, or "
-                "use_sparse=False if you need a DataFrame.",
-                UserWarning
-            )
-            cooc_matrix_df = pd.DataFrame(
-                cooc_matrix_array.toarray(), 
-                index=vocab_list, 
-                columns=vocab_list
-            )
-        else:
-            cooc_matrix_df = pd.DataFrame(
-                cooc_matrix_array, 
-                index=vocab_list, 
-                columns=vocab_list
-            )
-        return cooc_matrix_df
-    else:
-        return cooc_matrix_array, word_to_index
+    Args:
+        documents: List of tokenized documents.
+        word_to_index: Mapping from vocabulary words to matrix indices.
+        binary: If True, count presence (0/1) rather than frequency.
+    
+    Returns:
+        Sparse CSR matrix of co-occurrence counts.
+    """
+    vocab_size = len(word_to_index)
+    n_docs = len(documents)
+    
+    # Build term-document matrix (vocab_size x n_docs)
+    row_indices = []
+    col_indices = []
+    data = []
+    
+    for doc_idx, document in enumerate(documents):
+        doc_words = [w for w in document if w in word_to_index]
+        doc_word_counts = Counter(doc_words)
+        
+        for word, count in doc_word_counts.items():
+            word_idx = word_to_index[word]
+            row_indices.append(word_idx)
+            col_indices.append(doc_idx)
+            data.append(1 if binary else count)
+    
+    if not row_indices:
+        return sparse.csr_matrix((vocab_size, vocab_size), dtype=np.int64)
+    
+    # Create sparse term-document matrix
+    X = sparse.csr_matrix(
+        (data, (row_indices, col_indices)),
+        shape=(vocab_size, n_docs),
+        dtype=np.int64
+    )
+    
+    # Co-occurrence = X @ X.T
+    cooc = X @ X.T
+    
+    # Zero out diagonal (no self-co-occurrence)
+    cooc.setdiag(0)
+    cooc.eliminate_zeros()
+    
+    return cooc
 
 def plot_collocates(
     collocates: Union[List[Dict], pd.DataFrame],
@@ -845,6 +1162,9 @@ def plot_collocates(
         plot_collocates(collocates, show_labels=True, label_top_n=20,
         ...                 color='red', title='Collocates of 天')
     """
+    # Lazy import matplotlib
+    import matplotlib.pyplot as plt
+    
     if isinstance(collocates, list):
         if not collocates:
             raise ValueError("Empty collocates list provided")

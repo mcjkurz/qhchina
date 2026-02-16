@@ -31,9 +31,15 @@ from tqdm.auto import tqdm
 import time
 from .vectors import cosine_similarity
 from ..config import get_rng, resolve_seed
-from .cython_ext import word2vec as word2vec_c
-
 logger = logging.getLogger("qhchina.analytics.word2vec")
+
+try:
+    from .cython_ext import word2vec as word2vec_c
+    CYTHON_AVAILABLE = True
+except ImportError:
+    CYTHON_AVAILABLE = False
+    word2vec_c = None
+    logger.warning("Cython extensions not available; Word2Vec requires compiled extensions.")
 
 __all__ = [
     'Word2Vec',

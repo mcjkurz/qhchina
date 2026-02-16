@@ -1,6 +1,5 @@
 """
 Tests for qhchina.analytics.topicmodels module.
-Tests both Python and Cython implementations.
 """
 import pytest
 import numpy as np
@@ -42,7 +41,6 @@ class TestLDABasic:
             n_topics=3,
             iterations=10,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         
@@ -51,23 +49,6 @@ class TestLDABasic:
         assert lda.n_wt is not None
         assert lda.n_dt is not None
         assert lda.vocabulary is not None
-    
-    def test_lda_fit_cython(self, sample_documents):
-        """Test LDA fitting with Cython implementation."""
-        from qhchina.analytics.topicmodels import LDAGibbsSampler
-        
-        lda = LDAGibbsSampler(
-            n_topics=3,
-            iterations=10,
-            random_state=42,
-            use_cython=True,
-            min_word_count=1
-        )
-        
-        # Falls back to Python if Cython not available
-        lda.fit(sample_documents)
-        
-        assert lda.n_wt is not None
 
 
 class TestLDATopics:
@@ -82,7 +63,6 @@ class TestLDATopics:
             n_topics=5,
             iterations=20,
             random_state=42,
-            use_cython=False,
             min_word_count=2
         )
         lda.fit(larger_documents)
@@ -126,7 +106,6 @@ class TestLDAInference:
             n_topics=5,
             iterations=20,
             random_state=42,
-            use_cython=False,
             min_word_count=2
         )
         lda.fit(larger_documents)
@@ -152,7 +131,6 @@ class TestLDASaveLoad:
             n_topics=3,
             iterations=10,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -185,7 +163,6 @@ class TestLDAReproducibility:
             n_topics=3,
             iterations=15,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda1.fit(sample_documents)
@@ -194,7 +171,6 @@ class TestLDAReproducibility:
             n_topics=3,
             iterations=15,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda2.fit(sample_documents)
@@ -216,7 +192,6 @@ class TestLDAParameters:
             beta=0.1,
             iterations=10,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -231,7 +206,6 @@ class TestLDAParameters:
             n_topics=3,
             iterations=5,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda_loose.fit(larger_documents)
@@ -240,7 +214,6 @@ class TestLDAParameters:
             n_topics=3,
             iterations=5,
             random_state=42,
-            use_cython=False,
             min_word_count=3
         )
         lda_strict.fit(larger_documents)
@@ -264,7 +237,6 @@ class TestLDABoundaryValues:
             n_topics=1,
             iterations=5,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -283,7 +255,6 @@ class TestLDABoundaryValues:
             n_topics=3,
             iterations=1,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -298,7 +269,6 @@ class TestLDABoundaryValues:
             n_topics=20,  # More topics than documents
             iterations=5,
             random_state=42,
-            use_cython=False,
             min_word_count=2
         )
         lda.fit(larger_documents)
@@ -314,7 +284,6 @@ class TestLDABoundaryValues:
             alpha=10.0,  # High alpha
             iterations=10,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -330,7 +299,6 @@ class TestLDABoundaryValues:
             alpha=0.01,  # Low alpha
             iterations=10,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -346,7 +314,6 @@ class TestLDABoundaryValues:
             beta=1.0,  # High beta
             iterations=10,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -362,7 +329,6 @@ class TestLDABoundaryValues:
             iterations=10,
             burnin=5,
             random_state=42,
-            use_cython=False,
             min_word_count=1
         )
         lda.fit(sample_documents)
@@ -386,7 +352,6 @@ class TestLDABoundaryValues:
             n_topics=3,
             iterations=5,
             random_state=42,
-            use_cython=False,
             min_word_count=1,
             min_word_length=2
         )
@@ -465,7 +430,7 @@ class TestLDAEdgeCases:
         """Test that empty documents list raises error."""
         from qhchina.analytics.topicmodels import LDAGibbsSampler
         
-        lda = LDAGibbsSampler(n_topics=3, use_cython=False, min_word_count=1)
+        lda = LDAGibbsSampler(n_topics=3, min_word_count=1)
         
         with pytest.raises((ValueError, IndexError)):
             lda.fit([])
@@ -477,7 +442,7 @@ class TestLDAEdgeCases:
         # Each word appears only once, but min_word_count=10
         docs = [["a", "b", "c"], ["d", "e", "f"]]
         
-        lda = LDAGibbsSampler(n_topics=3, min_word_count=10, use_cython=False)
+        lda = LDAGibbsSampler(n_topics=3, min_word_count=10)
         
         with pytest.raises(ValueError):
             lda.fit(docs)
@@ -492,7 +457,6 @@ class TestLDAEdgeCases:
             n_topics=3,
             iterations=5,
             random_state=42,
-            use_cython=False,
             min_word_count=1,
             stopwords=stopwords
         )
@@ -510,7 +474,6 @@ class TestLDAEdgeCases:
             n_topics=3,
             iterations=5,
             random_state=42,
-            use_cython=False,
             min_word_count=1,
             max_vocab_size=50
         )

@@ -42,7 +42,6 @@ class LDAGibbsSampler:
         max_vocab_size: Maximum vocabulary size to keep.
         min_word_length: Minimum length of word to be included in vocabulary.
         stopwords: Set of words to exclude from vocabulary.
-        use_cython: Whether to use Cython acceleration if available (default: True).
         estimate_alpha: Frequency for estimating alpha (0 = no estimation; default 1 = 
             after every iteration, 2 = after every 2 iterations, etc.).
     
@@ -73,7 +72,6 @@ class LDAGibbsSampler:
         max_vocab_size: Optional[int] = None,
         min_word_length: int = 1,
         stopwords: Optional[set] = None,
-        use_cython: bool = True,
         estimate_alpha: int = 1
     ):
         # Validate parameters
@@ -135,8 +133,8 @@ class LDAGibbsSampler:
         self.use_cython = False  # Default to False until successful import
         self.lda_sampler = None
         
-        if use_cython:
-            self._attempt_cython_import()
+        # Always attempt to use Cython if available
+        self._attempt_cython_import()
         
         # Resolve seed once for reproducibility across Python and Cython
         self._effective_seed = resolve_seed(random_state)
@@ -181,14 +179,9 @@ class LDAGibbsSampler:
             self.lda_sampler = lda_sampler
             self.use_cython = True
             return True
-        except ImportError as e:
+        except ImportError:
             self.use_cython = False
-            warnings.warn(
-                f"Cython acceleration for LDA was requested but the extension "
-                f"is not available in the current environment. Falling back to Python implementation, "
-                f"which will be significantly slower.\n"
-                f"Error: {e}"
-            )
+            logger.warning("Cython extensions not available; using slower Python fallback.")
             return False
         
     def preprocess(self, documents: List[List[str]]) -> Tuple[List[List[int]], Dict[str, int], Dict[int, str]]:
@@ -791,7 +784,6 @@ class LDAGibbsSampler:
             'doc_lengths': self.doc_lengths.tolist() if self.doc_lengths is not None else None,
             'docs_tokens': self.docs_tokens.tolist() if self.docs_tokens is not None else None,
             'total_tokens': self.total_tokens,
-            'use_cython': self.use_cython,
             'estimate_alpha': self.estimate_alpha,
             'burnin': self.burnin,
             'random_state': self.random_state,
@@ -813,7 +805,6 @@ class LDAGibbsSampler:
         """
         model_data = np.load(filepath, allow_pickle=True).item()
         
-        use_cython = model_data.get('use_cython', True)
         estimate_alpha = model_data.get('estimate_alpha', 0)
         burnin = model_data.get('burnin', 0)
         random_state = model_data.get('random_state', None)
@@ -828,7 +819,6 @@ class LDAGibbsSampler:
             min_word_length=model_data.get('min_word_length', 1),
             max_vocab_size=model_data.get('max_vocab_size', None),
             stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None,
-            use_cython=use_cython,
             estimate_alpha=estimate_alpha,
             burnin=burnin,
             random_state=random_state
@@ -871,18 +861,6 @@ class LDAGibbsSampler:
         model.total_tokens = model_data.get('total_tokens', None)
         if model.total_tokens is None and model.doc_lengths is not None:
             model.total_tokens = int(np.sum(model.doc_lengths))
-        
-        if model.use_cython and model.lda_sampler is None:
-            try:
-                from .cython_ext import lda_sampler
-                model.lda_sampler = lda_sampler
-            except ImportError as e:
-                model.use_cython = False
-                warnings.warn(
-                    f"The loaded model was trained with Cython acceleration, but the Cython extension " 
-                    f"is not available in the current environment. Falling back to Python implementation.\n"
-                    f"Error: {e}"
-                )
         
         return model
     

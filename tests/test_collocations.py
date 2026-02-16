@@ -240,33 +240,67 @@ class TestCoocMatrix:
     
     def test_cooc_matrix_basic(self, sample_documents):
         """Test basic co-occurrence matrix generation."""
-        from qhchina.analytics.collocations import cooc_matrix
+        from qhchina.analytics.collocations import cooc_matrix, CoocMatrix
         
-        result = cooc_matrix(
-            sample_documents,
-            method='window',
-            horizon=2,
-            as_dataframe=True
-        )
+        result = cooc_matrix(sample_documents, horizon=2)
         
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result, CoocMatrix)
         # Should be square
         assert result.shape[0] == result.shape[1]
     
-    def test_cooc_matrix_numpy(self, sample_documents):
-        """Test co-occurrence matrix as numpy array."""
+    def test_cooc_matrix_to_dataframe(self, sample_documents):
+        """Test converting CoocMatrix to DataFrame."""
         from qhchina.analytics.collocations import cooc_matrix
         
-        matrix, vocab = cooc_matrix(
-            sample_documents,
-            method='window',
-            horizon=2,
-            as_dataframe=False
-        )
+        result = cooc_matrix(sample_documents, horizon=2)
+        df = result.to_dataframe()
         
-        assert isinstance(matrix, np.ndarray)
-        assert isinstance(vocab, dict)
-        assert matrix.shape[0] == matrix.shape[1]
+        assert isinstance(df, pd.DataFrame)
+        assert df.shape[0] == df.shape[1]
+    
+    def test_cooc_matrix_to_dense(self, sample_documents):
+        """Test converting CoocMatrix to dense numpy array."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        arr = result.to_dense()
+        
+        assert isinstance(arr, np.ndarray)
+        assert arr.shape[0] == arr.shape[1]
+    
+    def test_cooc_matrix_indexing_by_word(self, sample_documents):
+        """Test indexing CoocMatrix by word pairs."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        
+        # Get vocab to test with
+        vocab = result.vocab
+        if len(vocab) >= 2:
+            word1, word2 = vocab[0], vocab[1]
+            count = result[word1, word2]
+            assert isinstance(count, int)
+    
+    def test_cooc_matrix_indexing_by_int(self, sample_documents):
+        """Test indexing CoocMatrix by integer indices."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        
+        if result.shape[0] >= 2:
+            count = result[0, 1]
+            assert isinstance(count, int)
+    
+    def test_cooc_matrix_row_lookup(self, sample_documents):
+        """Test getting a row from CoocMatrix as dict."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        
+        vocab = result.vocab
+        if len(vocab) >= 1:
+            row = result[vocab[0]]
+            assert isinstance(row, dict)
     
     def test_cooc_matrix_with_vocabulary(self, sample_documents):
         """Test co-occurrence matrix with specified vocabulary."""
@@ -274,15 +308,45 @@ class TestCoocMatrix:
         
         vocab_subset = ["我", "人", "时", "也"]
         
-        result = cooc_matrix(
-            sample_documents,
-            method='window',
-            horizon=2,
-            vocab=vocab_subset,
-            as_dataframe=True
-        )
+        result = cooc_matrix(sample_documents, horizon=2, vocab=vocab_subset)
         
-        assert len(result.columns) <= len(vocab_subset)
+        assert len(result) <= len(vocab_subset)
+    
+    def test_cooc_matrix_sparse_property(self, sample_documents):
+        """Test that sparse property returns scipy sparse matrix."""
+        from qhchina.analytics.collocations import cooc_matrix
+        from scipy import sparse
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        
+        assert sparse.issparse(result.sparse)
+    
+    def test_cooc_matrix_contains(self, sample_documents):
+        """Test __contains__ for word membership."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        
+        vocab = result.vocab
+        if len(vocab) >= 1:
+            assert vocab[0] in result
+            assert "NONEXISTENT_WORD_XYZ" not in result
+    
+    def test_cooc_matrix_get_with_default(self, sample_documents):
+        """Test get() method with default value."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        
+        # Existing pair should return actual count
+        vocab = result.vocab
+        if len(vocab) >= 2:
+            count = result.get(vocab[0], vocab[1], default=-999)
+            assert count != -999 or result[vocab[0], vocab[1]] == 0
+        
+        # Non-existent word should return default
+        count = result.get("NONEXISTENT_WORD_XYZ", "ANOTHER_NONEXISTENT", default=0)
+        assert count == 0
 
 
 class TestAsymmetricHorizon:
@@ -670,22 +734,17 @@ class TestDeterministicCoocMatrixCalculations:
         documents = [["a", "b", "c", "d"]]
         
         # horizon=(0, 1) means: only count word immediately to the RIGHT
-        result = cooc_matrix(
-            documents,
-            method='window',
-            horizon=(0, 1),
-            as_dataframe=True
-        )
+        result = cooc_matrix(documents, horizon=(0, 1))
         
         # "a" should co-occur with "b" (b is to the right of a)
-        assert result.loc["a", "b"] > 0, "a->b should have co-occurrence (b is right of a)"
+        assert result["a", "b"] > 0, "a->b should have co-occurrence (b is right of a)"
         
         # "b" should NOT co-occur with "a" from b's perspective
         # because with (0, 1), we only look RIGHT, and "a" is to the LEFT of "b"
-        assert result.loc["b", "a"] == 0, "b->a should be 0 (a is left of b, but we only look right)"
+        assert result["b", "a"] == 0, "b->a should be 0 (a is left of b, but we only look right)"
         
         # "b" should co-occur with "c"
-        assert result.loc["b", "c"] > 0, "b->c should have co-occurrence"
+        assert result["b", "c"] > 0, "b->c should have co-occurrence"
     
     def test_cooc_matrix_left_only_horizon(self):
         """Verify cooc_matrix (N, 0) horizon only counts left co-occurrences."""
@@ -695,19 +754,14 @@ class TestDeterministicCoocMatrixCalculations:
         documents = [["a", "b", "c", "d"]]
         
         # horizon=(1, 0) means: only count word immediately to the LEFT
-        result = cooc_matrix(
-            documents,
-            method='window',
-            horizon=(1, 0),
-            as_dataframe=True
-        )
+        result = cooc_matrix(documents, horizon=(1, 0))
         
         # "b" should co-occur with "a" (a is to the left of b)
-        assert result.loc["b", "a"] > 0, "b->a should have co-occurrence (a is left of b)"
+        assert result["b", "a"] > 0, "b->a should have co-occurrence (a is left of b)"
         
         # "a" should NOT co-occur with "b" from a's perspective
         # because with (1, 0), we only look LEFT, and "b" is to the RIGHT of "a"
-        assert result.loc["a", "b"] == 0, "a->b should be 0 (b is right of a, but we only look left)"
+        assert result["a", "b"] == 0, "a->b should be 0 (b is right of a, but we only look left)"
     
     def test_cooc_matrix_symmetric_horizon(self):
         """Verify symmetric horizon produces symmetric co-occurrence for adjacent words."""
@@ -717,19 +771,14 @@ class TestDeterministicCoocMatrixCalculations:
         documents = [["a", "b", "c"]]
         
         # horizon=1 means: 1 word on each side (symmetric)
-        result = cooc_matrix(
-            documents,
-            method='window',
-            horizon=1,
-            as_dataframe=True
-        )
+        result = cooc_matrix(documents, horizon=1)
         
         # With symmetric horizon, a-b and b-a should both have co-occurrences
-        assert result.loc["a", "b"] > 0, "a-b should co-occur"
-        assert result.loc["b", "a"] > 0, "b-a should co-occur"
+        assert result["a", "b"] > 0, "a-b should co-occur"
+        assert result["b", "a"] > 0, "b-a should co-occur"
         
         # And they should be equal (symmetric)
-        assert result.loc["a", "b"] == result.loc["b", "a"], "Co-occurrence should be symmetric"
+        assert result["a", "b"] == result["b", "a"], "Co-occurrence should be symmetric"
     
     def test_cooc_matrix_window_size_limits(self):
         """Verify co-occurrence respects window size limits."""
@@ -739,18 +788,13 @@ class TestDeterministicCoocMatrixCalculations:
         documents = [["a", "b", "c", "d", "e"]]
         
         # horizon=1: only immediate neighbors
-        result = cooc_matrix(
-            documents,
-            method='window',
-            horizon=1,
-            as_dataframe=True
-        )
+        result = cooc_matrix(documents, horizon=1)
         
         # "a" and "c" are 2 positions apart, should NOT co-occur with horizon=1
-        assert result.loc["a", "c"] == 0, "a-c should NOT co-occur (2 positions apart, horizon=1)"
+        assert result["a", "c"] == 0, "a-c should NOT co-occur (2 positions apart, horizon=1)"
         
         # "a" and "b" are adjacent, should co-occur
-        assert result.loc["a", "b"] > 0, "a-b should co-occur (adjacent)"
+        assert result["a", "b"] > 0, "a-b should co-occur (adjacent)"
     
     def test_cooc_matrix_multiple_occurrences(self):
         """Verify co-occurrence counts multiple occurrences correctly."""
@@ -759,15 +803,10 @@ class TestDeterministicCoocMatrixCalculations:
         # "a" appears next to "b" twice
         documents = [["a", "b", "x", "a", "b"]]
         
-        result = cooc_matrix(
-            documents,
-            method='window',
-            horizon=1,
-            as_dataframe=True
-        )
+        result = cooc_matrix(documents, horizon=1)
         
         # "a" should co-occur with "b" twice
-        assert result.loc["a", "b"] == 2, "a-b should have count=2 (appears twice)"
+        assert result["a", "b"] == 2, "a-b should have count=2 (appears twice)"
 
 
 class TestPythonCythonConsistencyDeterministic:
@@ -894,13 +933,6 @@ class TestCoocMatrixValidation:
         
         with pytest.raises(ValueError, match="method must be"):
             cooc_matrix(sample_documents, method="invalid")
-    
-    def test_horizon_with_document_method_raises_error(self, sample_documents):
-        """Test that horizon with document method raises ValueError."""
-        from qhchina.analytics.collocations import cooc_matrix
-        
-        with pytest.raises(ValueError, match="horizon.*not applicable"):
-            cooc_matrix(sample_documents, method="document", horizon=5)
 
 
 class TestCoocMatrixBoundaryValues:
@@ -908,47 +940,192 @@ class TestCoocMatrixBoundaryValues:
     
     def test_single_document(self):
         """Test cooc_matrix with a single document."""
-        from qhchina.analytics.collocations import cooc_matrix
+        from qhchina.analytics.collocations import cooc_matrix, CoocMatrix
         
         docs = [list("我喜欢学习")]
-        result = cooc_matrix(docs, method='window', horizon=1, as_dataframe=True)
+        result = cooc_matrix(docs, horizon=1)
         
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result, CoocMatrix)
         assert result.shape[0] == result.shape[1]
     
     def test_horizon_one(self, sample_documents):
         """Test cooc_matrix with horizon=1."""
-        from qhchina.analytics.collocations import cooc_matrix
+        from qhchina.analytics.collocations import cooc_matrix, CoocMatrix
         
-        result = cooc_matrix(sample_documents, method='window', horizon=1, as_dataframe=True)
+        result = cooc_matrix(sample_documents, horizon=1)
         
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result, CoocMatrix)
     
     def test_binary_mode(self, sample_documents):
         """Test cooc_matrix with binary=True."""
         from qhchina.analytics.collocations import cooc_matrix
         
-        result = cooc_matrix(sample_documents, method='window', horizon=2, binary=True, as_dataframe=True)
+        result = cooc_matrix(sample_documents, horizon=2, binary=True)
+        df = result.to_dataframe()
         
         # All values should be 0 or 1
-        assert result.max().max() <= 1
-        assert result.min().min() >= 0
+        assert df.max().max() <= 1
+        assert df.min().min() >= 0
     
-    def test_sparse_matrix(self, larger_documents):
-        """Test cooc_matrix with use_sparse=True."""
+    def test_sparse_property(self, larger_documents):
+        """Test that CoocMatrix.sparse returns scipy sparse matrix."""
         from qhchina.analytics.collocations import cooc_matrix
         from scipy import sparse
         
-        matrix, vocab = cooc_matrix(
-            larger_documents, 
-            method='window', 
-            horizon=2, 
-            as_dataframe=False,
-            use_sparse=True
-        )
+        result = cooc_matrix(larger_documents, horizon=2)
         
-        assert sparse.issparse(matrix)
-        assert isinstance(vocab, dict)
+        assert sparse.issparse(result.sparse)
+        assert isinstance(result.word_to_index, dict)
+
+
+class TestCoocMatrixDistancePreservation:
+    """
+    Tests to verify that OOV words preserve positional distances in cooc_matrix.
+    
+    When vocabulary filtering removes words, the distance between remaining
+    vocabulary words should be preserved (not collapsed).
+    """
+    
+    def test_oov_words_preserve_distance_window_method(self):
+        """
+        Test that OOV words preserve distance between vocabulary words.
+        
+        Given: ["A", "x", "y", "B"] with vocab = {"A", "B"} and horizon=1
+        - "x" and "y" are OOV (out-of-vocabulary)
+        - A is at position 0, B is at position 3
+        - True distance is 3 positions apart
+        - With horizon=1, A and B should NOT co-occur
+        
+        Bug scenario (collapsed distances):
+        - If OOV words are removed: ["A", "B"] 
+        - A and B become adjacent (distance 1)
+        - With horizon=1, they would incorrectly co-occur
+        """
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        # A and B are 3 positions apart (with x, y in between)
+        documents = [["A", "x", "y", "B"]]
+        
+        # Only A and B are in vocabulary (x and y will be OOV)
+        result = cooc_matrix(documents, horizon=1, vocab=["A", "B"])
+        
+        # A and B should NOT co-occur because true distance is 3 (> horizon=1)
+        assert result["A", "B"] == 0, \
+            "A and B should NOT co-occur (3 positions apart, horizon=1). OOV distance not preserved!"
+        assert result["B", "A"] == 0, \
+            "B and A should NOT co-occur (3 positions apart, horizon=1). OOV distance not preserved!"
+    
+    def test_oov_words_allow_cooccurrence_within_horizon(self):
+        """
+        Test that vocabulary words within horizon DO co-occur (positive case).
+        
+        Given: ["A", "x", "B"] with vocab = {"A", "B"} and horizon=2
+        - A is at position 0, B is at position 2
+        - True distance is 2 positions apart
+        - With horizon=2, A and B SHOULD co-occur
+        """
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        documents = [["A", "x", "B"]]  # A and B are 2 apart
+        
+        result = cooc_matrix(documents, horizon=2, vocab=["A", "B"])
+        
+        # A and B SHOULD co-occur because distance 2 <= horizon 2
+        assert result["A", "B"] == 1, \
+            "A and B should co-occur (2 positions apart, horizon=2)"
+        assert result["B", "A"] == 1, \
+            "B and A should co-occur (2 positions apart, horizon=2)"
+    
+    def test_oov_distance_preservation_multiple_oov(self):
+        """
+        Test distance preservation with multiple OOV words in sequence.
+        
+        Given: ["A", "x1", "x2", "x3", "x4", "B"] with vocab = {"A", "B"}
+        - A at position 0, B at position 5
+        - True distance is 5 positions
+        - With horizon=4, A and B should NOT co-occur
+        - With horizon=5, A and B SHOULD co-occur
+        """
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        documents = [["A", "x1", "x2", "x3", "x4", "B"]]  # A and B are 5 apart
+        
+        # horizon=4: should NOT co-occur
+        result_h4 = cooc_matrix(documents, horizon=4, vocab=["A", "B"])
+        assert result_h4["A", "B"] == 0, \
+            "A-B should NOT co-occur with horizon=4 (5 positions apart)"
+        
+        # horizon=5: SHOULD co-occur
+        result_h5 = cooc_matrix(documents, horizon=5, vocab=["A", "B"])
+        assert result_h5["A", "B"] == 1, \
+            "A-B SHOULD co-occur with horizon=5 (5 positions apart)"
+    
+    def test_oov_distance_preservation_asymmetric_horizon(self):
+        """
+        Test distance preservation with asymmetric horizon.
+        
+        Given: ["A", "x", "y", "B"] with vocab = {"A", "B"}
+        - B is 3 positions to the RIGHT of A
+        - A is 3 positions to the LEFT of B
+        """
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        documents = [["A", "x", "y", "B"]]
+        
+        # horizon=(0, 2): look only right, up to 2 positions
+        # A->B: B is 3 right of A, should NOT co-occur
+        result_right = cooc_matrix(documents, horizon=(0, 2), vocab=["A", "B"])
+        assert result_right["A", "B"] == 0, \
+            "A->B should NOT co-occur with right-only horizon=2 (B is 3 right of A)"
+        
+        # horizon=(0, 3): look only right, up to 3 positions  
+        # A->B: B is 3 right of A, SHOULD co-occur
+        result_right3 = cooc_matrix(documents, horizon=(0, 3), vocab=["A", "B"])
+        assert result_right3["A", "B"] == 1, \
+            "A->B SHOULD co-occur with right-only horizon=3 (B is exactly 3 right of A)"
+
+
+class TestCoocMatrixCythonPythonConsistency:
+    """
+    Tests to verify Cython and Python implementations produce identical results.
+    """
+    
+    def test_cython_python_window_consistency(self):
+        """Verify Cython and Python paths produce identical co-occurrence matrices."""
+        from qhchina.analytics.collocations import cooc_matrix, CYTHON_AVAILABLE
+        
+        if not CYTHON_AVAILABLE:
+            pytest.skip("Cython extension not available")
+        
+        # Test documents with some words that will be filtered out
+        documents = [
+            ["the", "quick", "brown", "fox", "jumps"],
+            ["over", "the", "lazy", "dog", "today"],
+            ["brown", "fox", "is", "quick", "and", "lazy"],
+        ]
+        
+        # Use vocab filter to create OOV words
+        vocab = ["quick", "brown", "fox", "lazy", "dog"]
+        
+        # Get Cython result (default when available)
+        result_cython = cooc_matrix(documents, horizon=2, vocab=vocab)
+        
+        # Force Python fallback by temporarily disabling Cython
+        import qhchina.analytics.collocations as col_module
+        original_func = col_module.calculate_cooc_matrix_window
+        col_module.calculate_cooc_matrix_window = None
+        
+        try:
+            result_python = cooc_matrix(documents, horizon=2, vocab=vocab)
+        finally:
+            col_module.calculate_cooc_matrix_window = original_func
+        
+        # Results should be identical
+        pd.testing.assert_frame_equal(
+            result_cython.to_dataframe(), result_python.to_dataframe(),
+            check_exact=True,
+            obj="Cython vs Python cooc_matrix results"
+        )
 
 
 # =============================================================================
