@@ -39,20 +39,17 @@ except ImportError:
     logger.warning("Cython extensions not available; using slower Python fallback.")
 
 
-# =============================================================================
-# CoocMatrix Class - Vocabulary-aware co-occurrence matrix
-# =============================================================================
-
 class CoocMatrix:
     """
-    A vocabulary-aware co-occurrence matrix with intuitive indexing.
+    Co-occurrence matrix with flexible indexing by word or index.
     
-    Supports flexible indexing by word strings or integer indices:
-        matrix["word1", "word2"]  → single count (int)
-        matrix[132, 5234]         → single count (int)
-        matrix["word1"]           → row as dict {word: count}
-        matrix["word1", :]        → row as dict {word: count}
-        matrix[:, "word2"]        → column as dict {word: count}
+    Supports flexible indexing:
+    
+    - ``matrix["word1", "word2"]`` - single count (int)
+    - ``matrix[132, 5234]`` - single count (int)
+    - ``matrix["word1"]`` - row as dict {word: count}
+    - ``matrix["word1", :]`` - row as dict {word: count}
+    - ``matrix[:, "word2"]`` - column as dict {word: count}
     
     Internally stores data as a scipy sparse CSR matrix for memory efficiency.
     
@@ -853,11 +850,12 @@ def cooc_matrix(
     """
     Calculate a co-occurrence matrix from a list of documents.
     
-    Returns a CoocMatrix object with intuitive vocabulary-aware indexing:
-        matrix["word1", "word2"]  → single count
-        matrix["word1"]           → row as dict {word: count}
-        matrix.to_dataframe()     → pandas DataFrame
-        matrix.to_dense()         → numpy array
+    Returns a CoocMatrix object with flexible indexing:
+    
+    - ``matrix["word1", "word2"]`` - single count
+    - ``matrix["word1"]`` - row as dict {word: count}
+    - ``matrix.to_dataframe()`` - pandas DataFrame
+    - ``matrix.to_dense()`` - numpy array
     
     Args:
         documents: List of tokenized documents, where each document is a list of tokens.
@@ -882,7 +880,7 @@ def cooc_matrix(
         binary: If True, count co-occurrences as binary (0/1). Default False.
     
     Returns:
-        CoocMatrix: A vocabulary-aware co-occurrence matrix object.
+        CoocMatrix: Co-occurrence matrix object.
     
     Example:
         >>> matrix = cooc_matrix(documents, horizon=5)
