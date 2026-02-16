@@ -4,9 +4,6 @@ Fast Word2Vec training operations implemented in Cython.
 This module provides optimized implementations of the core training
 operations for Word2Vec with minimal Python/Cython boundary crossings.
 
-THREAD SAFETY: This module is fully thread-safe. All state is passed as
-parameters to functions - there are no global mutable variables.
-
 Key optimizations:
 - Raw BLAS function pointers (like Gensim) for zero-overhead calls
 - Vocabulary lookup happens inside Cython (with GIL, but no intermediate allocations)
