@@ -1,6 +1,7 @@
 import logging
 import numpy as np
 from typing import Any
+from collections.abc import Iterable
 import time
 import warnings
 from collections import defaultdict, Counter
@@ -35,6 +36,7 @@ class LDAGibbsSampler:
             (default 0).
         random_state: Random seed for reproducibility.
         log_interval: Calculate perplexity and print results every log_interval iterations.
+            If None (default), no periodic logging is performed.
         min_word_count: Minimum count of word to be included in vocabulary.
         max_vocab_size: Maximum vocabulary size to keep.
         min_word_length: Minimum length of word to be included in vocabulary.
@@ -474,16 +476,17 @@ class LDAGibbsSampler:
         # Ensure phi is C-contiguous after transpose: (n_topics, vocab_size)
         self.phi = np.ascontiguousarray(phi.T)
         
-    def fit(self, documents: list[list[str]]) -> None:
+    def fit(self, documents: Iterable[list[str]]) -> None:
         """
         Fit the LDA model to the given documents.
         
         Args:
-            documents: List of tokenized documents (each document is a list of tokens)
+            documents: Iterable of tokenized documents (each document is a list of tokens).
+                Can be a list, Corpus, or any other iterable.
         """
-        # Validate input documents
+        # Convert iterable to list if needed (supports Corpus, generators, etc.)
         if not isinstance(documents, list):
-            raise TypeError(f"documents must be a list, got {type(documents)}")
+            documents = list(documents)
         if len(documents) == 0:
             raise ValueError("documents cannot be empty")
         

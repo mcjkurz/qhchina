@@ -82,14 +82,15 @@ class Word2Vec:
         ns_exponent (float): Exponent used to shape the negative sampling distribution (default: 0.75).
         cbow_mean (bool): If True, use mean of context word vectors, else use sum (default: True).
         sg (int): Training algorithm: 1 for skip-gram; 0 for CBOW (default: 0).
-        seed (int): Seed for random number generator (default: 1).
+        seed (int, optional): Seed for random number generator. If None, uses global seed setting.
         alpha (float): Initial learning rate (default: 0.025).
-        min_alpha (float): Minimum learning rate. If None, learning rate remains constant at alpha.
+        min_alpha (float, optional): Minimum learning rate. If None, learning rate remains constant at alpha.
         sample (float): Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
         shrink_windows (bool): If True, the effective window size is uniformly sampled from [1, window] 
             for each target word during training. If False, always use the full window (default: True).
-        max_vocab_size (int): Maximum vocabulary size to keep, keeping the most frequent words.
+        max_vocab_size (int, optional): Maximum vocabulary size to keep, keeping the most frequent words.
             None means no limit (keep all words above min_word_count).
+        verbose (bool): If True, log detailed progress information during training (default: False).
         epochs (int): Number of training iterations over the corpus (default: 1).
         batch_size (int): Target number of words per training batch (default: 10240). 
             Note that the Cython training buffer is limited to 10240 words, regardless of the batch_size parameter; 
@@ -922,30 +923,45 @@ class TempRefWord2Vec(Word2Vec):
     The class takes multiple corpora corresponding to different time periods and automatically
     creates temporal references for specified target words.
     
+    Note:
+        This implementation only supports Skip-gram (sg=1). CBOW is not supported.
+    
     Args:
-        corpora (list[list[list[str]]]): List of corpora, each corpus is a list of sentences 
-            for a time period.
-        labels (list[str]): Labels for each corpus (e.g., time periods like "1800s", "1900s").
+        corpora (dict[str, list[list[str]]]): Dictionary mapping time period labels to corpora.
+            Each corpus is a list of sentences (each sentence is a list of tokens).
+            Example: {"1800s": [["bread", "baker"], ["food", "eat"]], 
+                      "1900s": [["bread", "supermarket"], ["food", "buy"]]}
         targets (list[str]): List of target words to trace semantic change.
         balance (bool): Whether to balance the corpora to equal sizes (default: True).
-        **kwargs: Arguments passed to Word2Vec parent class (vector_size, window, sg, etc.).
+            When True, larger corpora are downsampled to match the smallest corpus.
+        **kwargs: Arguments passed to Word2Vec parent class. Common options include:
+            - vector_size (int): Dimensionality of word vectors (default: 100)
+            - window (int): Context window size (default: 5)
+            - min_word_count (int): Minimum word frequency threshold (default: 5)
+            - negative (int): Number of negative samples (default: 5)
+            - epochs (int): Number of training epochs (default: 1)
+            - alpha (float): Initial learning rate (default: 0.025)
+            - verbose (bool): Whether to log progress (default: False)
+            
+            Note: sg must be 1 (Skip-gram) - CBOW is not supported.
     
     Example:
         from qhchina.analytics.word2vec import TempRefWord2Vec
         
-        # Corpora from different time periods
-        corpus_1800s = [["bread", "baker", ...], ["food", "eat", ...], ...]
-        corpus_1900s = [["bread", "supermarket", ...], ["food", "buy", ...], ...]
+        # Corpora from different time periods as a dictionary
+        corpora = {
+            "1800s": [["bread", "baker", "oven"], ["food", "eat", "cook"]],
+            "1900s": [["bread", "supermarket", "buy"], ["food", "restaurant", "order"]]
+        }
         
         # Initialize and train model (training starts automatically)
         model = TempRefWord2Vec(
-        ...     corpora=[corpus_1800s, corpus_1900s],
-        ...     labels=["1800s", "1900s"],
-        ...     targets=["bread", "food", "money"],
-        ...     vector_size=100,
-        ...     window=5,
-        ...     sg=1  # Skip-gram required
-        ... )
+            corpora=corpora,
+            targets=["bread", "food", "money"],
+            vector_size=100,
+            window=5,
+            sg=1  # Skip-gram required
+        )
         
         # Analyze semantic change (model is already trained)
         model.most_similar("bread_1800s")  # Words similar to "bread" in the 1800s
@@ -990,25 +1006,23 @@ class TempRefWord2Vec(Word2Vec):
 
     @staticmethod
     def _add_corpus_tags(
-        corpora: list[list[list[str]]], 
-        labels: list[str], 
+        corpora: dict[str, list[list[str]]], 
         target_words: list[str]
-    ) -> list[list[list[str]]]:
+    ) -> dict[str, list[list[str]]]:
         """
         Add corpus-specific tags to target words in all corpora at once.
         
         Args:
-            corpora: List of corpora (each corpus is list of tokenized sentences).
-            labels: List of corpus labels.
+            corpora: Dictionary mapping labels to corpora (each corpus is list of tokenized sentences).
             target_words: List of words to tag.
         
         Returns:
-            List of processed corpora where target words have been tagged with their corpus label.
+            Dictionary of processed corpora where target words have been tagged with their corpus label.
         """
-        processed_corpora = []
+        processed_corpora = {}
         target_words_set = set(target_words)
         
-        for corpus, label in zip(corpora, labels):
+        for label, corpus in corpora.items():
             processed_corpus = []
             for sentence in corpus:
                 processed_sentence = []
@@ -1018,23 +1032,23 @@ class TempRefWord2Vec(Word2Vec):
                     else:
                         processed_sentence.append(token)
                 processed_corpus.append(processed_sentence)
-            processed_corpora.append(processed_corpus)
+            processed_corpora[label] = processed_corpus
         
         return processed_corpora
 
     def __init__(
         self,
-        corpora: list[list[list[str]]],  # List of corpora, each corpus is a list of sentences
-        labels: list[str],               # Labels for each corpus (e.g., time periods)
-        targets: list[str],              # Target words to trace semantic change
-        balance: bool = True,            # Whether to balance the corpora
-        _skip_init: bool = False,        # Used by load() to skip normal initialization
-        **kwargs                         # Parameters passed to Word2Vec parent class
+        corpora: dict[str, list[list[str]]],  # Dictionary mapping labels to corpora
+        targets: list[str],                   # Target words to trace semantic change
+        balance: bool = True,                 # Whether to balance the corpora
+        _skip_init: bool = False,             # Used by load() to skip normal initialization
+        _labels: list[str] | None = None,     # Internal: used by load() to restore labels
+        **kwargs                              # Parameters passed to Word2Vec parent class
     ):
         # _skip_init is used by load() to create an empty shell that will be populated
         # with saved state. This avoids unnecessary corpus processing and training.
         if _skip_init:
-            self.labels = labels
+            self.labels = _labels if _labels is not None else []
             self.targets = targets
             self.combined_corpus = []
             self.period_vocab_counts = {}
@@ -1044,13 +1058,16 @@ class TempRefWord2Vec(Word2Vec):
             super().__init__(_skip_init=True, **kwargs)
             return
         
-        # Check that corpora and labels have the same length
-        if len(corpora) != len(labels):
-            raise ValueError(f"Number of corpora ({len(corpora)}) must match number of labels ({len(labels)})")
+        # Validate corpora is a dictionary
+        if not isinstance(corpora, dict):
+            raise TypeError(f"corpora must be a dictionary mapping labels to corpora, got {type(corpora).__name__}")
     
         # check if sg = 1, else raise NotImplementedError
         if kwargs.get('sg') != 1:
             raise NotImplementedError("TempRefWord2Vec only supports Skip-gram model (sg=1)")
+        
+        # Extract labels from corpora dictionary keys
+        labels = list(corpora.keys())
         
         # Store labels and targets as instance variables
         self.labels = labels
@@ -1062,30 +1079,30 @@ class TempRefWord2Vec(Word2Vec):
         # print how many sentences in each corpus (each corpus a list of sentences)
         # and total size of each corpus (how many words; each sentence a list of words)
         # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-        if verbose and not all(len(corpus) == 0 for corpus in corpora):
-            for i, corpus in enumerate(corpora):
-                logger.info(f"Corpus {labels[i]} has {len(corpus)} sentences and {sum(len(sentence) for sentence in corpus)} words")
+        if verbose and not all(len(corpus) == 0 for corpus in corpora.values()):
+            for label, corpus in corpora.items():
+                logger.info(f"Corpus {label} has {len(corpus)} sentences and {sum(len(sentence) for sentence in corpus)} words")
 
         # Calculate token counts and determine minimum
         if balance:
-            corpus_token_counts = [sum(len(sentence) for sentence in corpus) for corpus in corpora]
-            target_token_count = min(corpus_token_counts)
+            corpus_token_counts = {label: sum(len(sentence) for sentence in corpus) for label, corpus in corpora.items()}
+            target_token_count = min(corpus_token_counts.values())
             if verbose:
                 logger.info(f"Balancing corpora to minimum size: {target_token_count} tokens")
             
             # Balance corpus sizes
-            balanced_corpora = []
-            for i, corpus in enumerate(corpora):
-                if corpus_token_counts[i] <= target_token_count:
-                    balanced_corpora.append(corpus)
+            balanced_corpora = {}
+            for label, corpus in corpora.items():
+                if corpus_token_counts[label] <= target_token_count:
+                    balanced_corpora[label] = corpus
                 else:
                     sampled_corpus = self._sample_sentences_to_token_count(corpus, target_token_count)
-                    balanced_corpora.append(sampled_corpus)
+                    balanced_corpora[label] = sampled_corpus
         
             # Add corpus tags to the corpora
-            tagged_corpora = self._add_corpus_tags(balanced_corpora, labels, targets)
+            tagged_corpora = self._add_corpus_tags(balanced_corpora, targets)
         else:
-            tagged_corpora = self._add_corpus_tags(corpora, labels, targets)
+            tagged_corpora = self._add_corpus_tags(corpora, targets)
 
         # Initialize combined corpus before using it
         self.combined_corpus = []
@@ -1093,20 +1110,20 @@ class TempRefWord2Vec(Word2Vec):
         # Calculate vocab counts for each period before combining
         self.period_vocab_counts = {}
         
-        for i, (corpus, label) in enumerate(zip(tagged_corpora, labels)):
+        for label, corpus in tagged_corpora.items():
             period_counter = Counter()
             for sentence in corpus:
                 period_counter.update(sentence)
             self.period_vocab_counts[label] = period_counter
             # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-            if verbose and not all(len(corpus) == 0 for corpus in corpora):
+            if verbose and not all(len(c) == 0 for c in corpora.values()):
                 logger.info(f"Period '{label}': {len(period_counter)} unique tokens, {sum(period_counter.values())} total tokens")
         
         # Combine all tagged corpora
-        for corpus in tagged_corpora:
+        for corpus in tagged_corpora.values():
             self.combined_corpus.extend(corpus)
         # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-        if verbose and not all(len(corpus) == 0 for corpus in corpora):
+        if verbose and not all(len(c) == 0 for c in corpora.values()):
             logger.info(f"Combined corpus: {len(self.combined_corpus)} sentences, {sum(len(s) for s in self.combined_corpus)} tokens")
         
         
@@ -1502,10 +1519,9 @@ class TempRefWord2Vec(Word2Vec):
         max_vocab_size = model_data.get('max_vocab_size', None)
         
         # Create model instance with _skip_init to avoid unnecessary initialization
-        # Dummy corpora are still passed for interface consistency but won't be processed
+        # Empty dict is passed for corpora - won't be processed with _skip_init
         model = cls(
-            corpora=[],  # Empty - won't be used with _skip_init
-            labels=labels,
+            corpora={},  # Empty dict - won't be used with _skip_init
             targets=targets,
             vector_size=model_data['vector_size'],
             window=model_data['window'],
@@ -1518,6 +1534,7 @@ class TempRefWord2Vec(Word2Vec):
             shrink_windows=shrink_windows,
             max_vocab_size=max_vocab_size,
             _skip_init=True,
+            _labels=labels,
         )
         
         # Restore saved model state

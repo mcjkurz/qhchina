@@ -603,8 +603,7 @@ class TestTempRefWord2Vec:
             pytest.skip("No common words found between corpora")
         
         model = TempRefWord2Vec(
-            corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-            labels=['song', 'ming'],
+            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
             targets=common_words,
             vector_size=30,
             window=3,
@@ -630,8 +629,7 @@ class TestTempRefWord2Vec:
             pytest.skip("No common words found between corpora")
         
         model = TempRefWord2Vec(
-            corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-            labels=['song', 'ming'],
+            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
             targets=common_words,
             vector_size=20,
             window=2,
@@ -677,8 +675,7 @@ class TestTempRefWord2Vec:
             pytest.skip("No frequent common words found")
         
         model = TempRefWord2Vec(
-            corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-            labels=['song', 'ming'],
+            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
             targets=common_frequent,
             vector_size=20,
             window=2,
@@ -712,8 +709,7 @@ class TestTempRefWord2Vec:
             pytest.skip("No common words found")
         
         model = TempRefWord2Vec(
-            corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-            labels=['song', 'ming'],
+            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
             targets=common_words,
             vector_size=15,
             window=2,
@@ -748,20 +744,18 @@ class TestTempRefWord2Vec:
         
         with pytest.raises(NotImplementedError):
             TempRefWord2Vec(
-                corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-                labels=['song', 'ming'],
+                corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
                 targets=['天'],
                 sg=0,  # CBOW not supported
             )
     
-    def test_tempref_mismatched_labels(self, song_ming_corpora):
-        """Test that mismatched corpora and labels raises error."""
+    def test_tempref_invalid_corpora_type(self, song_ming_corpora):
+        """Test that non-dict corpora raises TypeError."""
         from qhchina.analytics.word2vec import TempRefWord2Vec
         
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             TempRefWord2Vec(
-                corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-                labels=['only_one_label'],  # Wrong number of labels
+                corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],  # List instead of dict
                 targets=['天'],
                 sg=1,
             )
@@ -791,8 +785,7 @@ class TestTempRefWord2Vec:
             pytest.skip("No frequent common words found")
         
         model = TempRefWord2Vec(
-            corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-            labels=['song', 'ming'],
+            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
             targets=common_frequent,
             vector_size=20,
             window=2,
@@ -847,8 +840,7 @@ class TestTempRefWord2Vec:
             pytest.skip("No frequent common words found")
         
         model = TempRefWord2Vec(
-            corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],
-            labels=['song', 'ming'],
+            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
             targets=common_frequent,
             vector_size=30,
             window=3,

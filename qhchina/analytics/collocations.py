@@ -1,5 +1,6 @@
 import logging
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from typing import TypedDict
 
 import numpy as np
@@ -535,7 +536,7 @@ def _calculate_collocations_sentence_python(tokenized_sentences, target_words, a
     )
 
 def find_collocates(
-    sentences: list[list[str]], 
+    sentences: Iterable[list[str]], 
     target_words: str | list[str], 
     method: str = 'window', 
     horizon: int | tuple | None = None, 
@@ -549,8 +550,8 @@ def find_collocates(
     Find collocates for target words within a corpus of sentences.
     
     Args:
-        sentences (list[list[str]]): List of tokenized sentences, where each sentence 
-            is a list of tokens.
+        sentences (Iterable[list[str]]): Iterable of tokenized sentences, where each 
+            sentence is a list of tokens. Can be a list, Corpus, or any other iterable.
         target_words (str | list[str]): Target word(s) to find collocates for.
         method (str): Method to use for calculating collocations. Either 'window' or 
             'sentence'. 'window' uses a sliding window of specified horizon around each 
@@ -616,9 +617,13 @@ def find_collocates(
             - **p_value** (float): P-value from Fisher's exact test.
             - **adjusted_p_value** (float, optional): Present only if ``correction`` is set.
     """
+    # Convert iterable to list if needed (supports Corpus, generators, etc.)
+    if not isinstance(sentences, list):
+        sentences = list(sentences)
     if not sentences:
         raise ValueError("sentences cannot be empty")
-    if not all(isinstance(s, list) for s in sentences):
+    # Validate that sentences are lists of tokens (not just strings)
+    if sentences and not isinstance(sentences[0], list):
         raise ValueError("sentences must be a list of lists (tokenized sentences)")
     
     # Validate correction parameter
@@ -835,7 +840,7 @@ def find_collocates(
     return results
 
 def cooc_matrix(
-    documents: list[list[str]], 
+    documents: Iterable[list[str]], 
     horizon: int | tuple[int, int] | None = None,
     method: str = 'window',
     min_word_count: int = 1, 
@@ -855,7 +860,8 @@ def cooc_matrix(
     - ``matrix.to_dense()`` - numpy array
     
     Args:
-        documents: List of tokenized documents, where each document is a list of tokens.
+        documents: Iterable of tokenized documents, where each document is a list of 
+            tokens. Can be a list, Corpus, or any other iterable.
         horizon: Context window size relative to each word. Only applicable for method='window'.
             If not provided, defaults to 5 for window method. Must not be provided for 
             method='document'.
@@ -890,10 +896,13 @@ def cooc_matrix(
         >>> # With predefined vocabulary (no filtering applied)
         >>> matrix = cooc_matrix(documents, vocab=["fox", "dog", "cat"])
     """
-    # Validation
+    # Convert iterable to list if needed (supports Corpus, generators, etc.)
+    if not isinstance(documents, list):
+        documents = list(documents)
     if not documents:
         raise ValueError("documents cannot be empty")
-    if not all(isinstance(doc, list) for doc in documents):
+    # Validate that documents are lists of tokens (not just strings)
+    if documents and not isinstance(documents[0], list):
         raise ValueError("documents must be a list of lists (tokenized documents)")
     if method not in ('window', 'document'):
         raise ValueError("method must be 'window' or 'document'")
