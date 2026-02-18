@@ -639,6 +639,171 @@ class Corpus:
             if key in doc.metadata
         }
     
+    def type_token_ratio(self, variant: str = 'standard') -> float:
+        """
+        Calculate Type-Token Ratio (TTR) for the corpus.
+        
+        TTR measures lexical diversity - the ratio of unique words (types)
+        to total words (tokens). Higher values indicate more diverse vocabulary.
+        
+        Note: Standard TTR is sensitive to text length (longer texts tend to
+        have lower TTR). Use 'root' or 'log' variants for length-normalized
+        measures, or use mattr() for comparing texts of different lengths.
+        
+        Args:
+            variant: Calculation method:
+                - 'standard': types / tokens (range: 0.0 to 1.0)
+                - 'root': types / sqrt(tokens) - Guiraud's R
+                - 'log': log(types) / log(tokens) - Herdan's C
+        
+        Returns:
+            The TTR value. For 'standard', this is between 0.0 and 1.0.
+            For 'root' and 'log', values vary based on corpus size.
+        
+        Raises:
+            ValueError: If variant is not recognized or corpus is empty.
+        
+        Example:
+            >>> corpus.type_token_ratio()
+            0.342
+            >>> corpus.type_token_ratio(variant='root')
+            45.67
+            >>> corpus.type_token_ratio(variant='log')
+            0.891
+        """
+        if variant not in ('standard', 'root', 'log'):
+            raise ValueError(
+                f"variant must be 'standard', 'root', or 'log', got '{variant}'"
+            )
+        
+        tokens = self.token_count
+        types = self.vocab_size
+        
+        if tokens == 0:
+            raise ValueError("Cannot calculate TTR for empty corpus")
+        
+        if variant == 'standard':
+            return types / tokens
+        elif variant == 'root':
+            # Guiraud's R: types / sqrt(tokens)
+            return types / np.sqrt(tokens)
+        else:  # log
+            # Herdan's C: log(types) / log(tokens)
+            if tokens == 1:
+                return 1.0  # Edge case: single token
+            return np.log(types) / np.log(tokens)
+    
+    def mattr(self, window_size: int = 500) -> float:
+        """
+        Calculate Moving Average Type-Token Ratio (MATTR).
+        
+        MATTR is more reliable than standard TTR for comparing texts of
+        different lengths. It calculates TTR for a sliding window across
+        the corpus and returns the mean.
+        
+        Args:
+            window_size: Number of tokens per window. Default is 500,
+                which is standard in the literature. Smaller windows
+                give higher MATTR values.
+        
+        Returns:
+            Mean TTR across all windows (0.0 to 1.0).
+        
+        Raises:
+            ValueError: If corpus has fewer tokens than window_size.
+        
+        Example:
+            >>> corpus.mattr()
+            0.723
+            >>> corpus.mattr(window_size=100)
+            0.856
+        
+        Reference:
+            Covington, M. A., & McFall, J. D. (2010). Cutting the Gordian knot:
+            The moving-average type-token ratio (MATTR). Journal of Quantitative
+            Linguistics, 17(2), 94-100.
+        """
+        if window_size < 1:
+            raise ValueError(f"window_size must be positive, got {window_size}")
+        
+        # Flatten corpus to single token stream
+        all_tokens = []
+        for doc in self._documents:
+            all_tokens.extend(doc.tokens)
+        
+        n_tokens = len(all_tokens)
+        
+        if n_tokens < window_size:
+            raise ValueError(
+                f"Corpus has {n_tokens} tokens, but window_size is {window_size}. "
+                f"Use a smaller window_size or add more documents."
+            )
+        
+        # Calculate TTR for each window position
+        n_windows = n_tokens - window_size + 1
+        ttr_sum = 0.0
+        
+        # Use a sliding window with incremental updates for efficiency
+        window_counts: Counter = Counter(all_tokens[:window_size])
+        ttr_sum += len(window_counts) / window_size
+        
+        for i in range(1, n_windows):
+            # Remove token leaving the window
+            leaving = all_tokens[i - 1]
+            window_counts[leaving] -= 1
+            if window_counts[leaving] == 0:
+                del window_counts[leaving]
+            
+            # Add token entering the window
+            entering = all_tokens[i + window_size - 1]
+            window_counts[entering] += 1
+            
+            # Calculate TTR for this window
+            ttr_sum += len(window_counts) / window_size
+        
+        return ttr_sum / n_windows
+    
+    def hapax_legomena(self) -> set[str]:
+        """
+        Return words that appear exactly once in the corpus.
+        
+        Hapax legomena (Greek: "said once") are words occurring only once.
+        They are important for:
+        - Vocabulary richness analysis
+        - Authorship attribution
+        - Zipf's law studies
+        
+        A corpus typically has 40-60% of its vocabulary as hapax legomena.
+        
+        Returns:
+            Set of words with frequency == 1.
+        
+        Example:
+            >>> hapax = corpus.hapax_legomena()
+            >>> len(hapax)
+            1247
+            >>> print(f"Hapax ratio: {len(hapax) / corpus.vocab_size:.1%}")
+            Hapax ratio: 48.2%
+        """
+        return {word for word, count in self.vocab.items() if count == 1}
+    
+    def hapax_dislegomena(self) -> set[str]:
+        """
+        Return words that appear exactly twice in the corpus.
+        
+        Hapax dislegomena (Greek: "said twice") complement hapax legomena
+        in vocabulary richness analysis.
+        
+        Returns:
+            Set of words with frequency == 2.
+        
+        Example:
+            >>> dis = corpus.hapax_dislegomena()
+            >>> len(dis)
+            523
+        """
+        return {word for word, count in self.vocab.items() if count == 2}
+    
     # =========================================================================
     # Serialization
     # =========================================================================

@@ -228,7 +228,7 @@ cdef inline unsigned long long train_sg_pair(
     REAL_t *syn0,
     REAL_t *syn1neg,
     const int size,
-    const UITYPE_t word_index,
+    const UITYPE_t center_index,
     const UITYPE_t context_index,
     const REAL_t alpha,
     REAL_t *work,
@@ -241,8 +241,14 @@ cdef inline unsigned long long train_sg_pair(
     const int _compute_loss,
     REAL_t *running_loss
 ) noexcept nogil:
-    """Train on a single (center, context) pair with negative sampling."""
-    cdef long long row1 = <long long>context_index * <long long>size
+    """
+    Train on a single (center, context) pair with negative sampling.
+    
+    Skip-gram: center word predicts context word.
+    - center_index: The center word (input). Its W (syn0) embedding is updated.
+    - context_index: The context word (target). Its W_prime (syn1neg) embedding is updated.
+    """
+    cdef long long row1 = <long long>center_index * <long long>size
     cdef long long row2
     cdef unsigned long long modulo = 281474976710655ULL
     cdef REAL_t f, g, label, f_dot, f_dot_for_loss, log_e_f_dot
@@ -253,12 +259,12 @@ cdef inline unsigned long long train_sg_pair(
     
     for d in range(negative + 1):
         if d == 0:
-            target_index = word_index
+            target_index = context_index
             label = ONEF
         else:
             target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
             next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
-            if target_index == word_index:
+            if target_index == context_index:
                 continue
             label = <REAL_t>0.0
         

@@ -99,6 +99,8 @@ class Word2Vec:
         calculate_loss (bool): Whether to calculate and return the final loss (default: True).
         total_examples (int, optional): Total number of training examples per epoch. When provided 
             along with ``min_alpha``, uses this exact value instead of estimating for learning rate decay.
+        shuffle (bool, optional): Whether to shuffle sentences before each epoch. 
+            Defaults to True if sentences is a list, False otherwise (to preserve streaming).
     
     Example:
         from qhchina.analytics.word2vec import Word2Vec
@@ -144,6 +146,7 @@ class Word2Vec:
         callbacks: list[Callable] | None = None,
         calculate_loss: bool = True,
         total_examples: int | None = None,
+        shuffle: bool | None = None,
         _skip_init: bool = False,
     ):
         # _skip_init is used by load() to create an empty shell that will be populated
@@ -169,6 +172,7 @@ class Word2Vec:
             self.callbacks = callbacks
             self.calculate_loss = calculate_loss
             self.total_examples_hint = total_examples
+            self.shuffle = shuffle
             # Initialize empty structures - will be populated by load()
             self.vocab = {}
             self.index2word = []
@@ -223,6 +227,7 @@ class Word2Vec:
         self.callbacks = callbacks
         self.calculate_loss = calculate_loss
         self.total_examples_hint = total_examples
+        self.shuffle = shuffle
         
         # Auto-train if sentences are provided
         if sentences is not None:
@@ -624,8 +629,15 @@ class Word2Vec:
         if self.verbose:
             logger.info(f"Starting training: {epochs} epoch(s), batch_size={batch_size:,}, alpha={self.alpha}")
         
+        # Determine shuffle behavior: default to True for lists, False for iterables
+        shuffle = self.shuffle if self.shuffle is not None else isinstance(sentences, list)
+        
         # Training loop for each epoch
         for epoch in range(epochs):
+            # Shuffle sentences at the start of each epoch if enabled
+            if shuffle:
+                self._rng.shuffle(sentences)
+            
             epoch_start_time = time.time()
             epoch_loss = 0.0
             epoch_examples = 0
