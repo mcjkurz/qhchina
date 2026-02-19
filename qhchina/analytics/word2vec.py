@@ -365,14 +365,22 @@ class Word2Vec:
         return max(1, estimated)
 
     def _initialize_vectors(self) -> None:
-        """Initialize input (W) and output (W_prime) embedding matrices."""
+        """Initialize embedding matrices and work buffers.
+        
+        Note on matrix roles (following Gensim convention):
+          - W (syn0): Trained as CONTEXT word embeddings, returned for queries
+          - W_prime (syn1neg): Trained as CENTER word embeddings, discarded
+        
+        This is counterintuitive since skip-gram "predicts context from center", but
+        the swap ensures W receives decorrelated gradient updates (one per occurrence
+        as context) rather than bursty correlated updates (multiple per window when
+        appearing as center). See train_sg_pair() in word2vec.pyx for details.
+        """
         vocab_size = len(self.vocab)
         if self.verbose:
             logger.info(f"Initializing vectors: 2 matrices of shape ({vocab_size:,}, {self.vector_size})...")
         
-        # Must use default_rng (PCG64), not RandomState (Mersenne Twister)
-        # Different RNG algorithms produce different sequences even with same seed,
-        # causing divergent initial vectors and thus different trained embeddings
+        # Use default_rng (PCG64) for reproducible initialization
         init_rng = np.random.default_rng(seed=self.seed)
         self.W = init_rng.random((vocab_size, self.vector_size), dtype=self.dtype)
         self.W *= 2.0
@@ -381,6 +389,10 @@ class Word2Vec:
         
         # Output matrix starts at zero for stable negative sampling convergence
         self.W_prime = np.zeros((vocab_size, self.vector_size), dtype=self.dtype)
+        
+        # Work buffers reused across batches (avoids per-batch allocation)
+        self._work = np.zeros(self.vector_size, dtype=self.dtype)
+        self._neu1 = np.zeros(self.vector_size, dtype=self.dtype)
 
     def _prepare_noise_distribution(self) -> None:
         """
@@ -549,18 +561,7 @@ class Word2Vec:
         alpha: float,
         calculate_loss: bool
     ) -> tuple[float, int, int, int]:
-        """
-        Train on a single batch of sentences. Override in subclasses for different training logic.
-        
-        Args:
-            batch: List of tokenized sentences (already batched by word count in Python).
-            sample_ints: Subsampling thresholds as uint32 array.
-            alpha: Learning rate for this batch.
-            calculate_loss: Whether to compute and return loss.
-        
-        Returns:
-            Tuple of (batch_loss, examples_count, words_count, new_random_state).
-        """
+        """Train on a single batch. Override in subclasses for different training logic."""
         return word2vec_c.train_batch(
             self.W,
             self.W_prime,
@@ -568,6 +569,8 @@ class Word2Vec:
             self.vocab,
             sample_ints,
             self._cum_table,
+            self._work,
+            self._neu1,
             self.sample > 0,
             self.window,
             self.shrink_windows,
@@ -613,6 +616,10 @@ class Word2Vec:
             self.build_vocab(sentences)
         if self.W is None or self.W_prime is None:
             self._initialize_vectors()
+        # Ensure work buffers exist (needed if continuing training on loaded model)
+        if not hasattr(self, '_work') or self._work is None:
+            self._work = np.zeros(self.vector_size, dtype=self.dtype)
+            self._neu1 = np.zeros(self.vector_size, dtype=self.dtype)
         if self.noise_distribution is None:
             self._prepare_noise_distribution()
         
@@ -1286,22 +1293,7 @@ class TempRefWord2Vec(Word2Vec):
         alpha: float,
         calculate_loss: bool
     ) -> tuple[float, int, int, int]:
-        """
-        Train on a single batch using temporal-aware training.
-        
-        Overrides the parent method to use temporal mapping that converts
-        context words to their base forms while keeping center words as temporal variants.
-        
-        Args:
-            batch: List of tokenized sentences (already batched by word count in Python).
-            sample_ints: Subsampling thresholds as uint32 array.
-            alpha: Learning rate for this batch.
-            calculate_loss: Whether to compute and return loss.
-        
-        Returns:
-            Tuple of (batch_loss, examples_count, words_count, new_random_state).
-        """
-        # Ensure temporal index map is built
+        """Train on a single batch using temporal-aware training."""
         if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
             self._build_temporal_index_map()
         
@@ -1313,6 +1305,7 @@ class TempRefWord2Vec(Word2Vec):
             self.temporal_index_map,
             sample_ints,
             self._cum_table,
+            self._work,
             self.sample > 0,
             self.window,
             self.shrink_windows,
@@ -1388,11 +1381,9 @@ class TempRefWord2Vec(Word2Vec):
     def most_similar(self, word: str, topn: int = 10) -> list[tuple[str, float]]:
         """Find the topn most similar words to the given word.
         
-        Embedding selection based on training dynamics:
-          - Temporal variants (e.g., "民_宋"): W_prime (trained as center words)
-          - Regular words: W (trained as context words)
-        
-        Both query and comparison vectors use the appropriate trained embedding.
+        Cross-space comparison matching the training dynamics:
+          - Temporal variant queries: W_prime vs W (regular), W_prime vs W_prime (temporal)
+          - Regular word queries: W vs W
         
         Args:
             word: Input word (temporal variant or regular word).
@@ -1406,19 +1397,20 @@ class TempRefWord2Vec(Word2Vec):
         
         word_idx = self.vocab[word]
         
-        # Query vector: W_prime for temporal variants, W for regular words
         if self._is_temporal_variant(word):
+            # Cross-space: W_prime query vs W for regular words
             word_vec = self.W_prime[word_idx].reshape(1, -1)
+            sim = cosine_similarity(word_vec, self.W).flatten()
+            # Override temporal variants with W_prime vs W_prime (same space)
+            for t_word in self.reverse_temporal_map:
+                t_idx = self.vocab[t_word]
+                sim[t_idx] = float(cosine_similarity(
+                    word_vec, self.W_prime[t_idx].reshape(1, -1)
+                ))
         else:
+            # Regular word: W vs W
             word_vec = self.W[word_idx].reshape(1, -1)
-        
-        # Compute similarity against W (efficient batch operation)
-        sim = cosine_similarity(word_vec, self.W).flatten()
-        
-        # Replace scores for temporal variants using their W_prime embeddings
-        for temporal_word in self.reverse_temporal_map:
-            idx = self.vocab[temporal_word]
-            sim[idx] = cosine_similarity(word_vec, self.W_prime[idx].reshape(1, -1))[0, 0]
+            sim = cosine_similarity(word_vec, self.W).flatten()
         
         most_similar_words = []
         for idx in (-sim).argsort():
@@ -1428,6 +1420,51 @@ class TempRefWord2Vec(Word2Vec):
                     break
         
         return most_similar_words
+
+    def similarity(self, word1: str, word2: str) -> float:
+        """Calculate cosine similarity between two words.
+        
+        Cross-space comparison matching the training dynamics:
+          - Both temporal: W_prime vs W_prime
+          - One temporal, one regular: W_prime vs W (cross-space)
+          - Both regular: W vs W
+        
+        Args:
+            word1: First word.
+            word2: Second word.
+        
+        Returns:
+            Cosine similarity score between -1 and 1.
+        
+        Raises:
+            KeyError: If either word is not in vocabulary.
+        """
+        if word1 not in self.vocab:
+            raise KeyError(f"Word '{word1}' not found in vocabulary")
+        if word2 not in self.vocab:
+            raise KeyError(f"Word '{word2}' not found in vocabulary")
+        
+        is_temporal1 = self._is_temporal_variant(word1)
+        is_temporal2 = self._is_temporal_variant(word2)
+        
+        if is_temporal1 and is_temporal2:
+            # Both temporal: W_prime vs W_prime
+            word1_vec = self.W_prime[self.vocab[word1]]
+            word2_vec = self.W_prime[self.vocab[word2]]
+        elif is_temporal1:
+            # word1 temporal, word2 regular: W_prime vs W
+            word1_vec = self.W_prime[self.vocab[word1]]
+            word2_vec = self.W[self.vocab[word2]]
+        elif is_temporal2:
+            # word1 regular, word2 temporal: W vs W_prime
+            word1_vec = self.W[self.vocab[word1]]
+            word2_vec = self.W_prime[self.vocab[word2]]
+        else:
+            # Both regular: W vs W
+            word1_vec = self.W[self.vocab[word1]]
+            word2_vec = self.W[self.vocab[word2]]
+        
+        return float(cosine_similarity(word1_vec, word2_vec))
 
     def calculate_semantic_change(self, target_word: str, labels: list[str] | None = None) -> dict[str, list[tuple[str, float]]]:
         """

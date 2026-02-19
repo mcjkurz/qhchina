@@ -247,8 +247,19 @@ cdef inline unsigned long long train_sg_pair(
       - syn1neg[center_index]: Output embedding of center word (positive target)
       - syn0[context_index]: Input embedding of context word
     
-    This design (updating context's syn0, not center's) avoids the multiple-update
-    problem where the same syn0 row would be updated multiple times per window.
+    Why syn0 holds CONTEXT embeddings (not center), despite theory suggesting otherwise:
+    
+    In skip-gram, each center word generates multiple (center, context) pairs from its
+    window. If syn0 held center embeddings, syn0[center] would receive multiple correlated
+    updates in rapid succession (one per context word in the same window). These updates
+    all derive from the same local context, leading to "bursty" correlated gradients.
+    
+    By making syn0 the context matrix instead:
+      - Each syn0[word] update comes from a DIFFERENT center word elsewhere in the corpus
+      - Updates to the same syn0 row are spread across training, not clustered
+      - The discarded syn1neg absorbs the bursty updates (multiple per window)
+    
+    This produces better-quality embeddings in syn0, which is what we return for queries.
     """
     cdef long long row1 = <long long>context_index * <long long>size
     cdef long long row2
@@ -588,6 +599,8 @@ def train_batch(
     dict word2idx,
     np.uint32_t[:] sample_ints,
     np.uint32_t[:] cum_table,
+    np.float32_t[:] work,
+    np.float32_t[:] neu1,
     bint use_subsampling,
     int window,
     bint shrink_windows,
@@ -600,25 +613,24 @@ def train_batch(
 ):
     """Train Word2Vec on a batch of sentences.
     
-    Thread-safe: all state passed as parameters. Uses stack-allocated buffers
-    for maximum performance. Batch should have at most MAX_WORDS_IN_BATCH words.
-    
     Args:
-        syn0: Input word vectors (vocab_size x vector_size)
-        syn1neg: Output word vectors for negative sampling
-        sentences: List of tokenized sentences
-        word2idx: Word to index mapping
-        sample_ints: Subsampling thresholds
-        cum_table: Cumulative table for negative sampling
-        use_subsampling: Apply subsampling of frequent words
-        window: Context window size
-        shrink_windows: Randomly reduce window size per word
-        alpha: Learning rate
-        sg: True for Skip-gram, False for CBOW
-        negative: Number of negative samples per positive
-        cbow_mean: Average context vectors (CBOW only)
-        random_seed: LCG seed (fresh per batch from Python RNG)
-        compute_loss: Track loss during training
+        syn0: Input word vectors (vocab_size x vector_size).
+        syn1neg: Output word vectors for negative sampling.
+        sentences: List of tokenized sentences.
+        word2idx: Word to index mapping.
+        sample_ints: Subsampling thresholds.
+        cum_table: Cumulative table for negative sampling.
+        work: Pre-allocated work buffer (vector_size,). Reused across batches.
+        neu1: Pre-allocated CBOW context buffer (vector_size,). Reused across batches.
+        use_subsampling: Apply subsampling of frequent words.
+        window: Context window size.
+        shrink_windows: Randomly reduce window size per word.
+        alpha: Learning rate.
+        sg: True for Skip-gram, False for CBOW.
+        negative: Number of negative samples per positive.
+        cbow_mean: Average context vectors (CBOW only).
+        random_seed: LCG seed (fresh per batch from Python RNG).
+        compute_loss: Track loss during training.
     
     Returns:
         (batch_loss, examples_trained, words_processed, final_random_state)
@@ -629,25 +641,21 @@ def train_batch(
     cdef int _sg = 1 if sg else 0
     cdef unsigned long long cum_table_len = len(cum_table)
     
-    # Get raw pointers to weight matrices
+    # Get raw pointers
     cdef REAL_t *syn0_ptr = &syn0[0, 0]
     cdef REAL_t *syn1neg_ptr = &syn1neg[0, 0]
     cdef UITYPE_t *sample_ints_ptr = &sample_ints[0]
     cdef UITYPE_t *cum_table_ptr = &cum_table[0]
+    cdef REAL_t *work_ptr = &work[0]
+    cdef REAL_t *neu1_ptr = &neu1[0]
     
-    # Fixed-size stack-allocated buffers (like Gensim)
+    # Stack-allocated buffers for batch data
     cdef UITYPE_t indexes[MAX_WORDS_IN_BATCH]
     cdef UITYPE_t sentence_idx[MAX_WORDS_IN_BATCH + 1]
     cdef ITYPE_t reduced_windows[MAX_WORDS_IN_BATCH]
-    cdef UITYPE_t context_buffer[50]  # Max window is typically < 25, so 2*25 = 50
+    cdef UITYPE_t context_buffer[50]  # 2 * max_window
     
-    # Work buffers need to be dynamically allocated based on vector_size
-    cdef np.ndarray[REAL_t, ndim=1] work = np.zeros(vector_size, dtype=np.float32)
-    cdef np.ndarray[REAL_t, ndim=1] neu1 = np.zeros(vector_size, dtype=np.float32)
-    cdef REAL_t *work_ptr = <REAL_t *>np.PyArray_DATA(work)
-    cdef REAL_t *neu1_ptr = <REAL_t *>np.PyArray_DATA(neu1)
-    
-    # State variables (local, not global)
+    # State variables
     cdef unsigned long long next_random = random_seed
     cdef REAL_t running_loss = 0.0
     cdef long long total_examples = 0
@@ -740,6 +748,7 @@ def train_batch_temporal(
     np.int32_t[:] temporal_index_map,
     np.uint32_t[:] sample_ints,
     np.uint32_t[:] cum_table,
+    np.float32_t[:] work,
     bint use_subsampling,
     int window,
     bint shrink_windows,
@@ -748,36 +757,29 @@ def train_batch_temporal(
     unsigned long long random_seed,
     bint compute_loss=True,
 ):
-    """
-    Train Word2Vec Skip-gram with temporal mapping on a batch of sentences.
-    
-    THREAD SAFE: All state is passed as parameters. No global variables are used.
+    """Train Skip-gram with temporal mapping (for TempRefWord2Vec).
     
     Context words are mapped to base forms, center words keep temporal variant.
-    Uses fixed-size stack-allocated buffers (like Gensim) for maximum performance.
-    
-    IMPORTANT: The batch should contain at most MAX_WORDS_IN_BATCH (10240) words.
-    Words beyond this limit will be dropped. Python is responsible for batching 
-    by word count before calling this function.
     
     Args:
-        syn0: Input word vectors (vocab_size x vector_size)
-        syn1neg: Output word vectors (vocab_size x vector_size)
-        sentences: List of tokenized sentences (list of list of str)
-        word2idx: Dictionary mapping words to indices
-        temporal_index_map: Array mapping vocab index -> base form index (identity mapping for non-temporal words)
-        sample_ints: Pre-computed subsampling thresholds (uint32)
-        cum_table: Cumulative distribution table for negative sampling
-        use_subsampling: Whether to apply subsampling
-        window: Context window size
-        shrink_windows: Whether to randomly shrink windows
-        alpha: Learning rate for this batch
-        negative: Number of negative samples
-        random_seed: Seed for random number generator
-        compute_loss: Whether to compute and track loss (default True)
+        syn0: Input word vectors (vocab_size x vector_size).
+        syn1neg: Output word vectors (vocab_size x vector_size).
+        sentences: List of tokenized sentences.
+        word2idx: Word to index mapping.
+        temporal_index_map: Maps vocab index -> base form index.
+        sample_ints: Subsampling thresholds.
+        cum_table: Cumulative table for negative sampling.
+        work: Pre-allocated work buffer (vector_size,). Reused across batches.
+        use_subsampling: Apply subsampling of frequent words.
+        window: Context window size.
+        shrink_windows: Randomly reduce window size per word.
+        alpha: Learning rate.
+        negative: Number of negative samples.
+        random_seed: LCG seed.
+        compute_loss: Track loss during training.
     
     Returns:
-        Tuple of (batch_loss, examples_trained, words_processed, final_random_state)
+        (batch_loss, examples_trained, words_processed, final_random_state)
     """
     cdef int vector_size = syn0.shape[1]
     cdef int num_sentences = len(sentences)
@@ -790,18 +792,15 @@ def train_batch_temporal(
     cdef UITYPE_t *sample_ints_ptr = &sample_ints[0]
     cdef ITYPE_t *temporal_map_ptr = &temporal_index_map[0]
     cdef UITYPE_t *cum_table_ptr = &cum_table[0]
+    cdef REAL_t *work_ptr = &work[0]
     
-    # Fixed-size stack-allocated buffers (like Gensim)
+    # Stack-allocated buffers for batch data
     cdef UITYPE_t center_indexes[MAX_WORDS_IN_BATCH]
     cdef UITYPE_t context_indexes[MAX_WORDS_IN_BATCH]
     cdef UITYPE_t sentence_idx[MAX_WORDS_IN_BATCH + 1]
     cdef ITYPE_t reduced_windows[MAX_WORDS_IN_BATCH]
     
-    # Work buffer needs to be dynamically allocated based on vector_size
-    cdef np.ndarray[REAL_t, ndim=1] work = np.zeros(vector_size, dtype=np.float32)
-    cdef REAL_t *work_ptr = <REAL_t *>np.PyArray_DATA(work)
-    
-    # State variables (local, not global)
+    # State variables
     cdef unsigned long long next_random = random_seed
     cdef REAL_t running_loss = 0.0
     cdef long long total_examples = 0
