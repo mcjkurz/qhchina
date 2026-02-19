@@ -1,14 +1,13 @@
 """
 Fast Word2Vec training operations implemented in Cython.
 
-This module provides optimized implementations of the core training
-operations for Word2Vec with minimal Python/Cython boundary crossings.
+Training loop design and BLAS integration inspired by Gensim's word2vec_inner.pyx.
 
 Key optimizations:
-- Raw BLAS function pointers (like Gensim) for zero-overhead calls
-- Vocabulary lookup happens inside Cython (with GIL, but no intermediate allocations)
-- Fixed-size stack-allocated buffers (like Gensim) for maximum performance
-- GIL released for actual training computations
+- Raw BLAS function pointers for zero-overhead calls
+- Vocabulary lookup inside Cython (avoids intermediate allocations)
+- Fixed-size stack-allocated buffers for maximum performance
+- GIL released during actual training computations
 - Conditional loss computation (only when needed)
 """
 
@@ -115,13 +114,12 @@ cdef REAL_t[EXP_TABLE_SIZE] LOG_TABLE
 cdef bint _tables_initialized = False
 
 def _init_blas():
-    """
-    Initialize BLAS function pointers by extracting raw C pointers from scipy.
+    """Extract raw BLAS function pointers from scipy for zero-overhead calls.
     
-    Returns:
-        0 if sdot returns double
-        1 if sdot returns float  
-        2 if using pure Cython fallback (no BLAS)
+    BLAS provides optimized vector operations (dot product, saxpy) that are
+    significantly faster than pure Python/Cython loops.
+    
+    Returns: 0=sdot returns double, 1=sdot returns float, 2=no BLAS (fallback)
     """
     global our_sdot, our_saxpy, our_sscal, dsdot_ptr_global
     
@@ -193,7 +191,11 @@ _init_tables()
 # =============================================================================
 
 cdef inline unsigned long long random_int32(unsigned long long *next_random) noexcept nogil:
-    """Fast LCG random number generator."""
+    """Linear Congruential Generator for fast random numbers inside nogil blocks.
+    
+    LCG parameters (multiplier=25214903917, increment=11, modulus=2^48) chosen for
+    good statistical properties and fast computation.
+    """
     cdef unsigned long long this_random = next_random[0] >> 16
     next_random[0] = (next_random[0] * <unsigned long long>25214903917ULL + 11) & 281474976710655ULL
     return this_random
@@ -233,22 +235,22 @@ cdef inline unsigned long long train_sg_pair(
     const REAL_t alpha,
     REAL_t *work,
     unsigned long long next_random,
-    # Negative sampling parameters (passed, not global)
     UITYPE_t *cum_table,
     unsigned long long cum_table_len,
     int negative,
-    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss
 ) noexcept nogil:
-    """
-    Train on a single (center, context) pair with negative sampling.
+    """Train on a single (center, context) word pair with negative sampling.
     
-    Skip-gram: center word predicts context word.
-    - center_index: The center word (input). Its W (syn0) embedding is updated.
-    - context_index: The context word (target). Its W_prime (syn1neg) embedding is updated.
+    Updates:
+      - syn1neg[center_index]: Output embedding of center word (positive target)
+      - syn0[context_index]: Input embedding of context word
+    
+    This design (updating context's syn0, not center's) avoids the multiple-update
+    problem where the same syn0 row would be updated multiple times per window.
     """
-    cdef long long row1 = <long long>center_index * <long long>size
+    cdef long long row1 = <long long>context_index * <long long>size
     cdef long long row2
     cdef unsigned long long modulo = 281474976710655ULL
     cdef REAL_t f, g, label, f_dot, f_dot_for_loss, log_e_f_dot
@@ -259,12 +261,12 @@ cdef inline unsigned long long train_sg_pair(
     
     for d in range(negative + 1):
         if d == 0:
-            target_index = context_index
+            target_index = center_index  # Positive sample = center word
             label = ONEF
         else:
             target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
             next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
-            if target_index == context_index:
+            if target_index == center_index:
                 continue
             label = <REAL_t>0.0
         
@@ -277,11 +279,84 @@ cdef inline unsigned long long train_sg_pair(
         f = EXP_TABLE[<int>((f_dot + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
         g = (label - f) * alpha
         
-        # Accumulate loss only if requested
         if _compute_loss == 1:
             f_dot_for_loss = (f_dot if d == 0 else -f_dot)
             if f_dot_for_loss <= -MAX_EXP or f_dot_for_loss >= MAX_EXP:
-                pass  # Skip this loss term
+                pass
+            else:
+                log_e_f_dot = LOG_TABLE[<int>((f_dot_for_loss + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
+                running_loss[0] = running_loss[0] - log_e_f_dot
+        
+        our_saxpy(&size, &g, &syn1neg[row2], &ONE, work, &ONE)
+        our_saxpy(&size, &g, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
+    
+    our_saxpy(&size, &ONEF, work, &ONE, &syn0[row1], &ONE)
+    
+    return next_random
+
+
+# =============================================================================
+# Temporal Skip-gram Training (nogil)
+# =============================================================================
+
+cdef inline unsigned long long train_sg_pair_temporal(
+    REAL_t *syn0,
+    REAL_t *syn1neg,
+    const int size,
+    const UITYPE_t center_index,
+    const UITYPE_t context_index,
+    const REAL_t alpha,
+    REAL_t *work,
+    unsigned long long next_random,
+    UITYPE_t *cum_table,
+    unsigned long long cum_table_len,
+    int negative,
+    const int _compute_loss,
+    REAL_t *running_loss
+) noexcept nogil:
+    """Train on a single (center, context) pair for temporal Word2Vec.
+    
+    For TempRefWord2Vec, temporal variants (e.g., "民_宋") only appear as centers.
+    
+    Updates:
+      - syn1neg[center_index]: Output embedding of center (temporal variant)
+      - syn0[context_index]: Input embedding of context (base form)
+    
+    This allows querying temporal variants via their syn1neg embeddings.
+    """
+    cdef long long row1 = <long long>context_index * <long long>size
+    cdef long long row2
+    cdef unsigned long long modulo = 281474976710655ULL
+    cdef REAL_t f, g, label, f_dot, f_dot_for_loss, log_e_f_dot
+    cdef UITYPE_t target_index
+    cdef int d
+    
+    memset(work, 0, size * cython.sizeof(REAL_t))
+    
+    for d in range(negative + 1):
+        if d == 0:
+            target_index = center_index  # Positive sample = center (temporal variant)
+            label = ONEF
+        else:
+            target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
+            next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
+            if target_index == center_index:
+                continue
+            label = <REAL_t>0.0
+        
+        row2 = <long long>target_index * <long long>size
+        f_dot = our_sdot(&size, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
+        
+        if f_dot <= -MAX_EXP or f_dot >= MAX_EXP:
+            continue
+        
+        f = EXP_TABLE[<int>((f_dot + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
+        g = (label - f) * alpha
+        
+        if _compute_loss == 1:
+            f_dot_for_loss = (f_dot if d == 0 else -f_dot)
+            if f_dot_for_loss <= -MAX_EXP or f_dot_for_loss >= MAX_EXP:
+                pass
             else:
                 log_e_f_dot = LOG_TABLE[<int>((f_dot_for_loss + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
                 running_loss[0] = running_loss[0] - log_e_f_dot
@@ -398,16 +473,18 @@ cdef void train_batch_sg(
     REAL_t alpha,
     REAL_t *work,
     unsigned long long *next_random,
-    # Negative sampling parameters
     UITYPE_t *cum_table,
     unsigned long long cum_table_len,
     int negative,
-    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss,
     long long *examples_trained
 ) noexcept nogil:
-    """Train skip-gram on a batch of indexed sentences (nogil)."""
+    """Train skip-gram on a batch of indexed sentences (nogil).
+    
+    For each word at position i, trains pairs with context words in window.
+    indexes[i] = center word, indexes[j] = context word.
+    """
     cdef int sent_idx, i, j, k
     cdef int idx_start, idx_end
     
@@ -427,9 +504,10 @@ cdef void train_batch_sg(
                 if j == i:
                     continue
                 
+                # indexes[i] = center, indexes[j] = context
                 next_random[0] = train_sg_pair(
                     syn0, syn1neg, size,
-                    indexes[i], indexes[j],
+                    indexes[i], indexes[j],  # center, context
                     alpha, work, next_random[0],
                     cum_table, cum_table_len, negative,
                     _compute_loss, running_loss
@@ -520,38 +598,30 @@ def train_batch(
     unsigned long long random_seed,
     bint compute_loss=True,
 ):
-    """
-    Train Word2Vec (Skip-gram or CBOW) on a batch of sentences.
+    """Train Word2Vec on a batch of sentences.
     
-    THREAD SAFE: All state is passed as parameters. No global variables are used.
-    
-    This function processes a single batch of sentences that has already been
-    batched by word count in Python. It uses fixed-size stack-allocated buffers
-    (like Gensim) for maximum performance.
-    
-    IMPORTANT: The batch should contain at most MAX_WORDS_IN_BATCH (10240) words.
-    Words beyond this limit will be dropped. Python is responsible for batching 
-    by word count before calling this function.
+    Thread-safe: all state passed as parameters. Uses stack-allocated buffers
+    for maximum performance. Batch should have at most MAX_WORDS_IN_BATCH words.
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size)
-        syn1neg: Output word vectors (vocab_size x vector_size)
-        sentences: List of tokenized sentences (list of list of str)
-        word2idx: Dictionary mapping words to indices
-        sample_ints: Pre-computed subsampling thresholds (uint32)
-        cum_table: Cumulative distribution table for negative sampling
-        use_subsampling: Whether to apply subsampling
+        syn1neg: Output word vectors for negative sampling
+        sentences: List of tokenized sentences
+        word2idx: Word to index mapping
+        sample_ints: Subsampling thresholds
+        cum_table: Cumulative table for negative sampling
+        use_subsampling: Apply subsampling of frequent words
         window: Context window size
-        shrink_windows: Whether to randomly shrink windows
-        alpha: Learning rate for this batch
-        sg: If True, use Skip-gram; if False, use CBOW
-        negative: Number of negative samples
-        cbow_mean: If True, average context vectors (for CBOW)
-        random_seed: Seed for random number generator
-        compute_loss: Whether to compute and track loss (default True)
+        shrink_windows: Randomly reduce window size per word
+        alpha: Learning rate
+        sg: True for Skip-gram, False for CBOW
+        negative: Number of negative samples per positive
+        cbow_mean: Average context vectors (CBOW only)
+        random_seed: LCG seed (fresh per batch from Python RNG)
+        compute_loss: Track loss during training
     
     Returns:
-        Tuple of (batch_loss, examples_trained, words_processed, final_random_state)
+        (batch_loss, examples_trained, words_processed, final_random_state)
     """
     cdef int vector_size = syn0.shape[1]
     cdef int num_sentences = len(sentences)
@@ -607,9 +677,9 @@ def train_batch(
             word_idx = word2idx[token]
             total_words += 1
             
-            # Subsampling
+            # Subsampling (matches Gensim exactly)
             if use_subsampling:
-                if sample_ints_ptr[word_idx] < (random_int32(&next_random) & 0xFFFFFFFF):
+                if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
             
             indexes[effective_words] = <UITYPE_t>word_idx
@@ -820,24 +890,19 @@ cdef void train_batch_sg_temporal(
     REAL_t alpha,
     REAL_t *work,
     unsigned long long *next_random,
-    # Negative sampling parameters
     UITYPE_t *cum_table,
     unsigned long long cum_table_len,
     int negative,
-    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss,
     long long *examples_trained
 ) noexcept nogil:
-    """
-    Train skip-gram on a batch with temporal mapping (nogil).
+    """Train skip-gram on a batch with temporal mapping (nogil).
     
-    center_indexes: Original word indices (may be temporal variants)
-    context_indexes: Mapped indices (base forms for context)
+    center_indexes[i] = original index (temporal variant like "民_宋")
+    context_indexes[j] = mapped to base form (via temporal_index_map)
     
-    For each (center, context) pair:
-    - center word uses center_indexes[i] (keeps temporal variant)
-    - context word uses context_indexes[j] (mapped to base form)
+    Result: temporal variants get syn1neg trained, base forms get syn0 trained.
     """
     cdef int sent_idx, i, j, k
     cdef int idx_start, idx_end
@@ -858,11 +923,12 @@ cdef void train_batch_sg_temporal(
                 if j == i:
                     continue
                 
-                # Train: center word (original) predicts context word (mapped base form)
-                next_random[0] = train_sg_pair(
+                # center_indexes[i] -> syn1neg updated (temporal variant)
+                # context_indexes[j] -> syn0 updated (base form)
+                next_random[0] = train_sg_pair_temporal(
                     syn0, syn1neg, size,
-                    center_indexes[i],   # center word (may be temporal variant)
-                    context_indexes[j],  # context word (mapped to base form)
+                    center_indexes[i],   # center (temporal variant)
+                    context_indexes[j],  # context (base form)
                     alpha, work, next_random[0],
                     cum_table, cum_table_len, negative,
                     _compute_loss, running_loss

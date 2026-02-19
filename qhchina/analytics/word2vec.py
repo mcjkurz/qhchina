@@ -1,26 +1,19 @@
 """
-Sample-based Word2Vec implementation
------------------------------------
-This module implements the Word2Vec algorithm with both CBOW and Skip-gram models,
-accelerated with Cython for training.
+Word2Vec implementation with CBOW and Skip-gram models.
 
-- Skip-gram (sg=1): Each training example is a tuple (input_idx, output_idx), where 
-  input_idx is the index of the center word and output_idx is the index of a context word.
-  Negative examples are generated from the noise distribution for each positive example.
-
-- CBOW (sg=0): Each training example is a tuple (input_indices, output_idx), where
-  input_indices are the indices of context words, and output_idx is the index of the center word.
-  Negative examples are generated from the noise distribution for each positive example.
+Many implementation details (RNG handling, vocabulary ordering, cumulative table
+construction, batch processing) are inspired by the Gensim library to ensure
+comparable results and proven training behavior.
 
 Features:
 - CBOW and Skip-gram architectures
 - Cython-accelerated training with BLAS operations
-- Negative sampling for each training example
+- Negative sampling with configurable exponent
 - Subsampling of frequent words
-- Dynamic window sizing with shrink_windows parameter
-- Properly managed learning rate decay
-- Vocabulary size restriction with max_vocab_size parameter
-- Streaming support for large corpora that don't fit in memory
+- Dynamic window sizing (shrink_windows)
+- Learning rate decay across training
+- Vocabulary size restriction (max_vocab_size)
+- Streaming support for large corpora
 """
 
 import logging
@@ -282,13 +275,28 @@ class Word2Vec:
             # Intersect with words that meet min_word_count criteria
             retained_words = {word for word in top_words if word in retained_words}
             
-        # Create mappings
+        # Create mappings with Gensim-compatible ordering
+        # Gensim sorts by: primary = descending count, secondary = descending original index
+        # This ensures identical vocabulary indices between implementations for same corpus
+        words_with_counts = [(word, count) for word, count in self.word_counts.items() 
+                             if word in retained_words]
+        
+        # Build list with original indices for stable sorting
+        # original_index is based on first-seen order during counting
+        word_to_original_idx = {word: i for i, word in enumerate(self.word_counts.keys())}
+        words_with_indices = [(word, count, word_to_original_idx[word]) 
+                              for word, count in words_with_counts]
+        
+        # Sort by: descending count, then descending original index for ties
+        # The tie-breaker matters: different orderings assign different indices,
+        # which affects which vectors receive which gradient updates during training
+        words_sorted = sorted(words_with_indices, key=lambda x: (-x[1], -x[2]))
+        
         self.index2word = []
-        for word, _ in self.word_counts.most_common():
-            if word in retained_words:
-                word_id = len(self.index2word)
-                self.vocab[word] = word_id # word2index
-                self.index2word.append(word)
+        for word, count, _ in words_sorted:
+            word_id = len(self.index2word)
+            self.vocab[word] = word_id
+            self.index2word.append(word)
         
         # Compute token counts for example estimation
         self.total_corpus_tokens = sum(self.word_counts.values())  # All tokens (including OOV)
@@ -357,25 +365,22 @@ class Word2Vec:
         return max(1, estimated)
 
     def _initialize_vectors(self) -> None:
-        """
-        Initialize input (W) and output (W_prime) word embedding matrices.
-        
-        Uses Xavier/Glorot initialization with uniform distribution in range 
-        [-0.5/vector_size, 0.5/vector_size] for better convergence during training.
-        Both matrices are initialized with random values (not zeros).
-        """
+        """Initialize input (W) and output (W_prime) embedding matrices."""
         vocab_size = len(self.vocab)
         if self.verbose:
             logger.info(f"Initializing vectors: 2 matrices of shape ({vocab_size:,}, {self.vector_size})...")
         
-        # Initialize input and output matrices with Xavier/Glorot initialization
-        bound = 0.5 / self.vector_size
-        self.W = self._rng.uniform(
-            low=-bound, high=bound, size=(vocab_size, self.vector_size)
-        ).astype(self.dtype)
-        self.W_prime = self._rng.uniform(
-            low=-bound, high=bound, size=(vocab_size, self.vector_size)
-        ).astype(self.dtype)
+        # Must use default_rng (PCG64), not RandomState (Mersenne Twister)
+        # Different RNG algorithms produce different sequences even with same seed,
+        # causing divergent initial vectors and thus different trained embeddings
+        init_rng = np.random.default_rng(seed=self.seed)
+        self.W = init_rng.random((vocab_size, self.vector_size), dtype=self.dtype)
+        self.W *= 2.0
+        self.W -= 1.0
+        self.W /= self.vector_size
+        
+        # Output matrix starts at zero for stable negative sampling convergence
+        self.W_prime = np.zeros((vocab_size, self.vector_size), dtype=self.dtype)
 
     def _prepare_noise_distribution(self) -> None:
         """
@@ -415,35 +420,56 @@ class Word2Vec:
             np.ndarray[uint32]: Cumulative distribution table
             
         The model keeps a reference to this array to prevent garbage collection.
+        
+        Note: This matches Gensim's make_cum_table() exactly to ensure identical
+        negative sampling behavior.
         """
-        if self.noise_distribution is None or len(self.noise_distribution) == 0:
+        vocab_size = len(self.vocab)
+        if vocab_size == 0:
             self._cum_table = np.array([], dtype=np.uint32)
             return self._cum_table
         
-        # Build cumulative table using NumPy
-        # Domain is 2^31 - 1 (max value for signed 32-bit int, used for binary search)
-        domain = 2147483647.0
-        cumsum = np.cumsum(self.noise_distribution)
-        self._cum_table = np.minimum(cumsum * domain, domain).astype(np.uint32)
+        # Match Gensim's make_cum_table exactly:
+        # 1. Compute sum of all count^ns_exponent (Z in paper)
+        # 2. Build cumulative values with round() for each entry
+        domain = 2**31 - 1
+        self._cum_table = np.zeros(vocab_size, dtype=np.uint32)
+        
+        # Compute Z = sum of all count^exponent
+        train_words_pow = 0.0
+        for word in self.index2word:
+            count = self.word_counts[word]
+            train_words_pow += count ** self.ns_exponent
+        
+        # Build cumulative table entry by entry using round()
+        # Using round() is critical - truncation via astype(uint32) causes different
+        # negative samples to be drawn, leading to divergent training results
+        cumulative = 0.0
+        for word_index, word in enumerate(self.index2word):
+            count = self.word_counts[word]
+            cumulative += count ** self.ns_exponent
+            self._cum_table[word_index] = round(cumulative / train_words_pow * domain)
+        
+        # Verify final value equals domain (Gensim does this assertion)
+        if vocab_size > 0:
+            assert self._cum_table[-1] == domain, f"Final cum_table value {self._cum_table[-1]} != {domain}"
+        
         return self._cum_table
     
     def _get_random_state(self) -> int:
-        """Get current random state for training.
+        """Get a fresh random seed for training each batch.
         
-        Returns an integer seed for the Cython training code. If seed is None,
-        generates a random seed using the RNG.
+        Each batch gets a fresh seed derived from the model's NumPy RNG.
+        Reusing the LCG state across batches causes training divergence.
         """
-        if not hasattr(self, '_random_state'):
-            if self.seed is not None:
-                self._random_state = self.seed
-            else:
-                # Generate random seed from RNG when no seed was provided
-                self._random_state = self._rng.randint(0, 2**32 - 1)
-        return self._random_state
+        # Combine two 24-bit randints into a 48-bit seed for the Cython LCG
+        high = self._rng.randint(0, 2**24)
+        low = self._rng.randint(0, 2**24)
+        return (2**24) * high + low
     
     def _set_random_state(self, state: int) -> None:
-        """Update random state after training."""
-        self._random_state = state
+        """No-op: LCG state from Cython is discarded; each batch gets fresh seed."""
+        pass
     
     def _compute_sample_ints(self) -> np.ndarray:
         """
@@ -1319,6 +1345,89 @@ class TempRefWord2Vec(Word2Vec):
         
         # Call the parent's train method with our combined corpus
         return super().train(sentences=self.combined_corpus)
+
+    def _is_temporal_variant(self, word: str) -> bool:
+        """Check if a word is a temporal variant (e.g., '民_宋')."""
+        return word in self.reverse_temporal_map
+    
+    def get_vector(self, word: str, normalize: bool = False) -> np.ndarray:
+        """Get the vector for a word.
+        
+        Embedding selection based on training dynamics:
+          - Temporal variants (e.g., "民_宋"): W_prime (syn1neg), trained as centers
+          - Regular words: W (syn0), trained as context words
+        
+        Args:
+            word: Input word.
+            normalize: If True, return unit-length vector.
+        
+        Returns:
+            Word vector of shape (vector_size,).
+        
+        Raises:
+            KeyError: If word is not in vocabulary.
+        """
+        if word not in self.vocab:
+            raise KeyError(f"Word '{word}' not in vocabulary")
+        
+        word_idx = self.vocab[word]
+        
+        # Temporal variants -> W_prime (center embeddings)
+        # Regular words -> W (context embeddings)
+        if self._is_temporal_variant(word):
+            vector = self.W_prime[word_idx]
+        else:
+            vector = self.W[word_idx]
+        
+        if normalize:
+            norm = np.linalg.norm(vector)
+            if norm > 0:
+                return vector / norm
+        return vector
+    
+    def most_similar(self, word: str, topn: int = 10) -> list[tuple[str, float]]:
+        """Find the topn most similar words to the given word.
+        
+        Embedding selection based on training dynamics:
+          - Temporal variants (e.g., "民_宋"): W_prime (trained as center words)
+          - Regular words: W (trained as context words)
+        
+        Both query and comparison vectors use the appropriate trained embedding.
+        
+        Args:
+            word: Input word (temporal variant or regular word).
+            topn: Number of similar words to return.
+        
+        Returns:
+            List of (word, similarity) tuples sorted by descending similarity.
+        """
+        if word not in self.vocab:
+            return []
+        
+        word_idx = self.vocab[word]
+        
+        # Query vector: W_prime for temporal variants, W for regular words
+        if self._is_temporal_variant(word):
+            word_vec = self.W_prime[word_idx].reshape(1, -1)
+        else:
+            word_vec = self.W[word_idx].reshape(1, -1)
+        
+        # Compute similarity against W (efficient batch operation)
+        sim = cosine_similarity(word_vec, self.W).flatten()
+        
+        # Replace scores for temporal variants using their W_prime embeddings
+        for temporal_word in self.reverse_temporal_map:
+            idx = self.vocab[temporal_word]
+            sim[idx] = cosine_similarity(word_vec, self.W_prime[idx].reshape(1, -1))[0, 0]
+        
+        most_similar_words = []
+        for idx in (-sim).argsort():
+            if idx != word_idx:
+                most_similar_words.append((self.index2word[idx], float(sim[idx])))
+                if len(most_similar_words) >= topn:
+                    break
+        
+        return most_similar_words
 
     def calculate_semantic_change(self, target_word: str, labels: list[str] | None = None) -> dict[str, list[tuple[str, float]]]:
         """

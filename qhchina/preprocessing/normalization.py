@@ -46,44 +46,38 @@ class NormalizeOptions(TypedDict, total=False):
     
     All keys are optional - only specified options are applied.
     
-    Keys:
+    Attributes:
         conversion: Script/variant conversion using OpenCC. Values:
-            - 't2s': Traditional → Simplified
-            - 's2t': Simplified → Traditional
-            - 't2tw': Traditional → Taiwan standard (normalizes variants)
-            - 't2hk': Traditional → Hong Kong standard
-            - 's2tw': Simplified → Taiwan traditional
-            - 's2hk': Simplified → Hong Kong traditional
-            - Any valid OpenCC configuration name
-        
-        unicode: Unicode normalization form.
-            - 'NFC': Canonical composition (recommended)
-            - 'NFD': Canonical decomposition
-            - 'NFKC': Compatibility composition
-            - 'NFKD': Compatibility decomposition
-        
-        whitespace: Whitespace handling.
-            - 'collapse': Collapse multiple spaces/tabs/newlines to single, strip text
-            - 'strip': Strip leading/trailing whitespace from each line
-            - 'remove': Remove all whitespace (spaces, tabs, newlines)
-        
-        punctuation: Punctuation width.
-            - 'full': Convert to full-width (，。！？)
-            - 'half': Convert to half-width (,.!?)
-        
-        numbers: Digit width.
-            - 'full': Convert to full-width (０-９)
-            - 'half': Convert to half-width (0-9)
-        
-        letters: Letter width.
-            - 'full': Convert to full-width (Ａ-Ｚ)
-            - 'half': Convert to half-width (A-Z)
-        
-        quotes: Quotation mark style (smart nesting).
-            - 'straight': ASCII quotes (" ')
-            - 'smart': Typographic curly quotes (" " ' ')
-            - 'corner': East Asian corner brackets (「 」 『 』)
-            - 'guillemets': French-style angle quotes (« » ‹ ›)
+            't2s' (Traditional → Simplified),
+            's2t' (Simplified → Traditional),
+            't2tw' (Traditional → Taiwan standard),
+            't2hk' (Traditional → Hong Kong standard),
+            's2tw' (Simplified → Taiwan traditional),
+            's2hk' (Simplified → Hong Kong traditional),
+            or any valid OpenCC configuration name.
+        unicode: Unicode normalization form. Values:
+            'NFC' (canonical composition, recommended),
+            'NFD' (canonical decomposition),
+            'NFKC' (compatibility composition),
+            'NFKD' (compatibility decomposition).
+        whitespace: Whitespace handling. Values:
+            'collapse' (collapse multiple spaces/tabs/newlines to single, strip text),
+            'strip' (strip leading/trailing whitespace from each line),
+            'remove' (remove all whitespace).
+        punctuation: Punctuation width. Values:
+            'full' (convert to full-width: ，。！？),
+            'half' (convert to half-width: ,.!?).
+        numbers: Digit width. Values:
+            'full' (convert to full-width: ０-９),
+            'half' (convert to half-width: 0-9).
+        letters: Letter width. Values:
+            'full' (convert to full-width: Ａ-Ｚ),
+            'half' (convert to half-width: A-Z).
+        quotes: Quotation mark style with smart nesting. Values:
+            'straight' (ASCII quotes: " '),
+            'smart' (typographic curly quotes: " " ' '),
+            'corner' (East Asian corner brackets: 「 」 『 』),
+            'guillemets' (French-style angle quotes: « » ‹ ›).
     """
     conversion: str
     unicode: Literal['NFC', 'NFD', 'NFKC', 'NFKD']
