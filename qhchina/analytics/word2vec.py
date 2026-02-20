@@ -1,19 +1,8 @@
 """
-Word2Vec implementation with CBOW and Skip-gram models.
+Word2Vec implementation for learning word embeddings.
 
-Many implementation details (RNG handling, vocabulary ordering, cumulative table
-construction, batch processing) are inspired by the Gensim library to ensure
-comparable results and proven training behavior.
-
-Features:
-- CBOW and Skip-gram architectures
-- Cython-accelerated training with BLAS operations
-- Negative sampling with configurable exponent
-- Subsampling of frequent words
-- Dynamic window sizing (shrink_windows)
-- Learning rate decay across training
-- Vocabulary size restriction (max_vocab_size)
-- Streaming support for large corpora
+Provides CBOW and Skip-gram architectures for training word vectors from text corpora.
+Includes support for temporal semantic change analysis via TempRefWord2Vec.
 """
 
 import logging
@@ -44,27 +33,15 @@ __all__ = [
 
 class Word2Vec:
     """
-    Implementation of Word2Vec algorithm with Cython-accelerated training. It is inspired by the Gensim implementation.
+    Word2Vec model for learning word embeddings from text.
     
-    This class implements both Skip-gram and CBOW architectures:
-    - Skip-gram (sg=1): Each training example is (input_idx, output_idx) where input is the center word
-      and output is a context word.
-    - CBOW (sg=0): Each training example is (input_indices, output_idx) where inputs are context words
-      and output is the center word.
+    Supports two training algorithms:
+    - Skip-gram (sg=1): Predicts context words from center word. Generally better for 
+      infrequent words and smaller datasets.
+    - CBOW (sg=0): Predicts center word from context words. Faster to train.
     
-    Training is performed using optimized Cython routines with BLAS operations.
-    
-    If ``sentences`` is provided at initialization, training starts immediately. Otherwise, call
-    ``train()`` later with the sentences to train on.
-    
-    Features:
-    - CBOW and Skip-gram architectures
-    - Cython-accelerated training with BLAS operations
-    - Negative sampling for each training example
-    - Subsampling of frequent words
-    - Dynamic window sizing with shrink_windows parameter
-    - Properly managed learning rate decay
-    - Vocabulary size restriction with max_vocab_size parameter
+    If ``sentences`` is provided at initialization, training starts immediately. Otherwise, 
+    call ``train()`` later with the sentences to train on.
     
     Args:
         sentences (iterable of list of str, optional): Tokenized sentences for training. 
@@ -73,33 +50,27 @@ class Word2Vec:
         vector_size (int): Dimensionality of the word vectors (default: 100).
         window (int): Maximum distance between the current and predicted word (default: 5).
         min_word_count (int): Ignores all words with frequency lower than this (default: 5).
-        negative (int): Number of negative samples for negative sampling (default: 5).
-        ns_exponent (float): Exponent used to shape the negative sampling distribution (default: 0.75).
+        negative (int): Number of negative samples (default: 5).
+        ns_exponent (float): Exponent for negative sampling distribution (default: 0.75).
         cbow_mean (bool): If True, use mean of context word vectors, else use sum (default: True).
         sg (int): Training algorithm: 1 for skip-gram; 0 for CBOW (default: 0).
         seed (int, optional): Seed for random number generator. If None, uses global seed setting.
         alpha (float): Initial learning rate (default: 0.025).
-        min_alpha (float, optional): Minimum learning rate. If None, learning rate remains constant at alpha.
+        min_alpha (float, optional): Minimum learning rate. If None, learning rate remains constant.
         sample (float): Threshold for subsampling frequent words. Default is 1e-3, set to 0 to disable.
-        shrink_windows (bool): If True, the effective window size is uniformly sampled from [1, window] 
-            for each target word during training. If False, always use the full window (default: True).
-        max_vocab_size (int, optional): Maximum vocabulary size to keep, keeping the most frequent words.
-            None means no limit (keep all words above min_word_count).
-        verbose (bool): If True, log detailed progress information during training (default: False).
+        shrink_windows (bool): If True, randomly vary the effective window size during training 
+            (default: True).
+        max_vocab_size (int, optional): Maximum vocabulary size. None means no limit.
+        verbose (bool): If True, log progress information during training (default: False).
         epochs (int): Number of training iterations over the corpus (default: 1).
-        batch_size (int): Target number of words per training batch (default: 10240). 
-            Note that the Cython training buffer is limited to 10240 words, regardless of the batch_size parameter; 
-            words beyond this limit will be dropped from the batch, which mimics Gensim behavior.
-        workers (int): Number of worker threads for training (default: 1).
-            Training always uses a producer-consumer threading model for efficiency.
-            With workers=1, this enables pipelining (preparing next batch while training current).
-            With workers>1, enables parallel Hogwild!-style training on multiple batches.
+        batch_size (int): Number of words per training batch (default: 10240).
+        workers (int): Number of worker threads for parallel training (default: 1).
         callbacks (list of callable, optional): Callback functions to call after each epoch.
         calculate_loss (bool): Whether to calculate and return the final loss (default: True).
         total_examples (int, optional): Total number of training examples per epoch. When provided 
-            along with ``min_alpha``, uses this exact value instead of estimating for learning rate decay.
+            along with ``min_alpha``, uses this exact value for learning rate decay calculation.
         shuffle (bool, optional): Whether to shuffle sentences before each epoch. 
-            Defaults to True if sentences is a list, False otherwise (to preserve streaming).
+            Defaults to True if sentences is a list, False otherwise.
     
     Example:
         from qhchina.analytics.word2vec import Word2Vec
@@ -114,13 +85,11 @@ class Word2Vec:
         model = Word2Vec(vector_size=100, window=5, min_word_count=1, epochs=5)
         model.train(sentences)
         
-        # Get word vector (can use model directly or model.wv for gensim compatibility)
+        # Get word vector
         vector = model['喜欢']
-        vector = model.wv['喜欢']  # Same as above
         
         # Find similar words
         similar = model.most_similar('喜欢', topn=5)
-        similar = model.wv.most_similar('喜欢', topn=5)  # Same as above
     """
     
     def __init__(
@@ -1621,10 +1590,6 @@ class TempRefWord2Vec(Word2Vec):
     def get_vector(self, word: str, normalize: bool = False) -> np.ndarray:
         """Get the vector for a word.
         
-        Embedding selection based on training dynamics:
-          - Temporal variants (e.g., "民_宋"): W_prime (syn1neg), trained as centers
-          - Regular words: W (syn0), trained as context words
-        
         Args:
             word: Input word.
             normalize: If True, return unit-length vector.
@@ -1640,8 +1605,7 @@ class TempRefWord2Vec(Word2Vec):
         
         word_idx = self.vocab[word]
         
-        # Temporal variants -> W_prime (center embeddings)
-        # Regular words -> W (context embeddings)
+        # Temporal variants use output embeddings, regular words use input embeddings
         if self._is_temporal_variant(word):
             vector = self.W_prime[word_idx]
         else:
@@ -1654,14 +1618,10 @@ class TempRefWord2Vec(Word2Vec):
         return vector
     
     def most_similar(self, word: str, topn: int = 10) -> list[tuple[str, float]]:
-        """Find the topn most similar words to the given word.
-        
-        Cross-space comparison matching the training dynamics:
-          - Temporal variant queries: W_prime vs W (regular), W_prime vs W_prime (temporal)
-          - Regular word queries: W vs W
+        """Find the most similar words to the given word.
         
         Args:
-            word: Input word (temporal variant or regular word).
+            word: Input word (can be a temporal variant like "word_period" or a regular word).
             topn: Number of similar words to return.
         
         Returns:
@@ -1698,11 +1658,6 @@ class TempRefWord2Vec(Word2Vec):
 
     def similarity(self, word1: str, word2: str) -> float:
         """Calculate cosine similarity between two words.
-        
-        Cross-space comparison matching the training dynamics:
-          - Both temporal: W_prime vs W_prime
-          - One temporal, one regular: W_prime vs W (cross-space)
-          - Both regular: W vs W
         
         Args:
             word1: First word.
