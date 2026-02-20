@@ -1451,3 +1451,171 @@ class TestWord2VecAlphaHandling:
         assert model.alpha == 0.0
 
 
+class TestWord2VecMultithreading:
+    """Tests for multithreaded training."""
+    
+    def test_workers_one_trains_successfully(self, larger_documents):
+        """Test that workers=1 (pipelined) training works correctly."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=3,
+            min_word_count=2,
+            negative=3,
+            sg=1,
+            seed=42,
+            epochs=2,
+            workers=1,
+        )
+        
+        assert len(model.vocab) > 0
+        assert model.W is not None
+        assert model.W.shape[1] == 20
+        
+        # Vectors should be valid
+        for word in list(model.vocab.keys())[:5]:
+            vec = model.get_vector(word)
+            assert not np.any(np.isnan(vec))
+            assert not np.any(np.isinf(vec))
+    
+    def test_workers_multiple_trains_successfully(self, larger_documents):
+        """Test that workers>1 (parallel Hogwild) training works correctly."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=3,
+            min_word_count=2,
+            negative=3,
+            sg=1,
+            seed=42,
+            epochs=2,
+            workers=4,
+        )
+        
+        assert len(model.vocab) > 0
+        assert model.W is not None
+        assert model.W.shape[1] == 20
+        
+        # Vectors should be valid
+        for word in list(model.vocab.keys())[:5]:
+            vec = model.get_vector(word)
+            assert not np.any(np.isnan(vec))
+            assert not np.any(np.isinf(vec))
+    
+    def test_workers_cbow_mode(self, larger_documents):
+        """Test multithreading works with CBOW mode."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=3,
+            min_word_count=2,
+            negative=3,
+            sg=0,  # CBOW
+            seed=42,
+            epochs=2,
+            workers=2,
+        )
+        
+        assert len(model.vocab) > 0
+        assert model.W is not None
+    
+    def test_workers_invalid_raises_error(self):
+        """Test that workers<1 raises an error."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        with pytest.raises(ValueError, match="workers must be at least 1"):
+            Word2Vec(
+                vector_size=20,
+                workers=0,
+            )
+    
+    def test_workers_learning_rate_decay(self, larger_documents):
+        """Test that learning rate decay works with multithreading."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=3,
+            min_word_count=2,
+            negative=3,
+            sg=1,
+            seed=42,
+            alpha=0.025,
+            min_alpha=0.0001,
+            epochs=3,
+            workers=2,
+        )
+        
+        # After training with min_alpha set, alpha should equal min_alpha
+        assert model.alpha == 0.0001
+
+
+class TestTempRefWord2VecMultithreading:
+    """Tests for TempRefWord2Vec multithreading."""
+    
+    def test_tempref_workers_one(self):
+        """Test TempRefWord2Vec with workers=1."""
+        from qhchina.analytics.word2vec import TempRefWord2Vec
+        
+        corpora = {
+            "period1": [["word1", "word2", "word3"]] * 50,
+            "period2": [["word1", "word4", "word5"]] * 50,
+        }
+        
+        model = TempRefWord2Vec(
+            corpora=corpora,
+            targets=["word1"],
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            negative=3,
+            sg=1,
+            seed=42,
+            epochs=2,
+            workers=1,
+        )
+        
+        assert len(model.vocab) > 0
+        assert "word1_period1" in model.vocab
+        assert "word1_period2" in model.vocab
+    
+    def test_tempref_workers_multiple(self):
+        """Test TempRefWord2Vec with workers>1."""
+        from qhchina.analytics.word2vec import TempRefWord2Vec
+        
+        corpora = {
+            "period1": [["word1", "word2", "word3"]] * 50,
+            "period2": [["word1", "word4", "word5"]] * 50,
+        }
+        
+        model = TempRefWord2Vec(
+            corpora=corpora,
+            targets=["word1"],
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            negative=3,
+            sg=1,
+            seed=42,
+            epochs=2,
+            workers=2,
+        )
+        
+        assert len(model.vocab) > 0
+        assert "word1_period1" in model.vocab
+        assert "word1_period2" in model.vocab
+        
+        # Vectors should be valid
+        vec1 = model.get_vector("word1_period1")
+        vec2 = model.get_vector("word1_period2")
+        assert not np.any(np.isnan(vec1))
+        assert not np.any(np.isnan(vec2))
+
+

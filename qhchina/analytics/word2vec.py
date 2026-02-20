@@ -18,8 +18,10 @@ Features:
 
 import logging
 import numpy as np
+import threading
 from collections import Counter
 from collections.abc import Callable, Iterable
+from queue import Queue
 from tqdm.auto import tqdm
 import time
 from .vectors import cosine_similarity
@@ -88,6 +90,10 @@ class Word2Vec:
         batch_size (int): Target number of words per training batch (default: 10240). 
             Note that the Cython training buffer is limited to 10240 words, regardless of the batch_size parameter; 
             words beyond this limit will be dropped from the batch, which mimics Gensim behavior.
+        workers (int): Number of worker threads for training (default: 1).
+            Training always uses a producer-consumer threading model for efficiency.
+            With workers=1, this enables pipelining (preparing next batch while training current).
+            With workers>1, enables parallel Hogwild!-style training on multiple batches.
         callbacks (list of callable, optional): Callback functions to call after each epoch.
         calculate_loss (bool): Whether to calculate and return the final loss (default: True).
         total_examples (int, optional): Total number of training examples per epoch. When provided 
@@ -136,6 +142,7 @@ class Word2Vec:
         verbose: bool = False,
         epochs: int = 1,
         batch_size: int = 10240,
+        workers: int = 1,
         callbacks: list[Callable] | None = None,
         calculate_loss: bool = True,
         total_examples: int | None = None,
@@ -162,6 +169,7 @@ class Word2Vec:
             self.dtype = np.float32
             self.epochs = epochs
             self.batch_size = batch_size
+            self.workers = workers
             self.callbacks = callbacks
             self.calculate_loss = calculate_loss
             self.total_examples_hint = total_examples
@@ -217,6 +225,9 @@ class Word2Vec:
         if batch_size <= 0:
             raise ValueError("batch_size must be greater than 0")
         self.batch_size = batch_size
+        if workers < 1:
+            raise ValueError("workers must be at least 1")
+        self.workers = workers
         self.callbacks = callbacks
         self.calculate_loss = calculate_loss
         self.total_examples_hint = total_examples
@@ -553,6 +564,252 @@ class Word2Vec:
         # Yield any remaining sentences
         if batch:
             yield batch
+    
+    def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Allocate private work buffers for a worker thread.
+        
+        Each worker thread needs its own work buffers to avoid race conditions.
+        These buffers are used for gradient accumulation during training.
+        
+        Returns:
+            Tuple of (work, neu1) numpy arrays, each of shape (vector_size,).
+        """
+        work = np.zeros(self.vector_size, dtype=self.dtype)
+        neu1 = np.zeros(self.vector_size, dtype=self.dtype)
+        return work, neu1
+    
+    def _train_batch_worker(
+        self,
+        batch: list[list[str]],
+        sample_ints: np.ndarray,
+        alpha: float,
+        calculate_loss: bool,
+        work: np.ndarray,
+        neu1: np.ndarray,
+    ) -> tuple[float, int, int]:
+        """
+        Train on a single batch using provided work buffers.
+        
+        This method is called by worker threads and uses thread-private buffers
+        instead of the instance buffers. Override in subclasses for different
+        training logic (e.g., TempRefWord2Vec uses temporal training).
+        
+        Args:
+            batch: List of tokenized sentences.
+            sample_ints: Subsampling thresholds array.
+            alpha: Learning rate for this batch.
+            calculate_loss: Whether to compute loss.
+            work: Thread-private work buffer.
+            neu1: Thread-private neu1 buffer.
+        
+        Returns:
+            Tuple of (batch_loss, batch_examples, batch_words).
+        """
+        batch_loss, batch_examples, batch_words, _ = word2vec_c.train_batch(
+            self.W,
+            self.W_prime,
+            batch,
+            self.vocab,
+            sample_ints,
+            self._cum_table,
+            work,
+            neu1,
+            self.sample > 0,
+            self.window,
+            self.shrink_windows,
+            alpha,
+            self.sg,
+            self.negative,
+            self.cbow_mean,
+            self._get_random_state(),
+            calculate_loss,
+        )
+        return batch_loss, batch_examples, batch_words
+    
+    def _worker_loop(
+        self,
+        job_queue: Queue,
+        progress_queue: Queue,
+        sample_ints: np.ndarray,
+        calculate_loss: bool,
+    ) -> None:
+        """
+        Worker thread main loop - processes training jobs from the queue.
+        
+        Each worker pulls batches from the job queue, trains on them using
+        thread-private buffers, and reports progress back via the progress queue.
+        
+        Args:
+            job_queue: Queue containing (batch, alpha) tuples or None (poison pill).
+            progress_queue: Queue for reporting (loss, examples, words) results.
+            sample_ints: Subsampling thresholds array (shared, read-only).
+            calculate_loss: Whether to compute and report loss values.
+        """
+        work, neu1 = self._get_thread_working_mem()
+        
+        while True:
+            job = job_queue.get()
+            if job is None:
+                progress_queue.put(None)
+                break
+            
+            batch, alpha = job
+            
+            batch_loss, batch_examples, batch_words = self._train_batch_worker(
+                batch, sample_ints, alpha, calculate_loss, work, neu1
+            )
+            
+            progress_queue.put((batch_loss, batch_examples, batch_words))
+    
+    def _job_producer(
+        self,
+        sentences: Iterable[list[str]],
+        job_queue: Queue,
+        start_alpha: float,
+        min_alpha_val: float,
+        decay_alpha: bool,
+        total_words_all_epochs: int,
+        epoch: int,
+        epochs: int,
+    ) -> None:
+        """
+        Producer thread - batches sentences and puts jobs into the queue.
+        
+        This runs in a separate thread to enable pipelining: the producer prepares
+        the next batch while workers train on current batches. The producer also
+        computes the learning rate for each batch based on training progress.
+        
+        Args:
+            sentences: Iterable of tokenized sentences.
+            job_queue: Queue to put (batch, alpha) jobs into.
+            start_alpha: Initial learning rate.
+            min_alpha_val: Minimum learning rate (for decay).
+            decay_alpha: Whether to decay learning rate.
+            total_words_all_epochs: Total words across all epochs (for decay calculation).
+            epoch: Current epoch number (0-indexed).
+            epochs: Total number of epochs.
+        """
+        words_produced = 0
+        base_words = epoch * self.corpus_word_count
+        
+        for batch in self._iter_batches(sentences, batch_words=self.batch_size):
+            if decay_alpha and total_words_all_epochs > 0:
+                global_words = base_words + words_produced
+                progress = min(global_words / total_words_all_epochs, 1.0)
+                batch_alpha = start_alpha + (min_alpha_val - start_alpha) * progress
+            else:
+                batch_alpha = start_alpha
+            
+            job_queue.put((batch, batch_alpha))
+            words_produced += sum(len(s) for s in batch)
+        
+        for _ in range(self.workers):
+            job_queue.put(None)
+    
+    def _train_epoch_threaded(
+        self,
+        sentences: Iterable[list[str]],
+        sample_ints: np.ndarray,
+        start_alpha: float,
+        min_alpha_val: float,
+        decay_alpha: bool,
+        total_words_all_epochs: int,
+        epoch: int,
+        epochs: int,
+        calculate_loss: bool,
+        progress_bar,
+        recent_losses: list,
+    ) -> tuple[float, int, int]:
+        """
+        Train one epoch using producer-consumer threading model.
+        
+        This method spawns worker threads and a producer thread, then monitors
+        progress from the main thread. Even with workers=1, this enables
+        pipelining where batch preparation overlaps with training.
+        
+        Args:
+            sentences: Iterable of tokenized sentences.
+            sample_ints: Subsampling thresholds array.
+            start_alpha: Initial learning rate.
+            min_alpha_val: Minimum learning rate.
+            decay_alpha: Whether to decay learning rate.
+            total_words_all_epochs: Total words across all epochs.
+            epoch: Current epoch number (0-indexed).
+            epochs: Total number of epochs.
+            calculate_loss: Whether to compute loss.
+            progress_bar: tqdm progress bar or None.
+            recent_losses: List for tracking recent loss values (modified in place).
+        
+        Returns:
+            Tuple of (epoch_loss, epoch_examples, epoch_words).
+        """
+        queue_factor = 2
+        job_queue = Queue(maxsize=queue_factor * self.workers)
+        progress_queue = Queue(maxsize=(queue_factor + 1) * self.workers)
+        
+        worker_threads = [
+            threading.Thread(
+                target=self._worker_loop,
+                args=(job_queue, progress_queue, sample_ints, calculate_loss),
+            )
+            for _ in range(self.workers)
+        ]
+        
+        producer_thread = threading.Thread(
+            target=self._job_producer,
+            args=(
+                sentences, job_queue, start_alpha, min_alpha_val,
+                decay_alpha, total_words_all_epochs, epoch, epochs,
+            ),
+        )
+        
+        for t in worker_threads:
+            t.daemon = True
+            t.start()
+        producer_thread.daemon = True
+        producer_thread.start()
+        
+        epoch_loss = 0.0
+        epoch_examples = 0
+        epoch_words = 0
+        unfinished_workers = self.workers
+        LOSS_HISTORY_SIZE = 100
+        
+        while unfinished_workers > 0:
+            result = progress_queue.get()
+            if result is None:
+                unfinished_workers -= 1
+                continue
+            
+            batch_loss, batch_examples, batch_words = result
+            epoch_loss += batch_loss
+            epoch_examples += batch_examples
+            epoch_words += batch_words
+            
+            if batch_examples > 0 and batch_loss > 0:
+                batch_avg_loss = batch_loss / batch_examples
+                recent_losses.append(batch_avg_loss)
+                if len(recent_losses) > LOSS_HISTORY_SIZE:
+                    recent_losses.pop(0)
+            
+            if progress_bar is not None:
+                recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
+                if decay_alpha:
+                    global_words = epoch * self.corpus_word_count + epoch_words
+                    progress = min(global_words / total_words_all_epochs, 1.0) if total_words_all_epochs > 0 else 0
+                    current_alpha = start_alpha + (min_alpha_val - start_alpha) * progress
+                    postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}"
+                else:
+                    postfix_str = f"loss={recent_avg:.6f}"
+                progress_bar.set_postfix_str(postfix_str)
+                progress_bar.update(batch_words)
+        
+        producer_thread.join()
+        for t in worker_threads:
+            t.join()
+        
+        return epoch_loss, epoch_examples, epoch_words
         
     def _train_batch(
         self,
@@ -665,6 +922,9 @@ class Word2Vec:
         # Determine shuffle behavior: default to True for lists, False for iterables
         shuffle = self.shuffle if self.shuffle is not None else isinstance(sentences, list)
         
+        if self.verbose:
+            logger.info(f"Training with {self.workers} worker(s) using producer-consumer threading")
+        
         # Training loop for each epoch
         for epoch in range(epochs):
             # Shuffle sentences at the start of each epoch if enabled
@@ -672,13 +932,6 @@ class Word2Vec:
                 self._rng.shuffle(sentences)
             
             epoch_start_time = time.time()
-            epoch_loss = 0.0
-            epoch_examples = 0
-            epoch_words = 0
-            batch_count = 0
-            
-            # Progress tracking for this epoch
-            LOSS_HISTORY_SIZE = 100
             
             # Progress bar for streaming (we know total words from vocab building)
             if calculate_loss:
@@ -694,45 +947,20 @@ class Word2Vec:
             else:
                 progress_bar = None
             
-            # Iterate through batches (batched by word count, like Gensim)
-            for batch in self._iter_batches(sentences, batch_words=batch_size):
-                batch_count += 1
-                
-                # Compute learning rate for this batch based on global word progress
-                if decay_alpha and total_words_all_epochs > 0:
-                    progress = min(global_words_processed / total_words_all_epochs, 1.0)
-                    batch_alpha = start_alpha + (min_alpha_val - start_alpha) * progress
-                else:
-                    batch_alpha = start_alpha
-                
-                # Train on this batch (hook method - can be overridden by subclasses)
-                batch_loss, batch_examples_count, batch_words_count, new_random_state = self._train_batch(
-                    batch, sample_ints, batch_alpha, calculate_loss
-                )
-                self._set_random_state(new_random_state)
-                
-                # Accumulate stats
-                epoch_loss += batch_loss
-                epoch_examples += batch_examples_count
-                epoch_words += batch_words_count
-                global_words_processed += batch_words_count
-                
-                # Track loss history
-                if batch_examples_count > 0 and batch_loss > 0:
-                    batch_avg_loss = batch_loss / batch_examples_count
-                    recent_losses.append(batch_avg_loss)
-                    if len(recent_losses) > LOSS_HISTORY_SIZE:
-                        recent_losses.pop(0)
-                
-                # Update progress bar
-                if progress_bar is not None:
-                    recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
-                    if decay_alpha:
-                        postfix_str = f"loss={recent_avg:.6f}, lr={batch_alpha:.6f}"
-                    else:
-                        postfix_str = f"loss={recent_avg:.6f}"
-                    progress_bar.set_postfix_str(postfix_str)
-                    progress_bar.update(batch_words_count)
+            # Train epoch using threaded producer-consumer model
+            epoch_loss, epoch_examples, epoch_words = self._train_epoch_threaded(
+                sentences=sentences,
+                sample_ints=sample_ints,
+                start_alpha=start_alpha,
+                min_alpha_val=min_alpha_val,
+                decay_alpha=decay_alpha,
+                total_words_all_epochs=total_words_all_epochs,
+                epoch=epoch,
+                epochs=epochs,
+                calculate_loss=calculate_loss,
+                progress_bar=progress_bar,
+                recent_losses=recent_losses,
+            )
             
             # Close progress bar
             if progress_bar is not None:
@@ -761,7 +989,7 @@ class Word2Vec:
             if self.verbose:
                 elapsed = time.time() - epoch_start_time
                 logger.info(f"Epoch {epoch+1}/{epochs} completed: {epoch_examples:,} examples, "
-                          f"{epoch_words:,} words, {batch_count} batches in {elapsed:.1f}s")
+                          f"{epoch_words:,} words in {elapsed:.1f}s")
         
         # Update the instance alpha to reflect the final learning rate
         if decay_alpha:
@@ -1314,6 +1542,53 @@ class TempRefWord2Vec(Word2Vec):
             self._get_random_state(),
             calculate_loss,
         )
+    
+    def _train_batch_worker(
+        self,
+        batch: list[list[str]],
+        sample_ints: np.ndarray,
+        alpha: float,
+        calculate_loss: bool,
+        work: np.ndarray,
+        neu1: np.ndarray,
+    ) -> tuple[float, int, int]:
+        """
+        Train on a single batch using temporal-aware training with provided work buffers.
+        
+        This method is called by worker threads and uses thread-private buffers.
+        
+        Args:
+            batch: List of tokenized sentences.
+            sample_ints: Subsampling thresholds array.
+            alpha: Learning rate for this batch.
+            calculate_loss: Whether to compute loss.
+            work: Thread-private work buffer.
+            neu1: Thread-private neu1 buffer (unused in temporal training).
+        
+        Returns:
+            Tuple of (batch_loss, batch_examples, batch_words).
+        """
+        if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
+            self._build_temporal_index_map()
+        
+        batch_loss, batch_examples, batch_words, _ = word2vec_c.train_batch_temporal(
+            self.W,
+            self.W_prime,
+            batch,
+            self.vocab,
+            self.temporal_index_map,
+            sample_ints,
+            self._cum_table,
+            work,
+            self.sample > 0,
+            self.window,
+            self.shrink_windows,
+            alpha,
+            self.negative,
+            self._get_random_state(),
+            calculate_loss,
+        )
+        return batch_loss, batch_examples, batch_words
     
     def train(self, sentences: list[list[str]] | None = None) -> float | None:
         """
