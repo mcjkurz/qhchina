@@ -148,7 +148,9 @@ class Word2Vec:
             self.W = None
             self.W_prime = None
             self.noise_distribution = None
-            self._rng = get_rng(resolve_seed(seed))
+            # Use effective_seed consistently with the normal initialization path
+            effective_seed = resolve_seed(seed)
+            self._rng = get_rng(effective_seed)
             return
         
         self.verbose = verbose
@@ -294,17 +296,10 @@ class Word2Vec:
 
     def _estimate_example_count(self, sample_ints: np.ndarray) -> int:
         """
-        Estimate total training examples per epoch without iterating through data.
-        
-        Used for learning rate decay scheduling when min_alpha is provided.
-        The estimate accounts for subsampling, vocabulary coverage, and window effects.
-        
-        For Skip-gram: each retained word generates ~2*avg_window context pairs,
-            but context words must also be in vocabulary and survive subsampling.
-        For CBOW: each retained word generates 1 example (with context as input).
+        Estimate total training examples per epoch for learning rate decay scheduling.
         
         Args:
-            sample_ints: Pre-computed subsampling thresholds (uint32 array from _compute_sample_ints).
+            sample_ints: Pre-computed subsampling thresholds from _compute_sample_ints().
         
         Returns:
             Estimated number of training examples per epoch.
@@ -354,14 +349,9 @@ class Word2Vec:
     def _initialize_vectors(self) -> None:
         """Initialize embedding matrices and work buffers.
         
-        Note on matrix roles (following Gensim convention):
-          - W (syn0): Trained as CONTEXT word embeddings, returned for queries
-          - W_prime (syn1neg): Trained as CENTER word embeddings, discarded
-        
-        This is counterintuitive since skip-gram "predicts context from center", but
-        the swap ensures W receives decorrelated gradient updates (one per occurrence
-        as context) rather than bursty correlated updates (multiple per window when
-        appearing as center). See train_sg_pair() in word2vec.pyx for details.
+        Matrix roles in skip-gram with negative sampling:
+          - W (syn0): Center word embeddings (input layer), returned for queries
+          - W_prime (syn1neg): Context word embeddings (output layer), discarded
         """
         vocab_size = len(self.vocab)
         if self.verbose:
@@ -1015,28 +1005,39 @@ class Word2Vec:
         """
         return word in self.vocab
     
-    def most_similar(self, word: str, topn: int = 10) -> list[tuple[str, float]]:
+    def most_similar(
+        self, 
+        word: str, 
+        topn: int = 10,
+        cross_space: bool = False
+    ) -> list[tuple[str, float]]:
         """
         Find the topn most similar words to the given word.
         
         Args:
             word: Input word.
             topn: Number of similar words to return.
+            cross_space: If False (default), compare W vs W (second-order similarity).
+                If True, compare W vs W_prime (first-order similarity based on
+                direct co-occurrence patterns).
         
         Returns:
             List of (word, similarity) tuples sorted by descending similarity.
-            Returns empty list if word is not in vocabulary.
+        
+        Raises:
+            KeyError: If word is not in vocabulary.
         """
         if word not in self.vocab:
-            return []
+            raise KeyError(f"Word '{word}' not in vocabulary")
         
         word_idx = self.vocab[word]
         word_vec = self.W[word_idx].reshape(1, -1)
         
-        # Compute cosine similarities using vectors module
-        sim = cosine_similarity(word_vec, self.W).flatten()
+        if cross_space:
+            sim = cosine_similarity(word_vec, self.W_prime).flatten()
+        else:
+            sim = cosine_similarity(word_vec, self.W).flatten()
         
-        # Get top similar words, excluding the input word
         most_similar_words = []
         for idx in (-sim).argsort():
             if idx != word_idx and len(most_similar_words) < topn:
@@ -1044,13 +1045,20 @@ class Word2Vec:
         
         return most_similar_words
 
-    def similarity(self, word1: str, word2: str) -> float:
+    def similarity(
+        self, 
+        word1: str, 
+        word2: str,
+        cross_space: bool = False
+    ) -> float:
         """
         Calculate cosine similarity between two words.
         
         Args:
-            word1: First word.
-            word2: Second word.
+            word1: First word (always from W).
+            word2: Second word (from W or W_prime depending on cross_space).
+            cross_space: If False (default), compare W[word1] vs W[word2].
+                If True, compare W[word1] vs W_prime[word2].
         
         Returns:
             Cosine similarity between the two words (float between -1 and 1).
@@ -1064,9 +1072,12 @@ class Word2Vec:
             raise KeyError(f"Word '{word2}' not found in vocabulary")
         
         word1_vec = self.W[self.vocab[word1]]
-        word2_vec = self.W[self.vocab[word2]]
         
-        # Use the vectors module for cosine similarity
+        if cross_space:
+            word2_vec = self.W_prime[self.vocab[word2]]
+        else:
+            word2_vec = self.W[self.vocab[word2]]
+        
         return float(cosine_similarity(word1_vec, word2_vec))
 
     def save(self, path: str) -> None:

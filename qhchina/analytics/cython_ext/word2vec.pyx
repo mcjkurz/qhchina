@@ -243,25 +243,17 @@ cdef inline unsigned long long train_sg_pair(
 ) noexcept nogil:
     """Train on a single (center, context) word pair with negative sampling.
     
+    Standard skip-gram framing where center word predicts context:
+      - syn0[center_index]: Input embedding of center word (row1)
+      - syn1neg[context_index]: Output embedding of context word (positive target, d=0)
+      - syn1neg[negative]: Output embeddings of negative samples (d>0)
+    
     Updates:
-      - syn1neg[center_index]: Output embedding of center word (positive target)
-      - syn0[context_index]: Input embedding of context word
-    
-    Why syn0 holds CONTEXT embeddings (not center), despite theory suggesting otherwise:
-    
-    In skip-gram, each center word generates multiple (center, context) pairs from its
-    window. If syn0 held center embeddings, syn0[center] would receive multiple correlated
-    updates in rapid succession (one per context word in the same window). These updates
-    all derive from the same local context, leading to "bursty" correlated gradients.
-    
-    By making syn0 the context matrix instead:
-      - Each syn0[word] update comes from a DIFFERENT center word elsewhere in the corpus
-      - Updates to the same syn0 row are spread across training, not clustered
-      - The discarded syn1neg absorbs the bursty updates (multiple per window)
-    
-    This produces better-quality embeddings in syn0, which is what we return for queries.
+      - syn0[center_index]: Updated via accumulated gradients from all targets
+      - syn1neg[context_index]: Updated directly (positive target)
+      - syn1neg[negatives]: Updated directly (negative targets)
     """
-    cdef long long row1 = <long long>context_index * <long long>size
+    cdef long long row1 = <long long>center_index * <long long>size
     cdef long long row2
     cdef unsigned long long modulo = 281474976710655ULL
     cdef REAL_t f, g, label, f_dot, f_dot_for_loss, log_e_f_dot
@@ -272,12 +264,12 @@ cdef inline unsigned long long train_sg_pair(
     
     for d in range(negative + 1):
         if d == 0:
-            target_index = center_index  # Positive sample = center word
+            target_index = context_index  # Positive sample = context word
             label = ONEF
         else:
             target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
             next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
-            if target_index == center_index:
+            if target_index == context_index:
                 continue
             label = <REAL_t>0.0
         
@@ -420,7 +412,7 @@ cdef void train_batch_sg(
     """Train skip-gram on a batch of indexed sentences (nogil).
     
     For each word at position i, trains pairs with context words in window.
-    indexes[i] = center word, indexes[j] = context word.
+    Center word (indexes[i]) in syn0, context word (indexes[j]) as positive target in syn1neg.
     """
     cdef int sent_idx, i, j, k
     cdef int idx_start, idx_end
@@ -442,6 +434,7 @@ cdef void train_batch_sg(
                     continue
                 
                 # indexes[i] = center, indexes[j] = context
+                # Center word in syn0 (row1), predicts context word in syn1neg
                 next_random[0] = train_sg_pair(
                     syn0, syn1neg, size,
                     indexes[i], indexes[j],  # center, context
@@ -579,7 +572,12 @@ def train_batch(
     cdef UITYPE_t indexes[MAX_WORDS_IN_BATCH]
     cdef UITYPE_t sentence_idx[MAX_WORDS_IN_BATCH + 1]
     cdef ITYPE_t reduced_windows[MAX_WORDS_IN_BATCH]
-    cdef UITYPE_t context_buffer[50]  # 2 * max_window
+    
+    # Dynamically allocate context buffer based on window size (only used for CBOW)
+    # Maximum context size is 2 * window (left + right context words)
+    cdef int context_buffer_size = 2 * window
+    cdef np.ndarray[UITYPE_t, ndim=1] context_buffer_arr = np.zeros(context_buffer_size, dtype=np.uint32)
+    cdef UITYPE_t *context_buffer = &context_buffer_arr[0]
     
     # State variables
     cdef unsigned long long next_random = random_seed
@@ -685,12 +683,10 @@ def train_batch_temporal(
 ):
     """Train Skip-gram with temporal mapping (for TempRefWord2Vec).
     
-    Reverses the standard Skip-gram framing to align with negative sampling gradient flow:
-    - CENTER words = base forms (mapped via temporal_index_map) -> syn1neg (noisy updates)
-    - CONTEXT words = temporal variants (original tokens) -> syn0 (clean updates)
-    
-    This gives temporal variants high-quality embeddings in syn0 (W), so all queries
-    use W only. Base forms in syn1neg provide a stable reference frame.
+    Temporal referencing training where:
+    - CENTER words = temporal variants (tagged words like "民_宋") -> syn0
+    - CONTEXT words = base forms (untagged words like "民") -> syn1neg (positive targets)
+    - Negative samples are drawn from the cum_table distribution -> syn1neg
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size).
@@ -766,15 +762,12 @@ def train_batch_temporal(
                 if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
             
-            # Store center index as BASE FORM (via temporal_index_map)
-            # For temporal variants like "民_宋", this maps to base "民"
-            # For regular words, identity mapping (index maps to itself)
-            # Base forms go to syn1neg (noisy updates, stable reference)
-            center_indexes[effective_words] = <UITYPE_t>temporal_map_ptr[word_idx]
+            # Center = original token (temporal variant like "民_宋" if tagged)
+            center_indexes[effective_words] = <UITYPE_t>word_idx
             
-            # Store context index as ORIGINAL token (temporal variant if applicable)
-            # Temporal variants go to syn0 (clean updates, informative embeddings)
-            context_indexes[effective_words] = <UITYPE_t>word_idx
+            # Context = base form (via temporal_index_map: "民_宋" -> "民")
+            # For regular words, identity mapping (index maps to itself)
+            context_indexes[effective_words] = <UITYPE_t>temporal_map_ptr[word_idx]
             
             effective_words += 1
             
@@ -832,10 +825,8 @@ cdef void train_batch_sg_temporal(
 ) noexcept nogil:
     """Train skip-gram on a batch with temporal mapping (nogil).
     
-    center_indexes[i] = base form (mapped via temporal_index_map) -> syn1neg (noisy)
-    context_indexes[j] = original token (temporal variant) -> syn0 (clean)
-    
-    Result: temporal variants get high-quality syn0 embeddings, base forms get noisy syn1neg.
+    center_indexes[i] = temporal variant (tagged) -> syn0
+    context_indexes[j] = base form (untagged) -> syn1neg (positive target)
     """
     cdef int sent_idx, i, j, k
     cdef int idx_start, idx_end
@@ -856,12 +847,12 @@ cdef void train_batch_sg_temporal(
                 if j == i:
                     continue
                 
-                # center_indexes[i] = base form -> syn1neg (noisy updates)
-                # context_indexes[j] = temporal variant -> syn0 (clean updates)
+                # center_indexes[i] = tagged word -> syn0
+                # context_indexes[j] = base form -> syn1neg (positive target)
                 next_random[0] = train_sg_pair(
                     syn0, syn1neg, size,
-                    center_indexes[i],   # center (base form)
-                    context_indexes[j],  # context (temporal variant)
+                    center_indexes[i],   # center (tagged)
+                    context_indexes[j],  # context (base form)
                     alpha, work, next_random[0],
                     cum_table, cum_table_len, negative,
                     _compute_loss, running_loss

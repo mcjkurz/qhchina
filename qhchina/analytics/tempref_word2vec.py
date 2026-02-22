@@ -32,16 +32,14 @@ class TempRefWord2Vec(Word2Vec):
     Word2Vec with Temporal Referencing (TR) for tracking semantic change.
     
     Implements temporal referencing where target words are tagged with time period
-    indicators (e.g., "bread_1800s"). The training aligns with how negative sampling
-    distributes gradients:
+    indicators (e.g., "bread_1800s"). During training:
     
-    - Temporal variants (e.g., "bread_1800s") are used as CONTEXT words, receiving
-      high-quality aggregated updates in W (syn0)
-    - Base forms (e.g., "bread") are used as CENTER words, receiving multiple noisy
-      updates in W_prime (syn1neg), providing a stable reference frame
+    - Temporal variants (e.g., "bread_1800s") are used as CENTER words in syn0 (W)
+    - Base forms (e.g., "bread") are used as CONTEXT words in syn1neg (W_prime)
+    - Negative samples are drawn from base forms only
     
-    This design ensures all queries use W only, making temporal variants directly
-    comparable with each other and with regular words.
+    This design places temporal variant embeddings in W, making them directly
+    comparable with each other and with regular words for semantic change analysis.
     
     Training uses balanced batch sampling - each batch contains equal numbers of
     documents from each time period, ensuring fair representation regardless of
@@ -79,10 +77,12 @@ class TempRefWord2Vec(Word2Vec):
         
         corpus1 = TempRefCorpus(label="1800s", targets=targets)
         corpus1.add_many(sentences_1800s)
+        corpus1.shuffle()
         corpus1.save("1800s.txt")
         
         corpus2 = TempRefCorpus(label="1900s", targets=targets)
         corpus2.add_many(sentences_1900s)
+        corpus2.shuffle()
         corpus2.save("1900s.txt")
         
         # Step 2: Initialize the model
@@ -154,6 +154,10 @@ class TempRefWord2Vec(Word2Vec):
         if kwargs.get('sg') != 1:
             raise NotImplementedError("TempRefWord2Vec only supports Skip-gram (sg=1)")
         
+        # Validate targets
+        if not targets:
+            raise ValueError("targets cannot be empty. Provide at least one target word for temporal tracking.")
+        
         # Reject shuffle=True (balanced iterator shuffles within batches)
         if kwargs.get('shuffle') is True:
             raise ValueError(
@@ -200,9 +204,10 @@ class TempRefWord2Vec(Word2Vec):
         in a single pass through the files, then adds temporal base words.
         
         Args:
-            sentences: Ignored for TempRefWord2Vec. Uses internal file readers instead.
+            sentences: Ignored. TempRefWord2Vec uses internal file readers instead.
+                Accepted for API compatibility with the parent class.
         """
-        self._count_words(sentences)
+        self._count_words()
         self._filter_and_map_vocab()
         self._add_temporal_base_words()
     
@@ -216,7 +221,8 @@ class TempRefWord2Vec(Word2Vec):
         correctly for balanced training.
         
         Args:
-            sentences: Ignored. Uses internal file readers instead.
+            sentences: Ignored. TempRefWord2Vec uses internal file readers instead.
+                Accepted for API compatibility with the parent class.
         
         Raises:
             ValueError: If corpus files contain no words.
@@ -259,10 +265,10 @@ class TempRefWord2Vec(Word2Vec):
         """
         Add base words to vocabulary with counts derived from their temporal variants.
         
-        Base words serve as CENTER words during training (getting noisy syn1neg updates),
-        while temporal variants serve as CONTEXT words (getting clean syn0 updates).
-        The base word's effective frequency equals the sum of all its variants, ensuring
-        proper negative sampling probability.
+        Base words serve as CONTEXT words (positive targets in syn1neg) during training,
+        while temporal variants serve as CENTER words (in syn0). The base word's
+        effective frequency equals the sum of all its variants, ensuring proper
+        negative sampling probability.
         
         Reference: Dubossarsky et al. (2019) "Time-Out: Temporal Referencing for Robust 
         Modeling of Lexical Semantic Change" - base forms provide stable reference frame.
@@ -324,10 +330,9 @@ class TempRefWord2Vec(Word2Vec):
         - For temporal variants: temporal_index_map[variant_idx] = base_word_idx
         - For regular words: temporal_index_map[word_idx] = word_idx (identity)
         
-        During training, this map is applied to CENTER words (which get noisy syn1neg
-        updates), so temporal variants like "民_宋" become base forms "民" for the
-        center role. The original variant index is used for CONTEXT words (which get
-        clean syn0 updates), giving temporal variants high-quality embeddings.
+        During training, CENTER words are temporal variants (in syn0), and this map
+        is applied to get the CONTEXT words (base forms as positive targets in syn1neg).
+        For example, "民_宋" (center, in syn0) predicts "民" (context, in syn1neg).
         """
         vocab_size = len(self.vocab)
         
@@ -342,6 +347,55 @@ class TempRefWord2Vec(Word2Vec):
                 self.temporal_index_map[variant_idx] = base_idx
         
         logger.debug(f"Built temporal index map with {len(self.reverse_temporal_map)} variant mappings")
+    
+    def _build_cum_table(self) -> np.ndarray:
+        """
+        Build cumulative table for negative sampling, excluding temporal variants.
+        
+        Temporal variants (e.g., "民_宋") are CENTER words (in syn0), not CONTEXT words.
+        Negative samples should come from the same distribution as positive targets
+        (base forms in syn1neg). Including temporal variants in negative sampling would
+        sample words whose syn1neg embeddings are never trained as positive targets.
+        
+        This override gives temporal variants zero probability by assigning them
+        the same cumulative value as the previous word (zero-width range).
+        
+        Returns:
+            np.ndarray[uint32]: Cumulative distribution table
+        """
+        vocab_size = len(self.vocab)
+        if vocab_size == 0:
+            self._cum_table = np.array([], dtype=np.uint32)
+            return self._cum_table
+        
+        domain = 2**31 - 1
+        self._cum_table = np.zeros(vocab_size, dtype=np.uint32)
+        
+        # Compute Z = sum of count^exponent for eligible words only
+        train_words_pow = 0.0
+        for word in self.index2word:
+            if word in self.reverse_temporal_map:
+                continue  # Skip temporal variants
+            count = self.word_counts[word]
+            train_words_pow += count ** self.ns_exponent
+        
+        # Build cumulative table
+        # Temporal variants get the same value as the previous entry (zero-width range)
+        cumulative = 0.0
+        for word_index, word in enumerate(self.index2word):
+            if word not in self.reverse_temporal_map:
+                count = self.word_counts[word]
+                cumulative += count ** self.ns_exponent
+            self._cum_table[word_index] = round(cumulative / train_words_pow * domain)
+        
+        # Verify final value equals domain
+        if vocab_size > 0:
+            assert self._cum_table[-1] == domain, f"Final cum_table value {self._cum_table[-1]} != {domain}"
+        
+        n_excluded = len([w for w in self.index2word if w in self.reverse_temporal_map])
+        logger.debug(f"Built cum_table excluding {n_excluded} temporal variants from negative sampling")
+        
+        return self._cum_table
     
     def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -437,100 +491,6 @@ class TempRefWord2Vec(Word2Vec):
         """Check if a word is a temporal variant (e.g., '民_宋')."""
         return word in self.reverse_temporal_map
 
-    def most_similar(
-        self, 
-        word: str, 
-        topn: int = 10,
-        cross_space: bool = False
-    ) -> list[tuple[str, float]]:
-        """Find the most similar words to the given word.
-        
-        Supports two comparison modes:
-        
-        cross_space=False (default): Second-order similarity via W vs W.
-            Finds words whose context embeddings predict similar center words. 
-        
-        cross_space=True: First-order similarity via W vs W_prime.
-            Finds words that directly co-occur with the query. W[query] dot
-            W_prime[word] reflects how often word appears as center when query
-            is in the context window. Results are more general/semantic because
-            W_prime is shaped by patterns across the entire corpus.
-        
-        For temporal variants (e.g., "word_1900"), when cross_space=False,
-        results show period-specific collocates (we ask: what words predict the same
-        centers as those predicted by word_1900?). When cross_space=True, results are
-        more general (we ask: of all possible centers, which are most likely to be
-        predicted by word_1900?).
-
-        Args:
-            word: Input word (can be a temporal variant like "word_period" or regular).
-            topn: Number of similar words to return.
-            cross_space: Comparison mode (see above).
-        
-        Returns:
-            List of (word, similarity) tuples sorted by descending similarity.
-        """
-        if word not in self.vocab:
-            return []
-        
-        word_idx = self.vocab[word]
-        word_vec = self.W[word_idx].reshape(1, -1)
-        
-        if cross_space:
-            sim = cosine_similarity(word_vec, self.W_prime).flatten()
-        else:
-            sim = cosine_similarity(word_vec, self.W).flatten()
-        
-        most_similar_words = []
-        for idx in (-sim).argsort():
-            if idx != word_idx:
-                most_similar_words.append((self.index2word[idx], float(sim[idx])))
-                if len(most_similar_words) >= topn:
-                    break
-        
-        return most_similar_words
-
-    def similarity(
-        self, 
-        word1: str, 
-        word2: str,
-        cross_space: bool = False
-    ) -> float:
-        """Calculate cosine similarity between two words.
-        
-        cross_space=False (default): Second-order similarity via W vs W.
-            Compares context embeddings. High similarity means word1 and word2
-            predict similar center words.
-        
-        cross_space=True: First-order similarity via W vs W_prime.
-            Compares W[word1] vs W_prime[word2]. High similarity means word1
-            (as context) frequently predicts word2 (as center).
-        
-        Args:
-            word1: First word (always from W, the context embedding).
-            word2: Second word (from W or W_prime depending on cross_space).
-            cross_space: Comparison mode (see above).
-        
-        Returns:
-            Cosine similarity score between -1 and 1.
-        
-        Raises:
-            KeyError: If either word is not in vocabulary.
-        """
-        if word1 not in self.vocab:
-            raise KeyError(f"Word '{word1}' not found in vocabulary")
-        if word2 not in self.vocab:
-            raise KeyError(f"Word '{word2}' not found in vocabulary")
-        
-        word1_vec = self.W[self.vocab[word1]]
-        
-        if cross_space:
-            word2_vec = self.W_prime[self.vocab[word2]]
-        else:
-            word2_vec = self.W[self.vocab[word2]]
-        
-        return float(cosine_similarity(word1_vec.reshape(1, -1), word2_vec.reshape(1, -1)))
-
     def calculate_semantic_change(self, target_word: str, labels: list[str] | None = None) -> dict[str, list[tuple[str, float]]]:
         """
         Calculate semantic change by comparing cosine similarities across time periods.
@@ -547,7 +507,7 @@ class TempRefWord2Vec(Word2Vec):
         Example:
             changes = model.calculate_semantic_change("人民")
             for transition, word_changes in changes.items():
-                print(f"\\n{transition}:")
+                print(f"{transition}:")
                 print("Words moved towards:", word_changes[:5])  # Top 5 increases
                 print("Words moved away:", word_changes[-5:])   # Top 5 decreases
         """

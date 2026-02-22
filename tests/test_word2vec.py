@@ -826,6 +826,18 @@ class TestTempRefWord2Vec:
                     shuffle=True,
                 )
     
+    def test_tempref_empty_targets_raises_error(self, song_ming_corpora):
+        """Test that empty targets list raises ValueError."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        
+        with tempref_corpus_files(song_ming_corpora, ['天']) as file_paths:
+            with pytest.raises(ValueError, match="targets cannot be empty"):
+                TempRefWord2Vec(
+                    sentences=file_paths,
+                    targets=[],  # Empty targets
+                    sg=1,
+                )
+    
     def test_tempref_base_word_count_equals_variant_sum(self, song_ming_corpora):
         """Test that base word counts equal the sum of their temporal variant counts.
         

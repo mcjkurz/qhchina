@@ -143,9 +143,6 @@ class BalancedSentenceIterator:
         token_budget: Target number of tokens to collect before yielding. Each corpus 
             contributes approximately token_budget // num_corpora tokens per cycle.
         seed: Random seed for reproducible sentence shuffling.
-    
-    Attributes:
-        token_count: Total tokens yielded per epoch (min_corpus_tokens * num_corpora).
     """
     
     def __init__(
