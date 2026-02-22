@@ -323,6 +323,85 @@ class TestCorpusFilter:
         assert len(filtered) == 0
 
 
+class TestCorpusShuffle:
+    """Tests for corpus shuffle."""
+    
+    def test_shuffle_basic(self):
+        """Test basic shuffle modifies corpus in-place."""
+        corpus = Corpus([['a'], ['b'], ['c'], ['d'], ['e']])
+        original_ids = {corpus[i].doc_id for i in range(len(corpus))}
+        
+        corpus.shuffle(seed=42)
+        
+        assert len(corpus) == 5
+        assert {corpus[i].doc_id for i in range(len(corpus))} == original_ids
+    
+    def test_shuffle_reproducible(self):
+        """Test shuffle is reproducible with same seed."""
+        corpus1 = Corpus([['a'], ['b'], ['c'], ['d'], ['e']])
+        corpus2 = Corpus([['a'], ['b'], ['c'], ['d'], ['e']])
+        
+        corpus1.shuffle(seed=42)
+        corpus2.shuffle(seed=42)
+        
+        order1 = [corpus1[i].doc_id for i in range(len(corpus1))]
+        order2 = [corpus2[i].doc_id for i in range(len(corpus2))]
+        assert order1 == order2
+    
+    def test_shuffle_different_seeds(self):
+        """Test different seeds produce different orders."""
+        corpus1 = Corpus([['a'], ['b'], ['c'], ['d'], ['e'], ['f'], ['g'], ['h']])
+        corpus2 = Corpus([['a'], ['b'], ['c'], ['d'], ['e'], ['f'], ['g'], ['h']])
+        
+        corpus1.shuffle(seed=42)
+        corpus2.shuffle(seed=123)
+        
+        order1 = [corpus1[i].doc_id for i in range(len(corpus1))]
+        order2 = [corpus2[i].doc_id for i in range(len(corpus2))]
+        assert order1 != order2
+    
+    def test_shuffle_preserves_metadata(self):
+        """Test shuffle preserves document metadata."""
+        corpus = Corpus()
+        corpus.add(['a', 'b'], author='Author1', year=1920)
+        corpus.add(['c', 'd'], author='Author2', year=1930)
+        
+        corpus.shuffle(seed=42)
+        
+        for i in range(len(corpus)):
+            assert 'author' in corpus[i].metadata
+            assert 'year' in corpus[i].metadata
+    
+    def test_shuffle_modifies_in_place(self):
+        """Test shuffle modifies corpus in-place."""
+        corpus = Corpus([['a'], ['b'], ['c'], ['d'], ['e'], ['f'], ['g'], ['h']])
+        original_order = [corpus[i].doc_id for i in range(len(corpus))]
+        
+        corpus.shuffle(seed=42)
+        
+        new_order = [corpus[i].doc_id for i in range(len(corpus))]
+        assert original_order != new_order
+    
+    def test_shuffle_empty_corpus(self):
+        """Test shuffle on empty corpus."""
+        corpus = Corpus()
+        corpus.shuffle(seed=42)
+        assert len(corpus) == 0
+    
+    def test_shuffle_single_document(self):
+        """Test shuffle with single document."""
+        corpus = Corpus([['a', 'b']])
+        corpus.shuffle(seed=42)
+        assert len(corpus) == 1
+        assert list(corpus)[0] == ['a', 'b']
+    
+    def test_shuffle_returns_none(self):
+        """Test shuffle returns None (in-place operation)."""
+        corpus = Corpus([['a'], ['b'], ['c']])
+        result = corpus.shuffle(seed=42)
+        assert result is None
+
+
 class TestCorpusGroupby:
     """Tests for corpus groupby."""
     
@@ -585,7 +664,7 @@ class TestCorpusSerialization:
         """Test that invalid format raises error."""
         corpus = Corpus([['a']])
         
-        with pytest.raises(ValueError, match="must be 'json' or 'pickle'"):
+        with pytest.raises(ValueError, match="must be 'json', 'pickle', or 'txt'"):
             corpus.save('test.json', format='xml')
     
     def test_save_load_preserves_doc_ids(self):

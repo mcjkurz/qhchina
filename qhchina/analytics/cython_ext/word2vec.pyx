@@ -211,7 +211,7 @@ cdef inline unsigned long long bisect_left(
     unsigned long long lo, 
     unsigned long long hi
 ) noexcept nogil:
-    """Binary search on cumulative table."""
+    """Binary search on cumulative table to find word index for negative sampling."""
     cdef unsigned long long mid
     while hi > lo:
         mid = (lo + hi) >> 1
@@ -307,80 +307,6 @@ cdef inline unsigned long long train_sg_pair(
 
 
 # =============================================================================
-# Temporal Skip-gram Training (nogil)
-# =============================================================================
-
-cdef inline unsigned long long train_sg_pair_temporal(
-    REAL_t *syn0,
-    REAL_t *syn1neg,
-    const int size,
-    const UITYPE_t center_index,
-    const UITYPE_t context_index,
-    const REAL_t alpha,
-    REAL_t *work,
-    unsigned long long next_random,
-    UITYPE_t *cum_table,
-    unsigned long long cum_table_len,
-    int negative,
-    const int _compute_loss,
-    REAL_t *running_loss
-) noexcept nogil:
-    """Train on a single (center, context) pair for temporal Word2Vec.
-    
-    For TempRefWord2Vec, temporal variants (e.g., "民_宋") only appear as centers.
-    
-    Updates:
-      - syn1neg[center_index]: Output embedding of center (temporal variant)
-      - syn0[context_index]: Input embedding of context (base form)
-    
-    This allows querying temporal variants via their syn1neg embeddings.
-    """
-    cdef long long row1 = <long long>context_index * <long long>size
-    cdef long long row2
-    cdef unsigned long long modulo = 281474976710655ULL
-    cdef REAL_t f, g, label, f_dot, f_dot_for_loss, log_e_f_dot
-    cdef UITYPE_t target_index
-    cdef int d
-    
-    memset(work, 0, size * cython.sizeof(REAL_t))
-    
-    for d in range(negative + 1):
-        if d == 0:
-            target_index = center_index  # Positive sample = center (temporal variant)
-            label = ONEF
-        else:
-            target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
-            next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
-            if target_index == center_index:
-                continue
-            label = <REAL_t>0.0
-        
-        row2 = <long long>target_index * <long long>size
-        f_dot = our_sdot(&size, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
-        
-        if f_dot <= -MAX_EXP or f_dot >= MAX_EXP:
-            continue
-        
-        f = EXP_TABLE[<int>((f_dot + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
-        g = (label - f) * alpha
-        
-        if _compute_loss == 1:
-            f_dot_for_loss = (f_dot if d == 0 else -f_dot)
-            if f_dot_for_loss <= -MAX_EXP or f_dot_for_loss >= MAX_EXP:
-                pass
-            else:
-                log_e_f_dot = LOG_TABLE[<int>((f_dot_for_loss + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
-                running_loss[0] = running_loss[0] - log_e_f_dot
-        
-        our_saxpy(&size, &g, &syn1neg[row2], &ONE, work, &ONE)
-        our_saxpy(&size, &g, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
-    
-    our_saxpy(&size, &ONEF, work, &ONE, &syn0[row1], &ONE)
-    
-    return next_random
-
-
-# =============================================================================
 # Core CBOW Training (nogil)
 # =============================================================================
 
@@ -404,7 +330,7 @@ cdef inline unsigned long long train_cbow_pair(
     const int _compute_loss,
     REAL_t *running_loss
 ) noexcept nogil:
-    """Train on a single CBOW example with negative sampling."""
+    """Train on a single CBOW example: predict center_index from context_indices."""
     cdef long long row2
     cdef unsigned long long modulo = 281474976710655ULL
     cdef REAL_t f, g, label, f_dot, f_dot_for_loss, count, inv_count, log_e_f_dot
@@ -550,7 +476,7 @@ cdef void train_batch_cbow(
     REAL_t *running_loss,
     long long *examples_trained
 ) noexcept nogil:
-    """Train CBOW on a batch of indexed sentences (nogil)."""
+    """Train CBOW on a batch: for each center word, predict from surrounding context."""
     cdef int sent_idx, i, j, k, m, ctx_count
     cdef int idx_start, idx_end
     
@@ -759,7 +685,12 @@ def train_batch_temporal(
 ):
     """Train Skip-gram with temporal mapping (for TempRefWord2Vec).
     
-    Context words are mapped to base forms, center words keep temporal variant.
+    Reverses the standard Skip-gram framing to align with negative sampling gradient flow:
+    - CENTER words = base forms (mapped via temporal_index_map) -> syn1neg (noisy updates)
+    - CONTEXT words = temporal variants (original tokens) -> syn0 (clean updates)
+    
+    This gives temporal variants high-quality embeddings in syn0 (W), so all queries
+    use W only. Base forms in syn1neg provide a stable reference frame.
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size).
@@ -832,15 +763,18 @@ def train_batch_temporal(
             
             # Subsampling (use original index for subsampling decision)
             if use_subsampling:
-                if sample_ints_ptr[word_idx] < (random_int32(&next_random) & 0xFFFFFFFF):
+                if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
             
-            # Store center index (may be temporal variant)
-            center_indexes[effective_words] = <UITYPE_t>word_idx
+            # Store center index as BASE FORM (via temporal_index_map)
+            # For temporal variants like "民_宋", this maps to base "民"
+            # For regular words, identity mapping (index maps to itself)
+            # Base forms go to syn1neg (noisy updates, stable reference)
+            center_indexes[effective_words] = <UITYPE_t>temporal_map_ptr[word_idx]
             
-            # Store context index (mapped to base form via temporal_index_map)
-            # For non-temporal words, this is identity mapping (index maps to itself)
-            context_indexes[effective_words] = <UITYPE_t>temporal_map_ptr[word_idx]
+            # Store context index as ORIGINAL token (temporal variant if applicable)
+            # Temporal variants go to syn0 (clean updates, informative embeddings)
+            context_indexes[effective_words] = <UITYPE_t>word_idx
             
             effective_words += 1
             
@@ -898,10 +832,10 @@ cdef void train_batch_sg_temporal(
 ) noexcept nogil:
     """Train skip-gram on a batch with temporal mapping (nogil).
     
-    center_indexes[i] = original index (temporal variant like "民_宋")
-    context_indexes[j] = mapped to base form (via temporal_index_map)
+    center_indexes[i] = base form (mapped via temporal_index_map) -> syn1neg (noisy)
+    context_indexes[j] = original token (temporal variant) -> syn0 (clean)
     
-    Result: temporal variants get syn1neg trained, base forms get syn0 trained.
+    Result: temporal variants get high-quality syn0 embeddings, base forms get noisy syn1neg.
     """
     cdef int sent_idx, i, j, k
     cdef int idx_start, idx_end
@@ -922,12 +856,12 @@ cdef void train_batch_sg_temporal(
                 if j == i:
                     continue
                 
-                # center_indexes[i] -> syn1neg updated (temporal variant)
-                # context_indexes[j] -> syn0 updated (base form)
-                next_random[0] = train_sg_pair_temporal(
+                # center_indexes[i] = base form -> syn1neg (noisy updates)
+                # context_indexes[j] = temporal variant -> syn0 (clean updates)
+                next_random[0] = train_sg_pair(
                     syn0, syn1neg, size,
-                    center_indexes[i],   # center (temporal variant)
-                    context_indexes[j],  # context (base form)
+                    center_indexes[i],   # center (base form)
+                    context_indexes[j],  # context (temporal variant)
                     alpha, work, next_random[0],
                     cum_table, cum_table_len, negative,
                     _compute_loss, running_loss

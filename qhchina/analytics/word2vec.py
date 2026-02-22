@@ -14,21 +14,10 @@ from queue import Queue
 from tqdm.auto import tqdm
 import time
 from .vectors import cosine_similarity
+from .word2vec_utils import LineSentenceFile, word2vec_c
 from ..config import get_rng, resolve_seed
+
 logger = logging.getLogger("qhchina.analytics.word2vec")
-
-try:
-    from .cython_ext import word2vec as word2vec_c
-    CYTHON_AVAILABLE = True
-except ImportError:
-    CYTHON_AVAILABLE = False
-    word2vec_c = None
-    logger.warning("Cython extensions not available; Word2Vec requires compiled extensions.")
-
-__all__ = [
-    'Word2Vec',
-    'TempRefWord2Vec',
-]
 
 
 class Word2Vec:
@@ -40,13 +29,14 @@ class Word2Vec:
       infrequent words and smaller datasets.
     - CBOW (sg=0): Predicts center word from context words. Faster to train.
     
-    If ``sentences`` is provided at initialization, training starts immediately. Otherwise, 
-    call ``train()`` later with the sentences to train on.
+    Training does NOT start automatically. Call ``train()`` explicitly after initialization
+    to begin training.
     
     Args:
-        sentences (iterable of list of str, optional): Tokenized sentences for training. 
-            If provided, training starts immediately during initialization.
-            Note: The iterable must be restartable (can be iterated multiple times).
+        sentences: Tokenized sentences for training. Can be:
+            - An iterable of sentences (each sentence is a list of tokens)
+            - A file path (str) to a corpus file (created via ``Corpus.save("file.txt")``)
+            Note: Iterables must be restartable (can be iterated multiple times).
         vector_size (int): Dimensionality of the word vectors (default: 100).
         window (int): Maximum distance between the current and predicted word (default: 5).
         min_word_count (int): Ignores all words with frequency lower than this (default: 5).
@@ -78,12 +68,17 @@ class Word2Vec:
         # Prepare corpus as list of tokenized sentences
         sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
         
-        # Option 1: Train immediately by providing sentences at init
+        # Initialize the model with sentences
         model = Word2Vec(sentences, vector_size=100, window=5, min_word_count=1, epochs=5)
         
-        # Option 2: Initialize first, train later
-        model = Word2Vec(vector_size=100, window=5, min_word_count=1, epochs=5)
-        model.train(sentences)
+        # Explicitly start training
+        model.train()
+        
+        # Or train from a corpus file (memory-efficient for large corpora)
+        corpus = Corpus(sentences)
+        corpus.save("corpus.txt")
+        model = Word2Vec("corpus.txt", vector_size=100, epochs=5)
+        model.train()
         
         # Get word vector
         vector = model['喜欢']
@@ -94,7 +89,7 @@ class Word2Vec:
     
     def __init__(
         self,
-        sentences: Iterable[list[str]] | None = None,
+        sentences: Iterable[list[str]] | str | None = None,
         vector_size: int = 100,
         window: int = 5,
         min_word_count: int = 5,
@@ -143,6 +138,7 @@ class Word2Vec:
             self.calculate_loss = calculate_loss
             self.total_examples_hint = total_examples
             self.shuffle = shuffle
+            self._sentences = None
             # Initialize empty structures - will be populated by load()
             self.vocab = {}
             self.index2word = []
@@ -177,6 +173,12 @@ class Word2Vec:
         effective_seed = resolve_seed(seed)
         self._rng = get_rng(effective_seed)
         
+        # Store sentences for training (normalize file path to LineSentenceFile)
+        if isinstance(sentences, str):
+            self._sentences = LineSentenceFile(sentences)
+        else:
+            self._sentences = sentences
+        
         # Initialize vocabulary structures
         self.vocab = {}  # word -> index (direct mapping)
         self.index2word = []  # index -> word
@@ -201,24 +203,6 @@ class Word2Vec:
         self.calculate_loss = calculate_loss
         self.total_examples_hint = total_examples
         self.shuffle = shuffle
-        
-        # Auto-train if sentences are provided
-        if sentences is not None:
-            self.train(sentences)
-
-    @property
-    def wv(self) -> 'Word2Vec':
-        """
-        Property for gensim compatibility. Returns self since the model directly
-        supports vector access via __getitem__, most_similar(), etc.
-        
-        This allows users familiar with gensim to use model.wv['word'] syntax.
-        Note: This returns self, not a copy - no additional memory is used.
-        
-        Returns:
-            The model itself (self).
-        """
-        return self
 
     def build_vocab(self, sentences: Iterable[list[str]]) -> None:
         """
@@ -230,7 +214,22 @@ class Word2Vec:
         Raises:
             ValueError: If sentences is empty or contains no words.
         """
-
+        self._count_words(sentences)
+        self._filter_and_map_vocab()
+    
+    def _count_words(self, sentences: Iterable[list[str]]) -> None:
+        """
+        Count word occurrences from sentences.
+        
+        Populates self.word_counts with word frequencies. Override in subclasses
+        for custom counting logic (e.g., balanced counting from multiple sources).
+        
+        Args:
+            sentences: Iterable of tokenized sentences.
+        
+        Raises:
+            ValueError: If sentences is empty or contains no words.
+        """
         self.word_counts = Counter()
         sentence_count = 0
         
@@ -241,49 +240,57 @@ class Word2Vec:
         if sentence_count == 0:
             raise ValueError("sentences cannot be empty")
         
-        # Check if any words were found (catches all-empty sentences)
         if not self.word_counts:
             raise ValueError("sentences contains no words. Provide non-empty tokenized sentences.")
+    
+    def _filter_and_map_vocab(self) -> None:
+        """
+        Filter words and create vocabulary mappings.
         
-        # Filter words by min_word_count and create vocabulary
-        retained_words = {word for word, count in self.word_counts.items() if count >= self.min_word_count}
+        Filters words by min_word_count and max_vocab_size, then creates
+        vocab (word->index) and index2word (index->word) mappings.
+        
+        Uses Gensim-compatible ordering: primary sort by descending count,
+        secondary sort by descending original index for ties.
+        
+        Requires self.word_counts to be populated first via _count_words().
+        """
+        # Filter words by min_word_count
+        retained_words = {
+            word for word, count in self.word_counts.items() 
+            if count >= self.min_word_count
+        }
         
         # If max_vocab_size is set, keep only the most frequent words
         if self.max_vocab_size is not None and len(retained_words) > self.max_vocab_size:
-            # Sort words by frequency (highest first) and take the top max_vocab_size
             top_words = [word for word, _ in self.word_counts.most_common(self.max_vocab_size)]
-            # Intersect with words that meet min_word_count criteria
             retained_words = {word for word in top_words if word in retained_words}
-            
+        
         # Create mappings with Gensim-compatible ordering
-        # Gensim sorts by: primary = descending count, secondary = descending original index
-        # This ensures identical vocabulary indices between implementations for same corpus
-        words_with_counts = [(word, count) for word, count in self.word_counts.items() 
-                             if word in retained_words]
-        
-        # Build list with original indices for stable sorting
-        # original_index is based on first-seen order during counting
-        word_to_original_idx = {word: i for i, word in enumerate(self.word_counts.keys())}
-        words_with_indices = [(word, count, word_to_original_idx[word]) 
-                              for word, count in words_with_counts]
-        
         # Sort by: descending count, then descending original index for ties
-        # The tie-breaker matters: different orderings assign different indices,
-        # which affects which vectors receive which gradient updates during training
+        word_to_original_idx = {word: i for i, word in enumerate(self.word_counts.keys())}
+        words_with_indices = [
+            (word, self.word_counts[word], word_to_original_idx[word]) 
+            for word in retained_words
+        ]
         words_sorted = sorted(words_with_indices, key=lambda x: (-x[1], -x[2]))
         
+        self.vocab = {}
         self.index2word = []
         for word, count, _ in words_sorted:
-            word_id = len(self.index2word)
-            self.vocab[word] = word_id
+            self.vocab[word] = len(self.index2word)
             self.index2word.append(word)
         
-        # Compute token counts for example estimation
-        self.total_corpus_tokens = sum(self.word_counts.values())  # All tokens (including OOV)
-        self.corpus_word_count = sum(self.word_counts[word] for word in self.vocab)  # Vocab tokens only
+        # Compute token counts
+        self.total_corpus_tokens = sum(self.word_counts.values())
+        self.corpus_word_count = sum(self.word_counts[word] for word in self.vocab)
         
         if self.verbose:
-            logger.info(f"Vocabulary built: {len(self.vocab):,} words, {self.corpus_word_count:,} tokens in vocab, {self.total_corpus_tokens:,} total tokens")
+            logger.info(
+                f"Vocabulary built: {len(self.vocab):,} words, "
+                f"{self.corpus_word_count:,} tokens in vocab, "
+                f"{self.total_corpus_tokens:,} total tokens"
+            )
 
     def _estimate_example_count(self, sample_ints: np.ndarray) -> int:
         """
@@ -377,9 +384,10 @@ class Word2Vec:
     def _prepare_noise_distribution(self) -> None:
         """
         Prepare noise distribution for negative sampling.
+        
         More frequent words have higher probability of being selected.
-        Applies subsampling with the ns_exponent parameter to prevent 
-        extremely common words from dominating.
+        Applies ns_exponent smoothing (typically 0.75) to prevent extremely
+        common words from dominating the negative samples.
         """
         if len(self.vocab) == 0:
             self.noise_distribution = np.array([], dtype=self.dtype)
@@ -553,6 +561,7 @@ class Word2Vec:
         batch: list[list[str]],
         sample_ints: np.ndarray,
         alpha: float,
+        random_seed: int,
         calculate_loss: bool,
         work: np.ndarray,
         neu1: np.ndarray,
@@ -568,6 +577,7 @@ class Word2Vec:
             batch: List of tokenized sentences.
             sample_ints: Subsampling thresholds array.
             alpha: Learning rate for this batch.
+            random_seed: Random seed for this batch (generated by producer thread).
             calculate_loss: Whether to compute loss.
             work: Thread-private work buffer.
             neu1: Thread-private neu1 buffer.
@@ -591,7 +601,7 @@ class Word2Vec:
             self.sg,
             self.negative,
             self.cbow_mean,
-            self._get_random_state(),
+            random_seed,
             calculate_loss,
         )
         return batch_loss, batch_examples, batch_words
@@ -610,7 +620,7 @@ class Word2Vec:
         thread-private buffers, and reports progress back via the progress queue.
         
         Args:
-            job_queue: Queue containing (batch, alpha) tuples or None (poison pill).
+            job_queue: Queue containing (batch, alpha, seed) tuples or None (poison pill).
             progress_queue: Queue for reporting (loss, examples, words) results.
             sample_ints: Subsampling thresholds array (shared, read-only).
             calculate_loss: Whether to compute and report loss values.
@@ -623,10 +633,10 @@ class Word2Vec:
                 progress_queue.put(None)
                 break
             
-            batch, alpha = job
+            batch, alpha, seed = job
             
             batch_loss, batch_examples, batch_words = self._train_batch_worker(
-                batch, sample_ints, alpha, calculate_loss, work, neu1
+                batch, sample_ints, alpha, seed, calculate_loss, work, neu1
             )
             
             progress_queue.put((batch_loss, batch_examples, batch_words))
@@ -651,7 +661,7 @@ class Word2Vec:
         
         Args:
             sentences: Iterable of tokenized sentences.
-            job_queue: Queue to put (batch, alpha) jobs into.
+            job_queue: Queue to put (batch, alpha, seed) jobs into.
             start_alpha: Initial learning rate.
             min_alpha_val: Minimum learning rate (for decay).
             decay_alpha: Whether to decay learning rate.
@@ -670,7 +680,8 @@ class Word2Vec:
             else:
                 batch_alpha = start_alpha
             
-            job_queue.put((batch, batch_alpha))
+            batch_seed = self._get_random_state()
+            job_queue.put((batch, batch_alpha, batch_seed))
             words_produced += sum(len(s) for s in batch)
         
         for _ in range(self.workers):
@@ -779,53 +790,26 @@ class Word2Vec:
             t.join()
         
         return epoch_loss, epoch_examples, epoch_words
-        
-    def _train_batch(
-        self,
-        batch: list[list[str]],
-        sample_ints: np.ndarray,
-        alpha: float,
-        calculate_loss: bool
-    ) -> tuple[float, int, int, int]:
-        """Train on a single batch. Override in subclasses for different training logic."""
-        return word2vec_c.train_batch(
-            self.W,
-            self.W_prime,
-            batch,
-            self.vocab,
-            sample_ints,
-            self._cum_table,
-            self._work,
-            self._neu1,
-            self.sample > 0,
-            self.window,
-            self.shrink_windows,
-            alpha,
-            self.sg,
-            self.negative,
-            self.cbow_mean,
-            self._get_random_state(),
-            calculate_loss,
-        )
 
-    def train(self, sentences: Iterable[list[str]]) -> float | None:
+    def train(self) -> float | None:
         """
-        Train word2vec model on given sentences.
+        Train word2vec model on sentences provided at initialization.
         
         Processes sentences in batches using Cython-accelerated training.
         This approach is memory-efficient and works with both lists and iterables.
         
-        Args:
-            sentences: Tokenized sentences. Can be:
-                - A list of sentences
-                - A restartable iterable (e.g., file-backed iterator)
-                
-                Note: Single-use generators are not supported. The iterable must be
-                restartable.
-        
         Returns:
             Final loss value if calculate_loss is True, None otherwise.
+        
+        Raises:
+            ValueError: If no sentences were provided at initialization.
         """
+        sentences = self._sentences
+        if sentences is None:
+            raise ValueError(
+                "No sentences provided. Pass sentences to Word2Vec() at initialization."
+            )
+        
         # Handle missing alpha
         if self.alpha is None:
             logger.warning("No initial learning rate (alpha) provided. Using default value of 0.025 with no decay.")
@@ -889,7 +873,16 @@ class Word2Vec:
             logger.info(f"Starting training: {epochs} epoch(s), batch_size={batch_size:,}, alpha={self.alpha}")
         
         # Determine shuffle behavior: default to True for lists, False for iterables
-        shuffle = self.shuffle if self.shuffle is not None else isinstance(sentences, list)
+        is_list = isinstance(sentences, list)
+        shuffle = self.shuffle if self.shuffle is not None else is_list
+        
+        # Validate shuffle parameter with non-list iterables
+        if shuffle and not is_list:
+            raise ValueError(
+                "shuffle=True requires sentences to be a list. "
+                "For file-based or streaming iterables, pre-shuffle your data "
+                "or set shuffle=False."
+            )
         
         if self.verbose:
             logger.info(f"Training with {self.workers} worker(s) using producer-consumer threading")
@@ -1031,7 +1024,8 @@ class Word2Vec:
             topn: Number of similar words to return.
         
         Returns:
-            List of (word, similarity) tuples.
+            List of (word, similarity) tuples sorted by descending similarity.
+            Returns empty list if word is not in vocabulary.
         """
         if word not in self.vocab:
             return []
@@ -1154,809 +1148,7 @@ class Word2Vec:
         return model
 
 
-class TempRefWord2Vec(Word2Vec):
-    """
-    Implementation of Word2Vec with Temporal Referencing (TR) for tracking semantic change.
-    
-    This class extends Word2Vec to implement temporal referencing, where target words
-    are represented with time period indicators (e.g., "bread_1800" for period 1800s) when used
-    as target words, but remain unchanged when used as context words.
-    
-    The class takes multiple corpora corresponding to different time periods and automatically
-    creates temporal references for specified target words.
-    
-    Note:
-        This implementation only supports Skip-gram (sg=1). CBOW is not supported.
-    
-    Args:
-        corpora (dict[str, list[list[str]]]): Dictionary mapping time period labels to corpora.
-            Each corpus is a list of sentences (each sentence is a list of tokens).
-            Example: {"1800s": [["bread", "baker"], ["food", "eat"]], 
-                      "1900s": [["bread", "supermarket"], ["food", "buy"]]}
-        targets (list[str]): List of target words to trace semantic change.
-        balance (bool): Whether to balance the corpora to equal sizes (default: True).
-            When True, larger corpora are downsampled to match the smallest corpus.
-        **kwargs: Arguments passed to Word2Vec parent class. Common options include:
-            - vector_size (int): Dimensionality of word vectors (default: 100)
-            - window (int): Context window size (default: 5)
-            - min_word_count (int): Minimum word frequency threshold (default: 5)
-            - negative (int): Number of negative samples (default: 5)
-            - epochs (int): Number of training epochs (default: 1)
-            - alpha (float): Initial learning rate (default: 0.025)
-            - verbose (bool): Whether to log progress (default: False)
-            
-            Note: sg must be 1 (Skip-gram) - CBOW is not supported.
-    
-    Example:
-        from qhchina.analytics.word2vec import TempRefWord2Vec
-        
-        # Corpora from different time periods as a dictionary
-        corpora = {
-            "1800s": [["bread", "baker", "oven"], ["food", "eat", "cook"]],
-            "1900s": [["bread", "supermarket", "buy"], ["food", "restaurant", "order"]]
-        }
-        
-        # Initialize and train model (training starts automatically)
-        model = TempRefWord2Vec(
-            corpora=corpora,
-            targets=["bread", "food", "money"],
-            vector_size=100,
-            window=5,
-            sg=1  # Skip-gram required
-        )
-        
-        # Analyze semantic change (model is already trained)
-        model.most_similar("bread_1800s")  # Words similar to "bread" in the 1800s
-        model.most_similar("bread_1900s")  # Words similar to "bread" in the 1900s
-    """
-    
-    @staticmethod
-    def _sample_sentences_to_token_count(
-        corpus: list[list[str]], 
-        target_tokens: int,
-        seed: int | None = None
-    ) -> list[list[str]]:
-        """
-        Sample sentences from a corpus until the target token count is reached.
-        
-        This method randomly selects sentences from the corpus until the total number
-        of tokens reaches or slightly exceeds the target count. This is useful for balancing
-        corpus sizes when comparing different time periods or domains.
-        
-        Args:
-            corpus: A list of sentences, where each sentence is a list of tokens.
-            target_tokens: The target number of tokens to sample.
-            seed: Random seed for reproducibility. If None, uses global seed.
-        
-        Returns:
-            A list of sampled sentences with token count close to target_tokens.
-        """
-        rng = get_rng(resolve_seed(seed))
-        sampled_sentences = []
-        current_tokens = 0
-        sentence_indices = list(range(len(corpus)))
-        rng.shuffle(sentence_indices)
-        
-        for idx in sentence_indices:
-            sentence = corpus[idx]
-            if current_tokens + len(sentence) <= target_tokens:
-                sampled_sentences.append(sentence)
-                current_tokens += len(sentence)
-            if current_tokens >= target_tokens:
-                break
-        return sampled_sentences
-
-    @staticmethod
-    def _add_corpus_tags(
-        corpora: dict[str, list[list[str]]], 
-        target_words: list[str]
-    ) -> dict[str, list[list[str]]]:
-        """
-        Add corpus-specific tags to target words in all corpora at once.
-        
-        Args:
-            corpora: Dictionary mapping labels to corpora (each corpus is list of tokenized sentences).
-            target_words: List of words to tag.
-        
-        Returns:
-            Dictionary of processed corpora where target words have been tagged with their corpus label.
-        """
-        processed_corpora = {}
-        target_words_set = set(target_words)
-        
-        for label, corpus in corpora.items():
-            processed_corpus = []
-            for sentence in corpus:
-                processed_sentence = []
-                for token in sentence:
-                    if token in target_words_set:
-                        processed_sentence.append(f"{token}_{label}")
-                    else:
-                        processed_sentence.append(token)
-                processed_corpus.append(processed_sentence)
-            processed_corpora[label] = processed_corpus
-        
-        return processed_corpora
-
-    def __init__(
-        self,
-        corpora: dict[str, list[list[str]]],  # Dictionary mapping labels to corpora
-        targets: list[str],                   # Target words to trace semantic change
-        balance: bool = True,                 # Whether to balance the corpora
-        _skip_init: bool = False,             # Used by load() to skip normal initialization
-        _labels: list[str] | None = None,     # Internal: used by load() to restore labels
-        **kwargs                              # Parameters passed to Word2Vec parent class
-    ):
-        # _skip_init is used by load() to create an empty shell that will be populated
-        # with saved state. This avoids unnecessary corpus processing and training.
-        if _skip_init:
-            self.labels = _labels if _labels is not None else []
-            self.targets = targets
-            self.combined_corpus = []
-            self.period_vocab_counts = {}
-            self.temporal_word_map = {}
-            self.reverse_temporal_map = {}
-            # Initialize parent with _skip_init to avoid training
-            super().__init__(_skip_init=True, **kwargs)
-            return
-        
-        # Validate corpora is a dictionary
-        if not isinstance(corpora, dict):
-            raise TypeError(f"corpora must be a dictionary mapping labels to corpora, got {type(corpora).__name__}")
-    
-        # check if sg = 1, else raise NotImplementedError
-        if kwargs.get('sg') != 1:
-            raise NotImplementedError("TempRefWord2Vec only supports Skip-gram model (sg=1)")
-        
-        # Extract labels from corpora dictionary keys
-        labels = list(corpora.keys())
-        
-        # Store labels and targets as instance variables
-        self.labels = labels
-        self.targets = targets
-        
-        # Extract verbose from kwargs for logging before super().__init__
-        verbose = kwargs.get('verbose', False)
-        
-        # print how many sentences in each corpus (each corpus a list of sentences)
-        # and total size of each corpus (how many words; each sentence a list of words)
-        # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-        if verbose and not all(len(corpus) == 0 for corpus in corpora.values()):
-            for label, corpus in corpora.items():
-                logger.info(f"Corpus {label} has {len(corpus)} sentences and {sum(len(sentence) for sentence in corpus)} words")
-
-        # Calculate token counts and determine minimum
-        if balance:
-            corpus_token_counts = {label: sum(len(sentence) for sentence in corpus) for label, corpus in corpora.items()}
-            target_token_count = min(corpus_token_counts.values())
-            if verbose:
-                logger.info(f"Balancing corpora to minimum size: {target_token_count} tokens")
-            
-            # Balance corpus sizes
-            balanced_corpora = {}
-            for label, corpus in corpora.items():
-                if corpus_token_counts[label] <= target_token_count:
-                    balanced_corpora[label] = corpus
-                else:
-                    sampled_corpus = self._sample_sentences_to_token_count(corpus, target_token_count)
-                    balanced_corpora[label] = sampled_corpus
-        
-            # Add corpus tags to the corpora
-            tagged_corpora = self._add_corpus_tags(balanced_corpora, targets)
-        else:
-            tagged_corpora = self._add_corpus_tags(corpora, targets)
-
-        # Initialize combined corpus before using it
-        self.combined_corpus = []
-        
-        # Calculate vocab counts for each period before combining
-        self.period_vocab_counts = {}
-        
-        for label, corpus in tagged_corpora.items():
-            period_counter = Counter()
-            for sentence in corpus:
-                period_counter.update(sentence)
-            self.period_vocab_counts[label] = period_counter
-            # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-            if verbose and not all(len(c) == 0 for c in corpora.values()):
-                logger.info(f"Period '{label}': {len(period_counter)} unique tokens, {sum(period_counter.values())} total tokens")
-        
-        # Combine all tagged corpora
-        for corpus in tagged_corpora.values():
-            self.combined_corpus.extend(corpus)
-        # Skip printing if all corpora are empty (likely loading from saved model with dummy corpora)
-        if verbose and not all(len(c) == 0 for c in corpora.values()):
-            logger.info(f"Combined corpus: {len(self.combined_corpus)} sentences, {sum(len(s) for s in self.combined_corpus)} tokens")
-        
-        
-        # Create temporal word map: maps base words to their temporal variants
-        self.temporal_word_map = {}
-        for target in targets:
-            variants = [f"{target}_{label}" for label in labels]
-            self.temporal_word_map[target] = variants
-        
-        # Create reverse mapping: temporal variant -> base word
-        self.reverse_temporal_map = {}
-        for base_word, variants in self.temporal_word_map.items():
-            for variant in variants:
-                self.reverse_temporal_map[variant] = base_word
-        
-        # Initialize parent Word2Vec class with kwargs (without sentences - we handle training ourselves)
-        super().__init__(**kwargs)
-        
-        # Auto-train if combined_corpus is non-empty (skip when loading from saved model with dummy corpora)
-        if self.combined_corpus:
-            self.train()
-    
-    def build_vocab(self, sentences: list[list[str]]) -> None:
-        """
-        Extends the parent build_vocab method to handle temporal word variants.
-        Explicitly adds base words to the vocabulary even if they don't appear in the corpus.
-        
-        Args:
-            sentences: List of tokenized sentences.
-        """
-        
-        # Call parent method to build the basic vocabulary
-        super().build_vocab(sentences)
-        
-        # Verify all temporal variants are in the vocabulary
-        # If any variant is missing, issue a warning
-        missing_variants = []
-        for base_word, variants in self.temporal_word_map.items():
-            for variant in variants:
-                if variant not in self.vocab:
-                    missing_variants.append(variant)
-        
-        if missing_variants:
-            logger.warning(f"{len(missing_variants)} temporal variants not found in corpus:")
-            logger.warning(f"Sample: {missing_variants[:10]}")
-            logger.warning("These variants will not be part of the temporal analysis.")
-        
-        # Add base words to vocabulary with counts derived from their temporal variants.
-        # Since context words are converted from tagged form (e.g., 张爱玲_民国) to base form
-        # (e.g., 张爱玲), the base word's effective frequency equals the sum of all its variants.
-        # This ensures proper negative sampling probability for base words.
-        # Reference: Dubossarsky et al. (2019) "Time-Out: Temporal Referencing for Robust 
-        # Modeling of Lexical Semantic Change" - context words share space across time periods.
-        added_base_words = 0
-        total_base_count = 0
-        skipped_base_words = []
-        for base_word, variants in self.temporal_word_map.items():
-            # Calculate base word count as sum of all temporal variant counts
-            base_count = sum(
-                self.word_counts.get(variant, 0) 
-                for variant in variants
-            )
-            
-            # Only add base word if at least one variant has counts
-            # (otherwise no training examples would use this base word as context)
-            if base_count == 0:
-                skipped_base_words.append(base_word)
-                continue
-            
-            if base_word not in self.vocab:
-                # Add the base word to vocabulary
-                word_id = len(self.index2word)
-                self.vocab[base_word] = word_id
-                self.index2word.append(base_word)
-                self.word_counts[base_word] = base_count
-                added_base_words += 1
-                total_base_count += base_count
-            else:
-                # Base word already in vocab (shouldn't happen normally)
-                # Update its count to be the sum of variants
-                self.word_counts[base_word] = base_count
-        
-        if skipped_base_words:
-            logger.warning(f"Skipped {len(skipped_base_words)} base words with no variant counts: {skipped_base_words[:5]}...")
-        
-        if added_base_words > 0:
-            # Add the base word counts to corpus total (for proper frequency normalization)
-            self.corpus_word_count += total_base_count
-        
-        # Build the temporal index map for Cython acceleration
-        self._build_temporal_index_map()
-    
-    def _build_temporal_index_map(self) -> None:
-        """
-        Build a numpy array for fast temporal index mapping in Cython.
-        
-        The array maps word indices to their base form indices:
-        - For temporal variants: temporal_index_map[variant_idx] = base_word_idx
-        - For regular words: temporal_index_map[word_idx] = word_idx (identity)
-        
-        This allows O(1) lookup during example generation in Cython instead of
-        Python dictionary lookups.
-        """
-        vocab_size = len(self.vocab)
-        
-        # Initialize with identity mapping (each index maps to itself)
-        self.temporal_index_map = np.arange(vocab_size, dtype=np.int32)
-        
-        # Override mappings for temporal variants
-        for variant_word, base_word in self.reverse_temporal_map.items():
-            if variant_word in self.vocab and base_word in self.vocab:
-                variant_idx = self.vocab[variant_word]
-                base_idx = self.vocab[base_word]
-                self.temporal_index_map[variant_idx] = base_idx
-        
-        logger.debug(f"Built temporal index map with {len(self.reverse_temporal_map)} variant mappings")
-    
-    def _train_batch(
-        self,
-        batch: list[list[str]],
-        sample_ints: np.ndarray,
-        alpha: float,
-        calculate_loss: bool
-    ) -> tuple[float, int, int, int]:
-        """Train on a single batch using temporal-aware training."""
-        if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
-            self._build_temporal_index_map()
-        
-        return word2vec_c.train_batch_temporal(
-            self.W,
-            self.W_prime,
-            batch,
-            self.vocab,
-            self.temporal_index_map,
-            sample_ints,
-            self._cum_table,
-            self._work,
-            self.sample > 0,
-            self.window,
-            self.shrink_windows,
-            alpha,
-            self.negative,
-            self._get_random_state(),
-            calculate_loss,
-        )
-    
-    def _train_batch_worker(
-        self,
-        batch: list[list[str]],
-        sample_ints: np.ndarray,
-        alpha: float,
-        calculate_loss: bool,
-        work: np.ndarray,
-        neu1: np.ndarray,
-    ) -> tuple[float, int, int]:
-        """
-        Train on a single batch using temporal-aware training with provided work buffers.
-        
-        This method is called by worker threads and uses thread-private buffers.
-        
-        Args:
-            batch: List of tokenized sentences.
-            sample_ints: Subsampling thresholds array.
-            alpha: Learning rate for this batch.
-            calculate_loss: Whether to compute loss.
-            work: Thread-private work buffer.
-            neu1: Thread-private neu1 buffer (unused in temporal training).
-        
-        Returns:
-            Tuple of (batch_loss, batch_examples, batch_words).
-        """
-        if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
-            self._build_temporal_index_map()
-        
-        batch_loss, batch_examples, batch_words, _ = word2vec_c.train_batch_temporal(
-            self.W,
-            self.W_prime,
-            batch,
-            self.vocab,
-            self.temporal_index_map,
-            sample_ints,
-            self._cum_table,
-            work,
-            self.sample > 0,
-            self.window,
-            self.shrink_windows,
-            alpha,
-            self.negative,
-            self._get_random_state(),
-            calculate_loss,
-        )
-        return batch_loss, batch_examples, batch_words
-    
-    def train(self, sentences: list[list[str]] | None = None) -> float | None:
-        """
-        Train the TempRefWord2Vec model using the preprocessed combined corpus.
-        
-        Unlike the parent Word2Vec class, TempRefWord2Vec always uses its internal combined_corpus
-        that was created and preprocessed during initialization. This ensures the training
-        data has the proper temporal references.
-        
-        All training configuration (epochs, batch_size, alpha, min_alpha, etc.) is read
-        from instance attributes set during initialization via ``**kwargs``.
-        
-        Args:
-            sentences: Ignored in TempRefWord2Vec, will use self.combined_corpus instead.
-        
-        Returns:
-            Final loss value if calculate_loss is True, None otherwise.
-        """
-        if sentences is not None:
-            logger.warning("TempRefWord2Vec always uses its internal preprocessed corpus for training.")
-            logger.warning("The provided 'sentences' argument will be ignored (using self.combined_corpus instead).")
-        
-        # Call the parent's train method with our combined corpus
-        return super().train(sentences=self.combined_corpus)
-
-    def _is_temporal_variant(self, word: str) -> bool:
-        """Check if a word is a temporal variant (e.g., '民_宋')."""
-        return word in self.reverse_temporal_map
-    
-    def get_vector(self, word: str, normalize: bool = False) -> np.ndarray:
-        """Get the vector for a word.
-        
-        Args:
-            word: Input word.
-            normalize: If True, return unit-length vector.
-        
-        Returns:
-            Word vector of shape (vector_size,).
-        
-        Raises:
-            KeyError: If word is not in vocabulary.
-        """
-        if word not in self.vocab:
-            raise KeyError(f"Word '{word}' not in vocabulary")
-        
-        word_idx = self.vocab[word]
-        
-        # Temporal variants use output embeddings, regular words use input embeddings
-        if self._is_temporal_variant(word):
-            vector = self.W_prime[word_idx]
-        else:
-            vector = self.W[word_idx]
-        
-        if normalize:
-            norm = np.linalg.norm(vector)
-            if norm > 0:
-                return vector / norm
-        return vector
-    
-    def most_similar(self, word: str, topn: int = 10) -> list[tuple[str, float]]:
-        """Find the most similar words to the given word.
-        
-        Args:
-            word: Input word (can be a temporal variant like "word_period" or a regular word).
-            topn: Number of similar words to return.
-        
-        Returns:
-            List of (word, similarity) tuples sorted by descending similarity.
-        """
-        if word not in self.vocab:
-            return []
-        
-        word_idx = self.vocab[word]
-        
-        if self._is_temporal_variant(word):
-            # Cross-space: W_prime query vs W for regular words
-            word_vec = self.W_prime[word_idx].reshape(1, -1)
-            sim = cosine_similarity(word_vec, self.W).flatten()
-            # Override temporal variants with W_prime vs W_prime (same space)
-            for t_word in self.reverse_temporal_map:
-                t_idx = self.vocab[t_word]
-                sim[t_idx] = float(cosine_similarity(
-                    word_vec, self.W_prime[t_idx].reshape(1, -1)
-                ))
-        else:
-            # Regular word: W vs W
-            word_vec = self.W[word_idx].reshape(1, -1)
-            sim = cosine_similarity(word_vec, self.W).flatten()
-        
-        most_similar_words = []
-        for idx in (-sim).argsort():
-            if idx != word_idx:
-                most_similar_words.append((self.index2word[idx], float(sim[idx])))
-                if len(most_similar_words) >= topn:
-                    break
-        
-        return most_similar_words
-
-    def similarity(self, word1: str, word2: str) -> float:
-        """Calculate cosine similarity between two words.
-        
-        Args:
-            word1: First word.
-            word2: Second word.
-        
-        Returns:
-            Cosine similarity score between -1 and 1.
-        
-        Raises:
-            KeyError: If either word is not in vocabulary.
-        """
-        if word1 not in self.vocab:
-            raise KeyError(f"Word '{word1}' not found in vocabulary")
-        if word2 not in self.vocab:
-            raise KeyError(f"Word '{word2}' not found in vocabulary")
-        
-        is_temporal1 = self._is_temporal_variant(word1)
-        is_temporal2 = self._is_temporal_variant(word2)
-        
-        if is_temporal1 and is_temporal2:
-            # Both temporal: W_prime vs W_prime
-            word1_vec = self.W_prime[self.vocab[word1]]
-            word2_vec = self.W_prime[self.vocab[word2]]
-        elif is_temporal1:
-            # word1 temporal, word2 regular: W_prime vs W
-            word1_vec = self.W_prime[self.vocab[word1]]
-            word2_vec = self.W[self.vocab[word2]]
-        elif is_temporal2:
-            # word1 regular, word2 temporal: W vs W_prime
-            word1_vec = self.W[self.vocab[word1]]
-            word2_vec = self.W_prime[self.vocab[word2]]
-        else:
-            # Both regular: W vs W
-            word1_vec = self.W[self.vocab[word1]]
-            word2_vec = self.W[self.vocab[word2]]
-        
-        return float(cosine_similarity(word1_vec, word2_vec))
-
-    def calculate_semantic_change(self, target_word: str, labels: list[str] | None = None) -> dict[str, list[tuple[str, float]]]:
-        """
-        Calculate semantic change by comparing cosine similarities across time periods.
-        
-        Args:
-            target_word: Target word to analyze (must be one of the targets specified 
-                during initialization).
-            labels: Time period labels (optional, defaults to labels from model initialization).
-        
-        Returns:
-            Dict mapping transition names to lists of (word, change) tuples, sorted by 
-            change score (descending).
-        
-        Example:
-            changes = model.calculate_semantic_change("人民")
-            for transition, word_changes in changes.items():
-                print(f"\\n{transition}:")
-                print("Words moved towards:", word_changes[:5])  # Top 5 increases
-                print("Words moved away:", word_changes[-5:])   # Top 5 decreases
-        """
-        # Use stored labels if not provided
-        if labels is None:
-            labels = self.labels
-        
-        # Validate that target_word is one of the tracked targets
-        if target_word not in self.targets:
-            raise ValueError(f"Target word '{target_word}' was not specified during model initialization. "
-                           f"Available targets: {self.targets}")
-        
-        results = {}
-        
-        # Get all words in vocabulary (excluding temporal variants)
-        all_words = [word for word in self.vocab.keys() 
-                    if word not in self.reverse_temporal_map]
-        
-        # Get embeddings for all words
-        all_word_vectors = np.array([self.get_vector(word) for word in all_words])
-
-        # For each adjacent pair of time periods
-        for i in range(len(labels) - 1):
-            from_period = labels[i]
-            to_period = labels[i+1]
-            transition = f"{from_period}_to_{to_period}"
-            
-            # Get temporal variants for the target word
-            from_variant = f"{target_word}_{from_period}"
-            to_variant = f"{target_word}_{to_period}"
-            
-            # Check if temporal variants exist in vocabulary
-            if from_variant not in self.vocab or to_variant not in self.vocab:
-                logger.warning(f"{from_variant} or {to_variant} not found in vocabulary. Skipping transition {transition}.")
-                continue
-            
-            # Get vectors for the target word in each period
-            from_vector = self.get_vector(from_variant).reshape(1, -1)
-            to_vector = self.get_vector(to_variant).reshape(1, -1)
-            
-            # Calculate cosine similarity for all words with the target word in each period
-            from_sims = cosine_similarity(from_vector, all_word_vectors)[0]
-            to_sims = cosine_similarity(to_vector, all_word_vectors)[0]
-            
-            # Calculate differences in similarity
-            sim_diffs = to_sims - from_sims
-            
-            # Create word-change pairs and sort by change
-            word_changes = [(all_words[j], float(sim_diffs[j])) for j in range(len(all_words))]
-            word_changes.sort(key=lambda x: x[1], reverse=True)
-            
-            results[transition] = word_changes
-        
-        return results
-
-    def get_available_targets(self) -> list[str]:
-        """
-        Get the list of target words available for semantic change analysis.
-        
-        Returns:
-            List of target words that were specified during model initialization.
-        """
-        return self.targets.copy()
-
-    def get_time_labels(self) -> list[str]:
-        """
-        Get the list of time period labels used in the model.
-        
-        Returns:
-            List of time period labels that were specified during model initialization.
-        """
-        return self.labels.copy()
-    
-    def get_period_vocab_counts(self, period: str | None = None) -> dict[str, Counter] | Counter:
-        """
-        Get vocabulary counts for a specific period or all periods.
-        
-        Args:
-            period: The period label to get vocab counts for. If None, returns all periods.
-            
-        Returns:
-            If period is None: dictionary mapping period labels to Counter objects.
-            If period is specified: Counter object for that specific period.
-            
-        Raises:
-            ValueError: If the specified period is not found in the model.
-        """
-        if not hasattr(self, 'period_vocab_counts'):
-            raise AttributeError("Vocabulary counts not available. Make sure the model has been initialized properly.")
-            
-        if period is None:
-            return self.period_vocab_counts.copy()
-        else:
-            if period not in self.period_vocab_counts:
-                available_periods = list(self.period_vocab_counts.keys())
-                raise ValueError(f"Period '{period}' not found. Available periods: {available_periods}")
-            return self.period_vocab_counts[period].copy()
-    
-    def save(self, path: str) -> None:
-        """
-        Save the TempRefWord2Vec model to a file, including vocab counts and temporal metadata.
-        
-        This overrides the parent save method to also save:
-        - Period-specific vocabulary counts
-        - Target words and labels  
-        - Temporal word mappings
-        - All other model parameters from the parent class
-        
-        Note: The combined corpus is NOT saved to reduce file size.
-        
-        Args:
-            path (str): Path to save the model file.
-        """
-        # Get the base model data from parent class
-        model_data = {
-            'vocab': self.vocab,
-            'index2word': self.index2word,
-            'word_counts': dict(self.word_counts),
-            'corpus_word_count': self.corpus_word_count,
-            'total_corpus_tokens': self.total_corpus_tokens,
-            'vector_size': self.vector_size,
-            'window': self.window,
-            'min_word_count': self.min_word_count,
-            'negative': self.negative,
-            'ns_exponent': self.ns_exponent,
-            'cbow_mean': self.cbow_mean,
-            'sg': self.sg,
-            'sample': self.sample,
-            'shrink_windows': self.shrink_windows,
-            'max_vocab_size': self.max_vocab_size,
-            'W': self.W,
-            'W_prime': self.W_prime
-        }
-        
-        # Add TempRefWord2Vec-specific data
-        tempref_data = {
-            'labels': self.labels,
-            'targets': self.targets,
-            'temporal_word_map': self.temporal_word_map,
-            'reverse_temporal_map': self.reverse_temporal_map,
-            'period_vocab_counts': {label: dict(counter) for label, counter in self.period_vocab_counts.items()},
-            'model_type': 'TempRefWord2Vec'
-        }
-        
-        # Combine all data
-        model_data.update(tempref_data)
-        
-        # Save to file
-        np.save(path, model_data, allow_pickle=True)
-        if self.verbose:
-            logger.info(f"TempRefWord2Vec model saved to {path}")
-            logger.info(f"Saved data includes:")
-            logger.info(f"  - Vocabulary: {len(self.vocab)} words")
-            logger.info(f"  - Time periods: {len(self.labels)} ({', '.join(self.labels)})")
-            logger.info(f"  - Target words: {len(self.targets)} ({', '.join(self.targets)})")
-            logger.info(f"  - Period vocab counts: {len(self.period_vocab_counts)} periods")
-    
-    @classmethod
-    def load(cls, path: str) -> 'TempRefWord2Vec':
-        """
-        Load a TempRefWord2Vec model from a file.
-        
-        This overrides the parent load method to also restore:
-        - Period-specific vocabulary counts
-        - Target words and labels  
-        - Temporal word mappings
-        
-        Args:
-            path (str): Path to load the model from.
-        
-        Returns:
-            TempRefWord2Vec: Loaded TempRefWord2Vec model with all temporal metadata 
-                restored.
-        
-        Raises:
-            ValueError: If the file doesn't contain TempRefWord2Vec data.
-        """
-        model_data = np.load(path, allow_pickle=True).item()
-        
-        # Check if this is a TempRefWord2Vec model
-        if model_data.get('model_type') != 'TempRefWord2Vec':
-            raise ValueError("The loaded file does not contain a TempRefWord2Vec model. "
-                           "Use Word2Vec.load() for regular Word2Vec models.")
-        
-        # Extract TempRefWord2Vec-specific data
-        labels = model_data['labels']
-        targets = model_data['targets']
-        
-        # Get base model parameters with defaults
-        shrink_windows = model_data.get('shrink_windows', False)
-        sample = model_data.get('sample', 1e-3)
-        max_vocab_size = model_data.get('max_vocab_size', None)
-        
-        # Create model instance with _skip_init to avoid unnecessary initialization
-        # Empty dict is passed for corpora - won't be processed with _skip_init
-        model = cls(
-            corpora={},  # Empty dict - won't be used with _skip_init
-            targets=targets,
-            vector_size=model_data['vector_size'],
-            window=model_data['window'],
-            min_word_count=model_data['min_word_count'],
-            negative=model_data['negative'],
-            ns_exponent=model_data['ns_exponent'],
-            cbow_mean=model_data['cbow_mean'],
-            sg=model_data['sg'],
-            sample=sample,
-            shrink_windows=shrink_windows,
-            max_vocab_size=max_vocab_size,
-            _skip_init=True,
-            _labels=labels,
-        )
-        
-        # Restore saved model state
-        model.vocab = model_data['vocab']
-        model.index2word = model_data['index2word']
-        model.word_counts = Counter(model_data.get('word_counts', {}))
-        model.W = model_data['W']
-        model.W_prime = model_data['W_prime']
-        
-        # Restore corpus statistics
-        model.corpus_word_count = model_data.get('corpus_word_count', sum(model.word_counts.values()))
-        model.total_corpus_tokens = model_data.get('total_corpus_tokens', model.corpus_word_count)
-        
-        # Restore TempRefWord2Vec-specific data
-        model.temporal_word_map = model_data['temporal_word_map']
-        model.reverse_temporal_map = model_data['reverse_temporal_map']
-        model.period_vocab_counts = {
-            label: Counter(counts_dict) 
-            for label, counts_dict in model_data['period_vocab_counts'].items()
-        }
-        
-        # Build temporal index map for Cython acceleration
-        model._build_temporal_index_map()
-        
-        # Clear the dummy combined_corpus to save memory
-        model.combined_corpus = []
-        
-        if model.verbose:
-            logger.info(f"TempRefWord2Vec model loaded from {path}")
-            logger.info(f"Restored data includes:")
-            logger.info(f"  - Vocabulary: {len(model.vocab)} words")
-            logger.info(f"  - Time periods: {len(model.labels)} ({', '.join(model.labels)})")
-            logger.info(f"  - Target words: {len(model.targets)} ({', '.join(model.targets)})")
-            logger.info(f"  - Period vocab counts: {len(model.period_vocab_counts)} periods")
-        
-        return model
-
+__all__ = [
+    'Word2Vec',
+    'LineSentenceFile',
+]

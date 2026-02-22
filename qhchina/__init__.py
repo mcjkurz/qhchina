@@ -53,8 +53,14 @@ def set_log_level(level: str) -> None:
 # Import global configuration functions
 from .config import set_random_seed, get_random_seed, get_rng
 
-# Import Corpus class
-from .corpus import Corpus
+# Import Corpus classes
+from .corpus import Corpus, TempRefCorpus
+
+# Import core analytics classes for convenient top-level access
+from .analytics import Word2Vec, TempRefWord2Vec, LDAGibbsSampler
+
+# Import preprocessing entry point
+from .preprocessing import create_segmenter
 
 # Import helper functions directly into the package namespace
 from .helpers.fonts import load_fonts, current_font, set_font, list_available_fonts, list_font_aliases, get_font_path

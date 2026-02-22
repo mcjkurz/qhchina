@@ -1,20 +1,41 @@
 """Analytics module for text and vector operations.
 
 This module provides tools for:
-- Collocation analytics
-- Vector operations and projections
-- Topic modeling
-- Stylometry and authorship attribution
-- Corpus comparison
+- Word embeddings (Word2Vec, TempRefWord2Vec)
+- Topic modeling (LDAGibbsSampler)
+- Stylometry and authorship attribution (Stylometry, compare_corpora)
+- Collocation analytics (find_collocates, cooc_matrix, plot_collocates)
+- Vector operations and projections (project_2d, cosine_similarity)
 
-To use specific functionality, import directly from the appropriate submodule:
-- from qhchina.analytics.word2vec import Word2Vec
-- from qhchina.analytics.vectors import project_2d, cosine_similarity
-- from qhchina.analytics.collocations import find_collocates, cooc_matrix, plot_collocates
-- from qhchina.analytics.topicmodels import LDAGibbsSampler
-- from qhchina.analytics.stylometry import Stylometry, compare_corpora
+Convenience imports:
+    from qhchina.analytics import Word2Vec, LDAGibbsSampler, Stylometry
+    from qhchina.analytics import find_collocates, cooc_matrix
 """
 
-# Define what should be available when using wildcard imports (import *)
-# This is empty to prevent unwanted imports when using `from qhchina.analytics import *`
-__all__ = []
+# Word embeddings
+from .word2vec import Word2Vec
+from .tempref_word2vec import TempRefWord2Vec
+
+# Topic modeling
+from .topicmodels import LDAGibbsSampler
+
+# Stylometry
+from .stylometry import Stylometry, compare_corpora
+
+# Collocations
+from .collocations import find_collocates, cooc_matrix, plot_collocates
+
+__all__ = [
+    # Word embeddings
+    'Word2Vec',
+    'TempRefWord2Vec',
+    # Topic modeling
+    'LDAGibbsSampler',
+    # Stylometry
+    'Stylometry',
+    'compare_corpora',
+    # Collocations
+    'find_collocates',
+    'cooc_matrix',
+    'plot_collocates',
+]

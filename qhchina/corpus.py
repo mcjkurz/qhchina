@@ -27,13 +27,15 @@ from typing import Any, TYPE_CHECKING
 
 import numpy as np
 
+from qhchina.config import get_rng, resolve_seed
+
 if TYPE_CHECKING:
     import pandas as pd
 
 logger = logging.getLogger("qhchina.corpus")
 
 
-__all__ = ['Corpus', 'Document']
+__all__ = ['Corpus', 'Document', 'TempRefCorpus']
 
 
 @dataclass(slots=True)
@@ -407,6 +409,23 @@ class Corpus:
         
         result._rebuild_index()
         return result
+    
+    def shuffle(self, seed: int | None = None) -> None:
+        """
+        Shuffle documents in-place.
+        
+        Args:
+            seed: Random seed for reproducibility. If None, uses the global
+                random seed from ``qhchina.set_random_seed()``.
+        
+        Example:
+            >>> corpus = Corpus([['a', 'b'], ['c', 'd'], ['e', 'f']])
+            >>> corpus.shuffle(seed=42)
+            >>> list(corpus)  # Documents in random order
+        """
+        rng = get_rng(resolve_seed(seed))
+        rng.shuffle(self._documents)
+        self._rebuild_index()
     
     # =========================================================================
     # Grouping
@@ -814,15 +833,23 @@ class Corpus:
         
         Args:
             path: Output file path.
-            format: File format - 'json' or 'pickle'. If None, inferred from
-                file extension (.json for JSON, .pkl/.pickle for pickle).
-                Pickle is recommended for large corpora as it's more compact
-                and faster to load.
+            format: File format - 'json', 'pickle', or 'txt'. If None, inferred from
+                file extension (.json for JSON, .pkl/.pickle for pickle, .txt for text).
+                
+                - json: Human-readable, includes metadata
+                - pickle: Compact binary, includes metadata  
+                - txt: Streaming format for Word2Vec/TempRefWord2Vec (tokens only, no metadata)
         
         Example:
             >>> corpus.save('my_corpus.json')           # JSON format
             >>> corpus.save('my_corpus.pkl')            # Pickle format (smaller)
+            >>> corpus.save('my_corpus.txt')            # Streaming text format
             >>> corpus.save('corpus', format='pickle')  # Explicit format
+        
+        Note:
+            The 'txt' format is designed for streaming with Word2Vec and TempRefWord2Vec.
+            It only saves tokens (one sentence per line), not document IDs or metadata.
+            Format: first line is "sentence_count token_count", followed by sentences.
         """
         import pickle
         
@@ -835,47 +862,71 @@ class Corpus:
                 format = 'json'
             elif suffix in ('.pkl', '.pickle'):
                 format = 'pickle'
+            elif suffix == '.txt':
+                format = 'txt'
             else:
                 raise ValueError(
                     f"Cannot infer format from extension '{suffix}'. "
-                    f"Use format='json' or format='pickle', or use .json/.pkl extension."
+                    f"Use format='json', 'pickle', or 'txt', or use .json/.pkl/.txt extension."
                 )
         
         format = format.lower()
-        if format not in ('json', 'pickle'):
-            raise ValueError(f"format must be 'json' or 'pickle', got '{format}'")
+        if format not in ('json', 'pickle', 'txt'):
+            raise ValueError(f"format must be 'json', 'pickle', or 'txt', got '{format}'")
         
-        data = {
-            'version': '1.0',
-            'default_metadata': self._default_metadata,
-            'documents': [
-                {
-                    'doc_id': doc.doc_id,
-                    'tokens': doc.tokens,
-                    'metadata': doc.metadata,
-                }
-                for doc in self._documents
-            ],
-        }
-        
-        if format == 'json':
+        if format == 'txt':
+            # Streaming format: header + one document per line (tokens only, no metadata)
+            doc_count = len(self._documents)
+            token_count = sum(len(doc.tokens) for doc in self._documents)
+            
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(f"{doc_count} {token_count}\n")
+                for doc in self._documents:
+                    f.write(' '.join(doc.tokens) + '\n')
+            
+            logger.info(f"Saved corpus with {doc_count} documents, {token_count} tokens to {path} (txt)")
+        elif format == 'json':
+            data = {
+                'version': '1.0',
+                'default_metadata': self._default_metadata,
+                'documents': [
+                    {
+                        'doc_id': doc.doc_id,
+                        'tokens': doc.tokens,
+                        'metadata': doc.metadata,
+                    }
+                    for doc in self._documents
+                ],
+            }
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info(f"Saved corpus with {len(self._documents)} documents to {path} (json)")
         else:  # pickle
+            data = {
+                'version': '1.0',
+                'default_metadata': self._default_metadata,
+                'documents': [
+                    {
+                        'doc_id': doc.doc_id,
+                        'tokens': doc.tokens,
+                        'metadata': doc.metadata,
+                    }
+                    for doc in self._documents
+                ],
+            }
             with open(path, 'wb') as f:
                 pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
-        
-        logger.info(f"Saved corpus with {len(self._documents)} documents to {path} ({format})")
+            logger.info(f"Saved corpus with {len(self._documents)} documents to {path} (pickle)")
     
     @classmethod
-    def load(cls, path: str | Path, format: str | None = None) -> Corpus:
+    def load(cls, path: str | Path, format: str | None = None) -> 'Corpus':
         """
         Load corpus from a file.
         
         Args:
             path: Input file path.
-            format: File format - 'json' or 'pickle'. If None, inferred from
-                file extension (.json for JSON, .pkl/.pickle for pickle).
+            format: File format - 'json', 'pickle', or 'txt'. If None, inferred from
+                file extension (.json for JSON, .pkl/.pickle for pickle, .txt for text).
         
         Returns:
             Loaded Corpus object.
@@ -883,6 +934,11 @@ class Corpus:
         Example:
             >>> corpus = Corpus.load('my_corpus.json')   # JSON format
             >>> corpus = Corpus.load('my_corpus.pkl')    # Pickle format
+            >>> corpus = Corpus.load('my_corpus.txt')    # Streaming text format
+        
+        Note:
+            Loading from 'txt' format creates documents without metadata since
+            the text format only stores tokens.
         """
         import pickle
         
@@ -895,17 +951,32 @@ class Corpus:
                 format = 'json'
             elif suffix in ('.pkl', '.pickle'):
                 format = 'pickle'
+            elif suffix == '.txt':
+                format = 'txt'
             else:
                 raise ValueError(
                     f"Cannot infer format from extension '{suffix}'. "
-                    f"Use format='json' or format='pickle', or use .json/.pkl extension."
+                    f"Use format='json', 'pickle', or 'txt', or use .json/.pkl/.txt extension."
                 )
         
         format = format.lower()
-        if format not in ('json', 'pickle'):
-            raise ValueError(f"format must be 'json' or 'pickle', got '{format}'")
+        if format not in ('json', 'pickle', 'txt'):
+            raise ValueError(f"format must be 'json', 'pickle', or 'txt', got '{format}'")
         
-        if format == 'json':
+        if format == 'txt':
+            # Streaming format: header + one document per line
+            corpus = cls()
+            with open(path, 'r', encoding='utf-8') as f:
+                # Read header (doc_count token_count)
+                f.readline()
+                for line in f:
+                    line = line.rstrip('\n\r')
+                    if line:
+                        tokens = line.split(' ')
+                        corpus.add(tokens)
+            logger.info(f"Loaded corpus with {len(corpus)} documents from {path} (txt)")
+            return corpus
+        elif format == 'json':
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         else:  # pickle
@@ -974,3 +1045,99 @@ class Corpus:
         """Invalidate cached statistics."""
         self._token_count_cache = None
         self._vocab_cache = None
+
+
+class TempRefCorpus(Corpus):
+    """
+    Corpus with automatic target word tagging for TempRefWord2Vec.
+    
+    This subclass tags target words with a period label when documents are added.
+    For example, if label="1800s" and targets=["bread"], then "bread" becomes "bread_1800s".
+    
+    Use this to prepare pre-tagged corpus files for memory-efficient TempRefWord2Vec training.
+    
+    Args:
+        documents: Optional initial documents (list of token lists).
+        label: Time period label for tagging (e.g., "1800s", "ming", "period1").
+        targets: List of target words to tag.
+        **metadata: Default metadata for all documents.
+    
+    Example:
+        >>> from qhchina import TempRefCorpus
+        >>> 
+        >>> # Create corpus for 1800s period
+        >>> corpus = TempRefCorpus(label="1800s", targets=["bread", "money"])
+        >>> corpus.add(["bread", "is", "good"])  # "bread" -> "bread_1800s"
+        >>> corpus.add(["money", "talks"])       # "money" -> "money_1800s"
+        >>> 
+        >>> # Save for streaming training
+        >>> corpus.save("1800s.txt")
+        >>> 
+        >>> # Use with TempRefWord2Vec
+        >>> model = TempRefWord2Vec(
+        ...     corpora={"1800s": "1800s.txt", "1900s": "1900s.txt"},
+        ...     targets=["bread", "money"],
+        ...     sg=1
+        ... )
+    """
+    
+    def __init__(
+        self,
+        documents: list[list[str]] | None = None,
+        *,
+        label: str,
+        targets: list[str],
+        **metadata: Any
+    ):
+        self.label = label
+        self.targets = set(targets)
+        super().__init__(documents, **metadata)
+    
+    def add(
+        self,
+        tokens: list[str],
+        doc_id: str | None = None,
+        **metadata: Any
+    ) -> str:
+        """
+        Add a document with target words tagged.
+        
+        Target words are automatically tagged with the period label.
+        For example, if label="1800s" and "bread" is a target, it becomes "bread_1800s".
+        
+        Args:
+            tokens: List of string tokens.
+            doc_id: Optional document ID.
+            **metadata: Document metadata.
+        
+        Returns:
+            The document ID.
+        """
+        tagged_tokens = [
+            f"{tok}_{self.label}" if tok in self.targets else tok
+            for tok in tokens
+        ]
+        return super().add(tagged_tokens, doc_id, **metadata)
+    
+    def add_many(
+        self,
+        documents: list[list[str]],
+        metadata_list: list[dict[str, Any]] | None = None,
+        **shared_metadata: Any
+    ) -> list[str]:
+        """
+        Add multiple documents with target words tagged.
+        
+        Args:
+            documents: List of token lists.
+            metadata_list: Optional per-document metadata.
+            **shared_metadata: Metadata applied to all documents.
+        
+        Returns:
+            List of document IDs.
+        """
+        tagged_documents = [
+            [f"{tok}_{self.label}" if tok in self.targets else tok for tok in tokens]
+            for tokens in documents
+        ]
+        return super().add_many(tagged_documents, metadata_list, **shared_metadata)

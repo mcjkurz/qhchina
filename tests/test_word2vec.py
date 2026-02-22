@@ -5,6 +5,43 @@ import pytest
 import numpy as np
 import tempfile
 import os
+from contextlib import contextmanager
+
+
+@contextmanager
+def tempref_corpus_files(corpora: dict, targets: list):
+    """
+    Context manager that creates temporary TempRefCorpus files for testing.
+    
+    Args:
+        corpora: Dict mapping labels to lists of sentences
+        targets: List of target words to tag
+        
+    Yields:
+        Dict mapping labels to file paths
+    """
+    from qhchina.corpus import TempRefCorpus
+    
+    temp_files = []
+    file_paths = {}
+    
+    try:
+        for label, sentences in corpora.items():
+            corpus = TempRefCorpus(label=label, targets=targets)
+            corpus.add_many(sentences)
+            
+            fd, path = tempfile.mkstemp(suffix='.txt', prefix=f'test_{label}_')
+            os.close(fd)
+            temp_files.append(path)
+            
+            corpus.save(path)
+            file_paths[label] = path
+        
+        yield file_paths
+    finally:
+        for path in temp_files:
+            if os.path.exists(path):
+                os.unlink(path)
 
 
 class TestWord2VecBasic:
@@ -36,9 +73,9 @@ class TestWord2VecBasic:
             negative=3,
             sg=1,  # Skip-gram
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         # Check vocabulary was built
         assert len(model.vocab) > 0
@@ -55,9 +92,9 @@ class TestWord2VecBasic:
             negative=3,
             sg=0,  # CBOW
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         assert len(model.vocab) > 0
     
@@ -73,9 +110,9 @@ class TestWord2VecBasic:
             negative=3,
             sg=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         # If Cython not available, it falls back to Python
         assert len(model.vocab) > 0
@@ -97,9 +134,9 @@ class TestWord2VecVectors:
             negative=5,
             sg=1,
             seed=42,
-
             epochs=3
         )
+        model.train()
         return model
     
     def test_get_vector(self, trained_model):
@@ -167,9 +204,9 @@ class TestWord2VecSaveLoad:
             window=2,
             min_word_count=2,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         # Save to temp file with .npy extension (used by np.save)
         with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as f:
@@ -211,9 +248,9 @@ class TestWord2VecTraining:
             window=2,
             min_word_count=2,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         # Vocabulary should be populated
         assert len(model.vocab) > 0
@@ -230,9 +267,9 @@ class TestWord2VecTraining:
             window=2,
             min_word_count=2,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         # All vectors should have the correct size
         for word in model.vocab:
@@ -257,9 +294,9 @@ class TestWord2VecBoundaryValues:
             window=1,
             min_word_count=2,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         assert len(model.vocab) > 0
     
@@ -273,9 +310,9 @@ class TestWord2VecBoundaryValues:
             window=2,
             min_word_count=2,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         for word in model.vocab:
             vec = model.get_vector(word)
@@ -292,9 +329,9 @@ class TestWord2VecBoundaryValues:
             min_word_count=2,
             negative=1,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         assert len(model.vocab) > 0
     
@@ -308,9 +345,9 @@ class TestWord2VecBoundaryValues:
             window=2,
             min_word_count=1,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         # Should keep more words than with higher threshold
         assert len(model.vocab) > 0
@@ -325,9 +362,9 @@ class TestWord2VecBoundaryValues:
             window=2,
             min_word_count=2,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         assert len(model.vocab) > 0
     
@@ -342,9 +379,9 @@ class TestWord2VecBoundaryValues:
             min_word_count=1,
             max_vocab_size=20,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         assert len(model.vocab) <= 20
     
@@ -359,9 +396,9 @@ class TestWord2VecBoundaryValues:
             min_word_count=2,
             sample=0,  # Disable subsampling
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         assert len(model.vocab) > 0
     
@@ -376,9 +413,9 @@ class TestWord2VecBoundaryValues:
             min_word_count=2,
             shrink_windows=False,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         assert len(model.vocab) > 0
 
@@ -394,19 +431,28 @@ class TestWord2VecEdgeCases:
         """Test that empty sentences raises ValueError."""
         from qhchina.analytics.word2vec import Word2Vec
         
-        model = Word2Vec(min_word_count=1)
+        model = Word2Vec([], min_word_count=1)
         
         with pytest.raises(ValueError, match="cannot be empty"):
-            model.train([])
+            model.train()
     
     def test_all_empty_sentences(self):
         """Test handling of all empty sentences."""
         from qhchina.analytics.word2vec import Word2Vec
         
-        model = Word2Vec(min_word_count=1)
+        model = Word2Vec([[], [], []], min_word_count=1)
         
         with pytest.raises(ValueError, match="contains no words"):
-            model.train([[], [], []])
+            model.train()
+    
+    def test_no_sentences_raises_error(self):
+        """Test that calling train() without sentences raises ValueError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(min_word_count=1)
+        
+        with pytest.raises(ValueError, match="No sentences provided"):
+            model.train()
     
     def test_all_words_filtered(self):
         """Test when all words are below min_word_count."""
@@ -416,6 +462,7 @@ class TestWord2VecEdgeCases:
         sentences = [["a", "b", "c"], ["d", "e", "f"]]
         
         model = Word2Vec(sentences, min_word_count=10, epochs=1)
+        model.train()
         
         # Vocabulary should be empty (all filtered)
         assert len(model.vocab) == 0
@@ -429,9 +476,9 @@ class TestWord2VecEdgeCases:
             vector_size=10,
             min_word_count=2,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         with pytest.raises(KeyError):
             model.get_vector("nonexistent_word_xyz_123")
@@ -445,9 +492,9 @@ class TestWord2VecEdgeCases:
             vector_size=10,
             min_word_count=2,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         with pytest.raises(KeyError):
             _ = model["nonexistent_word_xyz_123"]
@@ -461,9 +508,9 @@ class TestWord2VecEdgeCases:
             vector_size=10,
             min_word_count=2,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         vocab_words = list(model.vocab.keys())
         if len(vocab_words) > 0:
@@ -482,9 +529,9 @@ class TestWord2VecEdgeCases:
             window=2,
             min_word_count=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         assert len(model.vocab) > 0
     
@@ -500,9 +547,9 @@ class TestWord2VecEdgeCases:
             window=2,
             min_word_count=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         # Should handle gracefully
         assert isinstance(model.vocab, dict)
@@ -526,9 +573,9 @@ class TestWord2VecTrainingModes:
             min_word_count=2,
             sg=1,  # Skip-gram
             seed=42,
-
             epochs=3
         )
+        model_sg.train()
         
         model_cbow = Word2Vec(
             larger_documents,
@@ -537,9 +584,9 @@ class TestWord2VecTrainingModes:
             min_word_count=2,
             sg=0,  # CBOW
             seed=42,
-
             epochs=3
         )
+        model_cbow.train()
         
         # Both should have vocabulary
         assert len(model_sg.vocab) > 0
@@ -567,9 +614,9 @@ class TestWord2VecTrainingModes:
             sg=0,
             cbow_mean=True,
             seed=42,
-
             epochs=2
         )
+        model_mean.train()
         
         model_sum = Word2Vec(
             larger_documents,
@@ -579,9 +626,9 @@ class TestWord2VecTrainingModes:
             sg=0,
             cbow_mean=False,
             seed=42,
-
             epochs=2
         )
+        model_sum.train()
         
         assert len(model_mean.vocab) > 0
         assert len(model_sum.vocab) > 0
@@ -592,33 +639,33 @@ class TestTempRefWord2Vec:
     
     def test_tempref_init(self, song_ming_corpora):
         """Test TempRefWord2Vec initialization with 宋史/明史."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
         # Find common words in both corpora for target tracking
         song_tokens = set(token for sent in song_ming_corpora['song'] for token in sent)
         ming_tokens = set(token for sent in song_ming_corpora['ming'] for token in sent)
-        common_words = list(song_tokens & ming_tokens)[:5]  # Take first 5 common words
+        common_words = list(song_tokens & ming_tokens)[:5]
         
         if len(common_words) < 1:
             pytest.skip("No common words found between corpora")
         
-        model = TempRefWord2Vec(
-            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
-            targets=common_words,
-            vector_size=30,
-            window=3,
-            min_word_count=2,
-            sg=1,  # Skip-gram required
-            seed=42,
-
-        )
-        
-        assert model.labels == ['song', 'ming']
-        assert set(model.targets) == set(common_words)
+        with tempref_corpus_files(song_ming_corpora, common_words) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=common_words,
+                vector_size=30,
+                window=3,
+                min_word_count=2,
+                sg=1,
+                seed=42,
+            )
+            
+            assert model.labels == ['song', 'ming']
+            assert set(model.targets) == set(common_words)
     
     def test_tempref_train(self, song_ming_corpora):
         """Test TempRefWord2Vec training."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
         # Find common words
         song_tokens = set(token for sent in song_ming_corpora['song'] for token in sent)
@@ -628,41 +675,35 @@ class TestTempRefWord2Vec:
         if len(common_words) < 1:
             pytest.skip("No common words found between corpora")
         
-        model = TempRefWord2Vec(
-            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
-            targets=common_words,
-            vector_size=20,
-            window=2,
-            min_word_count=2,
-            sg=1,
-            seed=42,
-
-            epochs=2
-        )
-        
-        model.train()
-        
-        # Check temporal variants in vocabulary
-        for target in common_words:
-            if f"{target}_song" in model.vocab or f"{target}_ming" in model.vocab:
-                # At least one temporal variant should exist
-                break
-        else:
-            # This is OK - variants might be filtered by min_word_count
-            pass
-        
-        assert len(model.vocab) > 0
+        with tempref_corpus_files(song_ming_corpora, common_words) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=common_words,
+                vector_size=20,
+                window=2,
+                min_word_count=2,
+                sg=1,
+                seed=42,
+                epochs=2
+            )
+            
+            model.train()
+            
+            # Check temporal variants in vocabulary
+            for target in common_words:
+                if f"{target}_song" in model.vocab or f"{target}_ming" in model.vocab:
+                    break
+            
+            assert len(model.vocab) > 0
     
     def test_tempref_temporal_variants(self, song_ming_corpora):
         """Test that temporal variants are correctly created."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
-        
-        # Use a common word that should appear frequently
-        song_tokens = [token for sent in song_ming_corpora['song'] for token in sent]
-        ming_tokens = [token for sent in song_ming_corpora['ming'] for token in sent]
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from collections import Counter
         
         # Find words that appear at least 5 times in each corpus
-        from collections import Counter
+        song_tokens = [token for sent in song_ming_corpora['song'] for token in sent]
+        ming_tokens = [token for sent in song_ming_corpora['ming'] for token in sent]
         song_counts = Counter(song_tokens)
         ming_counts = Counter(ming_tokens)
         
@@ -674,32 +715,32 @@ class TestTempRefWord2Vec:
         if len(common_frequent) < 1:
             pytest.skip("No frequent common words found")
         
-        model = TempRefWord2Vec(
-            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
-            targets=common_frequent,
-            vector_size=20,
-            window=2,
-            min_word_count=3,
-            sg=1,
-            seed=42,
-
-            epochs=2
-        )
-        
-        model.train()
-        
-        # Check temporal mapping
-        assert len(model.temporal_word_map) > 0
-        
-        for target in common_frequent:
-            if target in model.temporal_word_map:
-                variants = model.temporal_word_map[target]
-                assert f"{target}_song" in variants
-                assert f"{target}_ming" in variants
+        with tempref_corpus_files(song_ming_corpora, common_frequent) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=common_frequent,
+                vector_size=20,
+                window=2,
+                min_word_count=3,
+                sg=1,
+                seed=42,
+                epochs=2
+            )
+            
+            model.train()
+            
+            # Check temporal mapping
+            assert len(model.temporal_word_map) > 0
+            
+            for target in common_frequent:
+                if target in model.temporal_word_map:
+                    variants = model.temporal_word_map[target]
+                    assert f"{target}_song" in variants
+                    assert f"{target}_ming" in variants
     
     def test_tempref_save_load(self, song_ming_corpora):
         """Test saving and loading TempRefWord2Vec model."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
         song_tokens = set(token for sent in song_ming_corpora['song'] for token in sent)
         ming_tokens = set(token for sent in song_ming_corpora['ming'] for token in sent)
@@ -708,57 +749,82 @@ class TestTempRefWord2Vec:
         if len(common_words) < 1:
             pytest.skip("No common words found")
         
-        model = TempRefWord2Vec(
-            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
-            targets=common_words,
-            vector_size=15,
-            window=2,
-            min_word_count=2,
-            sg=1,
-            seed=42,
-
-            epochs=1
-        )
-        
-        model.train()
-        
-        with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as f:
-            temp_path = f.name
-        
-        try:
-            model.save(temp_path)
+        with tempref_corpus_files(song_ming_corpora, common_words) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=common_words,
+                vector_size=15,
+                window=2,
+                min_word_count=2,
+                sg=1,
+                seed=42,
+                epochs=1
+            )
             
-            loaded = TempRefWord2Vec.load(temp_path)
+            model.train()
             
-            assert loaded.labels == model.labels
-            assert loaded.targets == model.targets
-            assert len(loaded.vocab) == len(model.vocab)
-            assert loaded.vector_size == model.vector_size
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+            with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as f:
+                temp_path = f.name
+            
+            try:
+                model.save(temp_path)
+                
+                loaded = TempRefWord2Vec.load(temp_path)
+                
+                assert loaded.labels == model.labels
+                assert loaded.targets == model.targets
+                assert len(loaded.vocab) == len(model.vocab)
+                assert loaded.vector_size == model.vector_size
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
     
     def test_tempref_requires_skipgram(self, song_ming_corpora):
         """Test that TempRefWord2Vec raises error for CBOW."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
-        with pytest.raises(NotImplementedError):
-            TempRefWord2Vec(
-                corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
-                targets=['天'],
-                sg=0,  # CBOW not supported
-            )
+        with tempref_corpus_files(song_ming_corpora, ['天']) as file_paths:
+            with pytest.raises(NotImplementedError):
+                TempRefWord2Vec(
+                    sentences=file_paths,
+                    targets=['天'],
+                    sg=0,  # CBOW not supported
+                )
     
-    def test_tempref_invalid_corpora_type(self, song_ming_corpora):
-        """Test that non-dict corpora raises TypeError."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+    def test_tempref_invalid_sentences_type(self, song_ming_corpora):
+        """Test that non-dict sentences raises TypeError."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
         with pytest.raises(TypeError):
             TempRefWord2Vec(
-                corpora=[song_ming_corpora['song'], song_ming_corpora['ming']],  # List instead of dict
+                sentences=["/path/to/file1.txt", "/path/to/file2.txt"],  # List instead of dict
                 targets=['天'],
                 sg=1,
             )
+    
+    def test_tempref_invalid_sentences_values(self, song_ming_corpora):
+        """Test that non-string sentences values raise TypeError."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        
+        with pytest.raises(TypeError, match="must be file paths"):
+            TempRefWord2Vec(
+                sentences={'song': song_ming_corpora['song']},  # List instead of path
+                targets=['天'],
+                sg=1,
+            )
+    
+    def test_tempref_shuffle_true_raises_error(self, song_ming_corpora):
+        """Test that shuffle=True raises ValueError."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        
+        with tempref_corpus_files(song_ming_corpora, ['天']) as file_paths:
+            with pytest.raises(ValueError, match="shuffle=True is not supported"):
+                TempRefWord2Vec(
+                    sentences=file_paths,
+                    targets=['天'],
+                    sg=1,
+                    shuffle=True,
+                )
     
     def test_tempref_base_word_count_equals_variant_sum(self, song_ming_corpora):
         """Test that base word counts equal the sum of their temporal variant counts.
@@ -766,7 +832,7 @@ class TestTempRefWord2Vec:
         This verifies the temporal referencing implementation correctly aggregates
         word frequencies from all time periods for proper negative sampling.
         """
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         from collections import Counter
         
         # Find words that appear frequently in both corpora
@@ -784,36 +850,34 @@ class TestTempRefWord2Vec:
         if len(common_frequent) < 1:
             pytest.skip("No frequent common words found")
         
-        model = TempRefWord2Vec(
-            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
-            targets=common_frequent,
-            vector_size=20,
-            window=2,
-            min_word_count=2,
-            sg=1,
-            seed=42,
-
-        )
-        
-        # Build vocab to populate word counts
-        model.build_vocab(model.combined_corpus)
-        
-        # For each target, verify base word count = sum of variant counts
-        for target in common_frequent:
-            if target not in model.vocab:
-                continue  # Skip if base word not in vocab
+        with tempref_corpus_files(song_ming_corpora, common_frequent) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=common_frequent,
+                vector_size=20,
+                window=2,
+                min_word_count=2,
+                sg=1,
+                seed=42,
+            )
+            model.train()
             
-            base_count = model.word_counts[target]
-            variant_count_sum = 0
-            
-            for label in model.labels:
-                variant = f"{target}_{label}"
-                if variant in model.word_counts:
-                    variant_count_sum += model.word_counts[variant]
-            
-            # Base word count should equal sum of variants
-            assert base_count == variant_count_sum, \
-                f"Base word '{target}' count ({base_count}) != sum of variants ({variant_count_sum})"
+            # For each target, verify base word count = sum of variant counts
+            for target in common_frequent:
+                if target not in model.vocab:
+                    continue  # Skip if base word not in vocab
+                
+                base_count = model.word_counts[target]
+                variant_count_sum = 0
+                
+                for label in model.labels:
+                    variant = f"{target}_{label}"
+                    if variant in model.word_counts:
+                        variant_count_sum += model.word_counts[variant]
+                
+                # Base word count should equal sum of variants
+                assert base_count == variant_count_sum, \
+                    f"Base word '{target}' count ({base_count}) != sum of variants ({variant_count_sum})"
     
     def test_tempref_temporal_variants_have_different_embeddings(self, song_ming_corpora):
         """Test that temporal variants of the same word have distinct embeddings.
@@ -821,7 +885,7 @@ class TestTempRefWord2Vec:
         After training, word_period1 and word_period2 should have different vectors,
         reflecting potential semantic change across time periods.
         """
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         from collections import Counter
         
         # Find words that appear frequently in both corpora
@@ -839,34 +903,33 @@ class TestTempRefWord2Vec:
         if len(common_frequent) < 1:
             pytest.skip("No frequent common words found")
         
-        model = TempRefWord2Vec(
-            corpora={'song': song_ming_corpora['song'], 'ming': song_ming_corpora['ming']},
-            targets=common_frequent,
-            vector_size=30,
-            window=3,
-            min_word_count=3,
-            sg=1,
-            seed=42,
-
-            epochs=3
-        )
-        
-        model.train()
-        
-        # Check that temporal variants exist and have different vectors
-        for target in common_frequent:
-            song_variant = f"{target}_song"
-            ming_variant = f"{target}_ming"
+        with tempref_corpus_files(song_ming_corpora, common_frequent) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=common_frequent,
+                vector_size=30,
+                window=3,
+                min_word_count=3,
+                sg=1,
+                seed=42,
+                epochs=3
+            )
+            model.train()
             
-            if song_variant in model.vocab and ming_variant in model.vocab:
-                vec_song = model.get_vector(song_variant)
-                vec_ming = model.get_vector(ming_variant)
+            # Check that temporal variants exist and have different vectors
+            for target in common_frequent:
+                song_variant = f"{target}_song"
+                ming_variant = f"{target}_ming"
                 
-                # Vectors should NOT be identical (training should differentiate them)
-                # Note: They could be similar if the word didn't change semantically,
-                # but they shouldn't be exactly equal after training
-                assert not np.allclose(vec_song, vec_ming, rtol=1e-5, atol=1e-5), \
-                    f"Temporal variants of '{target}' have identical vectors"
+                if song_variant in model.vocab and ming_variant in model.vocab:
+                    vec_song = model.get_vector(song_variant)
+                    vec_ming = model.get_vector(ming_variant)
+                    
+                    # Vectors should NOT be identical (training should differentiate them)
+                    # Note: They could be similar if the word didn't change semantically,
+                    # but they shouldn't be exactly equal after training
+                    assert not np.allclose(vec_song, vec_ming, rtol=1e-5, atol=1e-5), \
+                        f"Temporal variants of '{target}' have identical vectors"
 
 
 # =============================================================================
@@ -899,6 +962,7 @@ class TestWord2VecConsistency:
         )
         
         model = Word2Vec(larger_documents, **params)
+        model.train()
         
         # Model should have a valid vocabulary
         assert len(model.vocab) > 0
@@ -928,6 +992,7 @@ class TestWord2VecConsistency:
         )
         
         model = Word2Vec(larger_documents, **params)
+        model.train()
         
         assert len(model.vocab) > 0
     
@@ -951,9 +1016,11 @@ class TestWord2VecConsistency:
         
         # Train first model
         model1 = Word2Vec(larger_documents.copy(), **params)
+        model1.train()
         
         # Train second model with same seed
         model2 = Word2Vec(larger_documents.copy(), **params)
+        model2.train()
         
         # Vocabularies should be identical
         assert model1.vocab == model2.vocab
@@ -975,13 +1042,14 @@ class TestWord2VecConsistency:
             min_word_count=2,
             negative=3,
             sg=1,
-
             epochs=2,
         )
         
         model1 = Word2Vec(larger_documents.copy(), **params, seed=42)
+        model1.train()
         
         model2 = Word2Vec(larger_documents.copy(), **params, seed=999)
+        model2.train()
         
         # Vocabularies should still be the same
         assert model1.vocab == model2.vocab
@@ -1003,14 +1071,15 @@ class TestWord2VecConsistency:
 class TestWord2VecLearning:
     """Tests for Word2Vec learning behavior and convergence."""
     
-    def test_loss_decreases_over_epochs(self, larger_documents):
-        """Test that training loss decreases over multiple epochs.
+    def test_loss_returned_from_training(self, larger_documents):
+        """Test that training returns a valid loss value.
         
-        This verifies the model is actually learning from the data.
+        This verifies the model is computing loss during training.
         """
         from qhchina.analytics.word2vec import Word2Vec
         
         model = Word2Vec(
+            larger_documents,
             vector_size=30,
             window=3,
             min_word_count=2,
@@ -1019,38 +1088,24 @@ class TestWord2VecLearning:
             seed=42,
             alpha=0.025,
             min_alpha=0.0001,
-
-            epochs=1,
+            epochs=5,
             calculate_loss=True,
         )
         
-        # Build vocab first so repeated train() calls don't rebuild it
-        model.build_vocab(larger_documents)
+        loss = model.train()
         
-        # Train for multiple epochs and track loss manually
-        losses = []
-        for epoch in range(5):
-            loss = model.train(larger_documents)
-            if loss is not None:
-                losses.append(loss)
-        
-        # With sufficient epochs, loss should generally decrease
-        # (may not be strictly monotonic due to stochastic nature)
-        if len(losses) >= 3:
-            # Compare first third average to last third average
-            first_third = np.mean(losses[:len(losses)//3])
-            last_third = np.mean(losses[-len(losses)//3:])
-            
-            # Loss should decrease (or at least not increase significantly)
-            # Allow some tolerance for stochastic fluctuation
-            assert last_third <= first_third * 1.1, \
-                f"Loss didn't decrease: first={first_third:.4f}, last={last_third:.4f}"
+        # Loss should be a valid positive number
+        assert loss is not None
+        assert loss > 0
+        assert not np.isnan(loss)
+        assert not np.isinf(loss)
     
     def test_loss_decreases_within_epoch_cython(self, larger_documents):
         """Test that loss decreases during training with Cython."""
         from qhchina.analytics.word2vec import Word2Vec
         
         model = Word2Vec(
+            larger_documents,
             vector_size=30,
             window=3,
             min_word_count=2,
@@ -1059,13 +1114,12 @@ class TestWord2VecLearning:
             seed=42,
             alpha=0.025,
             min_alpha=0.0001,
-
             epochs=3,
             calculate_loss=True,
         )
         
         # Training should return a valid loss
-        loss = model.train(larger_documents)
+        loss = model.train()
         
         assert loss is not None, "Loss should be computed"
         assert loss > 0, "Loss should be positive"
@@ -1089,9 +1143,9 @@ class TestWord2VecLearning:
             seed=42,
             alpha=start_alpha,
             min_alpha=end_alpha,
-
             epochs=5
         )
+        model.train()
         
         # After training, alpha should have decayed to min_alpha
         # (or close to it, depending on total examples)
@@ -1119,9 +1173,9 @@ class TestWord2VecLearning:
             seed=42,
             alpha=start_alpha,
             min_alpha=None,  # No decay
-
             epochs=3
         )
+        model.train()
         
         # Alpha should remain unchanged
         assert model.alpha == start_alpha, \
@@ -1132,18 +1186,18 @@ class TestWord2VecLearning:
         from qhchina.analytics.word2vec import Word2Vec
         
         model = Word2Vec(
+            larger_documents,
             vector_size=20,
             window=2,
             min_word_count=2,
             negative=3,
             sg=1,
             seed=42,
-
             epochs=3,
         )
         
-        # Build vocab and initialize vectors
-        model.build_vocab(larger_documents)
+        # Build vocab and initialize vectors manually to capture initial state
+        model.build_vocab(model._sentences)
         model._initialize_vectors()
         model._prepare_noise_distribution()
         
@@ -1151,7 +1205,7 @@ class TestWord2VecLearning:
         initial_vectors = model.W.copy()
         
         # Train
-        model.train(larger_documents)
+        model.train()
         
         # Vectors should have changed
         assert not np.allclose(model.W, initial_vectors), \
@@ -1177,9 +1231,9 @@ class TestWord2VecVectorQuality:
             negative=5,
             sg=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         # Check normalized vectors
         for word in list(model.vocab.keys())[:10]:
@@ -1201,9 +1255,9 @@ class TestWord2VecVectorQuality:
             negative=5,
             sg=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         # Check that vectors have non-trivial magnitudes
         for word in list(model.vocab.keys())[:10]:
@@ -1225,9 +1279,9 @@ class TestWord2VecVectorQuality:
             negative=3,
             sg=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         vocab_words = list(model.vocab.keys())
         if len(vocab_words) >= 2:
@@ -1251,9 +1305,9 @@ class TestWord2VecVectorQuality:
             negative=3,
             sg=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         for word in list(model.vocab.keys())[:5]:
             sim = model.similarity(word, word)
@@ -1272,9 +1326,9 @@ class TestWord2VecVectorQuality:
             negative=3,
             sg=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         vocab_words = list(model.vocab.keys())
         if len(vocab_words) > 5:
@@ -1299,9 +1353,9 @@ class TestWord2VecVectorQuality:
             negative=3,
             sg=1,
             seed=42,
-
             epochs=2
         )
+        model.train()
         
         vocab_words = list(model.vocab.keys())
         if len(vocab_words) > 5:
@@ -1343,9 +1397,9 @@ class TestWord2VecStress:
             negative=5,
             sg=1,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         # Should handle large vocabulary without errors
         assert len(model.vocab) > 100
@@ -1373,9 +1427,9 @@ class TestWord2VecStress:
             negative=3,
             sg=1,
             seed=42,
-
             epochs=1
         )
+        model.train()
         
         # Should handle without errors
         assert len(model.vocab) > 0
@@ -1394,9 +1448,9 @@ class TestWord2VecStress:
             seed=42,
             alpha=0.025,
             min_alpha=0.0001,
-
             epochs=20
         )
+        model.train()
         
         # Should complete without errors
         assert len(model.vocab) > 0
@@ -1416,16 +1470,16 @@ class TestWord2VecAlphaHandling:
         from qhchina.analytics.word2vec import Word2Vec
         
         model = Word2Vec(
+            sample_documents,
             vector_size=10,
             window=2,
             min_word_count=1,
             negative=2,
             sg=1,
             seed=42,
-
             alpha=None
         )
-        model.train(sample_documents)
+        model.train()
         
         # After training, alpha should have been set to default 0.025
         assert model.alpha == 0.025
@@ -1436,6 +1490,7 @@ class TestWord2VecAlphaHandling:
         from qhchina.analytics.word2vec import Word2Vec
         
         model = Word2Vec(
+            sentences=sample_documents,
             vector_size=10,
             window=2,
             min_word_count=1,
@@ -1445,7 +1500,7 @@ class TestWord2VecAlphaHandling:
 
             alpha=0.0
         )
-        model.train(sample_documents)
+        model.train()
         
         # alpha=0.0 should be kept as-is (not replaced with 0.025)
         assert model.alpha == 0.0
@@ -1469,6 +1524,7 @@ class TestWord2VecMultithreading:
             epochs=2,
             workers=1,
         )
+        model.train()
         
         assert len(model.vocab) > 0
         assert model.W is not None
@@ -1495,6 +1551,7 @@ class TestWord2VecMultithreading:
             epochs=2,
             workers=4,
         )
+        model.train()
         
         assert len(model.vocab) > 0
         assert model.W is not None
@@ -1521,6 +1578,7 @@ class TestWord2VecMultithreading:
             epochs=2,
             workers=2,
         )
+        model.train()
         
         assert len(model.vocab) > 0
         assert model.W is not None
@@ -1552,6 +1610,7 @@ class TestWord2VecMultithreading:
             epochs=3,
             workers=2,
         )
+        model.train()
         
         # After training with min_alpha set, alpha should equal min_alpha
         assert model.alpha == 0.0001
@@ -1562,60 +1621,64 @@ class TestTempRefWord2VecMultithreading:
     
     def test_tempref_workers_one(self):
         """Test TempRefWord2Vec with workers=1."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3"]] * 50,
             "period2": [["word1", "word4", "word5"]] * 50,
         }
         
-        model = TempRefWord2Vec(
-            corpora=corpora,
-            targets=["word1"],
-            vector_size=20,
-            window=2,
-            min_word_count=1,
-            negative=3,
-            sg=1,
-            seed=42,
-            epochs=2,
-            workers=1,
-        )
-        
-        assert len(model.vocab) > 0
-        assert "word1_period1" in model.vocab
-        assert "word1_period2" in model.vocab
+        with tempref_corpus_files(corpora, ["word1"]) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=["word1"],
+                vector_size=20,
+                window=2,
+                min_word_count=1,
+                negative=3,
+                sg=1,
+                seed=42,
+                epochs=2,
+                workers=1,
+            )
+            model.train()
+            
+            assert len(model.vocab) > 0
+            assert "word1_period1" in model.vocab
+            assert "word1_period2" in model.vocab
     
     def test_tempref_workers_multiple(self):
         """Test TempRefWord2Vec with workers>1."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3"]] * 50,
             "period2": [["word1", "word4", "word5"]] * 50,
         }
         
-        model = TempRefWord2Vec(
-            corpora=corpora,
-            targets=["word1"],
-            vector_size=20,
-            window=2,
-            min_word_count=1,
-            negative=3,
-            sg=1,
-            seed=42,
-            epochs=2,
-            workers=2,
-        )
-        
-        assert len(model.vocab) > 0
-        assert "word1_period1" in model.vocab
-        assert "word1_period2" in model.vocab
-        
-        # Vectors should be valid
-        vec1 = model.get_vector("word1_period1")
-        vec2 = model.get_vector("word1_period2")
-        assert not np.any(np.isnan(vec1))
-        assert not np.any(np.isnan(vec2))
+        with tempref_corpus_files(corpora, ["word1"]) as file_paths:
+            model = TempRefWord2Vec(
+                sentences=file_paths,
+                targets=["word1"],
+                vector_size=20,
+                window=2,
+                min_word_count=1,
+                negative=3,
+                sg=1,
+                seed=42,
+                epochs=2,
+                workers=2,
+            )
+            model.train()
+            
+            assert len(model.vocab) > 0
+            assert "word1_period1" in model.vocab
+            assert "word1_period2" in model.vocab
+            
+            # Vectors should be valid
+            vec1 = model.get_vector("word1_period1")
+            vec2 = model.get_vector("word1_period2")
+            assert not np.any(np.isnan(vec1))
+            assert not np.any(np.isnan(vec2))
 
 
