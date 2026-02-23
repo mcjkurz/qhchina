@@ -242,19 +242,7 @@ def split_into_chunks(sequence, chunk_size, overlap=0.0):
         
     return chunks
 
-def _get_requests():
-    """Lazy import of requests module."""
-    try:
-        import requests
-        return requests
-    except ImportError as e:
-        raise ImportError(
-            "requests is required for downloading from GitHub. "
-            "Install it with: pip install requests"
-        ) from e
-
-
-def download_corpus(name: str, parent_dir: str | None = None) -> Path:
+def download_corpus(name: str, parent_dir: str | None = None, show_progress: bool = True) -> None:
     """
     Download a corpus folder from the qhchina-data GitHub repository.
     
@@ -266,9 +254,8 @@ def download_corpus(name: str, parent_dir: str | None = None) -> Path:
             folder name under ``corpora/`` in the qhchina-data repository.
         parent_dir: Parent directory where the corpus folder will be created.
             If None (default), uses the current working directory.
-            
-    Returns:
-        Path to the downloaded corpus folder.
+        show_progress: If True (default), display a progress bar showing
+            cumulative kilobytes downloaded.
         
     Raises:
         ImportError: If requests is not installed.
@@ -276,16 +263,58 @@ def download_corpus(name: str, parent_dir: str | None = None) -> Path:
         requests.RequestException: If the download fails.
         
     Example:
-        >>> from qhchina import download_corpus
-        >>> 
-        >>> # Download to current directory
-        >>> path = download_corpus("张爱玲")
-        >>> # Creates ./张爱玲/张爱玲_倾城之恋.txt, ./张爱玲/张爱玲_金锁记.txt, ...
-        >>> 
-        >>> # Download to a specific parent directory
-        >>> path = download_corpus("张爱玲", parent_dir="corpora")
-        >>> # Creates ./corpora/张爱玲/...
+        Basic usage::
+        
+            from qhchina import download_corpus
+            
+            # Download to current directory
+            download_corpus("张爱玲")
+            # Creates ./张爱玲/张爱玲_倾城之恋.txt, ./张爱玲/张爱玲_金锁记.txt, ...
+            
+            # Download to a specific parent directory
+            download_corpus("张爱玲", parent_dir="corpora")
+            # Creates ./corpora/张爱玲/...
+        
+        Full workflow with segmentation and analysis::
+        
+            import os
+            from qhchina import download_corpus, load_stopwords
+            from qhchina.preprocessing import create_segmenter
+            from qhchina.analytics import compare_corpora
+            
+            # Download two corpora
+            download_corpus("莫言", parent_dir="corpora")
+            download_corpus("张爱玲", parent_dir="corpora")
+            
+            # Set up segmenter with stopwords
+            stopwords = load_stopwords("zh")
+            segmenter = create_segmenter(
+                backend="jieba", 
+                strategy="sentence",
+                filters={"stopwords": stopwords}
+            )
+            
+            # Load and segment texts
+            moyan_sentences = []
+            for filename in os.listdir("corpora/莫言"):
+                if filename.endswith(".txt"):
+                    with open(f"corpora/莫言/{filename}", encoding="utf-8") as f:
+                        moyan_sentences.extend(segmenter.segment(f.read()))
+            
+            zal_sentences = []
+            for filename in os.listdir("corpora/张爱玲"):
+                if filename.endswith(".txt"):
+                    with open(f"corpora/张爱玲/{filename}", encoding="utf-8") as f:
+                        zal_sentences.extend(segmenter.segment(f.read()))
+            
+            # Compare the two corpora using Fisher's exact test
+            results = compare_corpora(
+                moyan_sentences, zal_sentences,
+                filters={"min_count": 5, "max_p": 0.05}
+            )
     """
+    import time
+    from tqdm.auto import tqdm
     from .github import query_github_api, download_file as _download_file
     
     # Determine output directory
@@ -319,25 +348,45 @@ def download_corpus(name: str, parent_dir: str | None = None) -> Path:
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    pbar = None
+    start_time = None
+    if show_progress:
+        start_time = time.time()
+        pbar = tqdm(
+            total=len(txt_files),
+            desc=f"Downloading {name}",
+            unit="file",
+            bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}{postfix}]",
+        )
+        pbar.set_postfix_str("0.0 KB/s")
+
     # Download each file
     total_size = 0
     for file_info in txt_files:
-        dest_path = output_dir / file_info['name']
-        _download_file(file_info['download_url'], dest_path)
-        total_size += dest_path.stat().st_size
-    
-    # Print summary
-    size_kb = total_size / 1024
-    if size_kb > 1024:
-        size_str = f"{size_kb / 1024:.1f} MB"
-    else:
-        size_str = f"{size_kb:.1f} KB"
-    print(f"Downloaded {len(txt_files)} file(s) ({size_str}) to {output_dir}/")
-    
-    return output_dir
+        dest_path = output_dir / file_info["name"]
+        _download_file(file_info["download_url"], dest_path)
+
+        file_size = dest_path.stat().st_size
+        total_size += file_size
+
+        if pbar is not None:
+            elapsed = time.time() - start_time
+            if elapsed > 0:
+                bps = total_size / elapsed  # bytes/s
+                if bps >= 1024 * 1024:
+                    speed_str = f"{bps / (1024 * 1024):.1f} MB/s"
+                else:
+                    speed_str = f"{bps / 1024:.1f} KB/s"
+
+                pbar.set_postfix_str(speed_str, refresh=False)
+
+            pbar.update(1)
+
+    if pbar is not None:
+        pbar.close()
 
 
-def download_file(path: str, output_dir: str | None = None) -> Path:
+def download_file(path: str, output_dir: str | None = None) -> None:
     """
     Download a single file from the qhchina-data GitHub repository.
     
@@ -346,9 +395,6 @@ def download_file(path: str, output_dir: str | None = None) -> Path:
             "fonts/NotoSerifSC-Regular.otf"). The path is relative to the repository root.
         output_dir: Directory where the file will be saved. If None (default),
             uses the current working directory.
-            
-    Returns:
-        Path to the downloaded file.
         
     Raises:
         ImportError: If requests is not installed.
@@ -359,16 +405,14 @@ def download_file(path: str, output_dir: str | None = None) -> Path:
         >>> from qhchina import download_file
         >>> 
         >>> # Download to current directory
-        >>> path = download_file("corpora/莫言/莫言_丰乳肥臀.txt")
+        >>> download_file("corpora/莫言/莫言_丰乳肥臀.txt")
         >>> # Creates ./莫言_丰乳肥臀.txt
         >>> 
         >>> # Download to a specific directory
-        >>> path = download_file("corpora/莫言/莫言_丰乳肥臀.txt", output_dir="texts")
+        >>> download_file("corpora/莫言/莫言_丰乳肥臀.txt", output_dir="texts")
         >>> # Creates ./texts/莫言_丰乳肥臀.txt
     """
-    from .github import download_file as _download_file, GITHUB_API_BASE
-    
-    requests = _get_requests()
+    from .github import download_file as _download_file, query_github_api
     
     # Normalize path (remove leading slash if present)
     path = path.lstrip('/')
@@ -381,12 +425,8 @@ def download_file(path: str, output_dir: str | None = None) -> Path:
     else:
         parent_path, filename = '', path_parts[0]
     
-    api_url = f"{GITHUB_API_BASE}/{parent_path}" if parent_path else GITHUB_API_BASE
-    
     try:
-        response = requests.get(api_url, timeout=30)
-        response.raise_for_status()
-        contents = response.json()
+        contents = query_github_api(parent_path) if parent_path else query_github_api('')
     except Exception as e:
         raise ValueError(f"Could not access path '{parent_path}': {e}") from e
     
@@ -410,17 +450,6 @@ def download_file(path: str, output_dir: str | None = None) -> Path:
     
     # Download the file
     _download_file(file_info['download_url'], dest_path)
-    
-    # Print summary
-    size_bytes = dest_path.stat().st_size
-    size_kb = size_bytes / 1024
-    if size_kb > 1024:
-        size_str = f"{size_kb / 1024:.1f} MB"
-    else:
-        size_str = f"{size_kb:.1f} KB"
-    print(f"Downloaded {filename} ({size_str})")
-    
-    return dest_path
 
 
 def list_remote_corpora() -> list[str]:

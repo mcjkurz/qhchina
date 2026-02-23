@@ -16,7 +16,7 @@ from .fonts import (
     clear_cache,
     get_cache_dir,
 )
-from .texts import load_text, load_texts, load_stopwords, split_into_chunks, get_stopword_languages, detect_encoding
+from .texts import load_text, load_texts, load_stopwords, split_into_chunks, get_stopword_languages, detect_encoding, download_corpus, download_file, list_remote_corpora
 
 __all__ = [
     # Font management
@@ -36,4 +36,7 @@ __all__ = [
     'split_into_chunks',
     'get_stopword_languages',
     'detect_encoding',
+    'download_corpus',
+    'download_file',
+    'list_remote_corpora',
 ]
