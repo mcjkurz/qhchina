@@ -8,7 +8,7 @@ import pandas as pd
 from scipy import sparse
 from scipy.stats import fisher_exact as scipy_fisher_exact
 
-from ..utils import apply_p_value_correction, VALID_CORRECTIONS
+from ..utils import apply_p_value_correction, VALID_CORRECTIONS, iter_batches, build_vocab_from_iter
 
 logger = logging.getLogger("qhchina.analytics.collocations")
 
@@ -24,6 +24,7 @@ __all__ = [
 try:
     from .cython_ext.collocations import (
         calculate_cooc_matrix_window,
+        calculate_cooc_matrix_document,
         calculate_window_counts_batch,
         calculate_sentence_counts_batch,
     )
@@ -31,6 +32,7 @@ try:
 except ImportError:
     CYTHON_AVAILABLE = False
     calculate_cooc_matrix_window = None
+    calculate_cooc_matrix_document = None
     calculate_window_counts_batch = None
     calculate_sentence_counts_batch = None
     logger.warning("Cython extensions not available; using slower Python fallback.")
@@ -264,109 +266,6 @@ class FilterOptions(TypedDict, total=False):
     max_obs_global: int
 
 
-# =============================================================================
-# Streaming / Batching Helpers
-# =============================================================================
-
-def _iter_batches(
-    sentences: Iterable[list[str]],
-    batch_words: int = 100_000,
-    max_sentence_length: int | None = 256,
-):
-    """
-    Yield batches of sentences grouped by total word count.
-    
-    Streams through the iterable without materializing the full corpus.
-    Truncates sentences exceeding *max_sentence_length* and skips empty ones.
-    
-    Args:
-        sentences: Restartable iterable of tokenized sentences.
-        batch_words: Target token count per batch.
-        max_sentence_length: Truncate longer sentences. None disables.
-    
-    Yields:
-        list[list[str]]: Batches where total tokens <= *batch_words*.
-    """
-    batch = []
-    word_count = 0
-    validated = False
-    
-    for sent in sentences:
-        if not validated and sent:
-            if not isinstance(sent, list):
-                raise ValueError(
-                    "sentences must be an iterable of lists (tokenized sentences), "
-                    f"but got an iterable of {type(sent).__name__}"
-                )
-            validated = True
-        if not sent:
-            continue
-        if max_sentence_length is not None:
-            sent = sent[:max_sentence_length]
-        sent_len = len(sent)
-        
-        if word_count + sent_len <= batch_words:
-            batch.append(sent)
-            word_count += sent_len
-        else:
-            if batch:
-                yield batch
-            batch = [sent]
-            word_count = sent_len
-    
-    if batch:
-        yield batch
-
-
-def _build_vocab_from_iter(sentences: Iterable[list[str]], max_sentence_length: int | None = 256):
-    """
-    Build vocabulary by streaming through sentences (pass 1 of 2).
-    
-    Args:
-        sentences: Restartable iterable of tokenized sentences.
-        max_sentence_length: Truncate longer sentences. None disables.
-    
-    Returns:
-        tuple: (word2idx, idx2word) dictionaries.
-    
-    Raises:
-        ValueError: If the iterable is empty or yields only empty sentences.
-    """
-    word2idx = {}
-    idx2word = {}
-    idx = 0
-    total_seen = 0
-    non_empty_count = 0
-    validated = False
-    
-    for sent in sentences:
-        total_seen += 1
-        if not validated and sent:
-            if not isinstance(sent, list):
-                raise ValueError(
-                    "sentences must be an iterable of lists (tokenized sentences), "
-                    f"but got an iterable of {type(sent).__name__}"
-                )
-            validated = True
-        if not sent:
-            continue
-        if max_sentence_length is not None:
-            sent = sent[:max_sentence_length]
-        non_empty_count += 1
-        for word in sent:
-            if word not in word2idx:
-                word2idx[word] = idx
-                idx2word[idx] = word
-                idx += 1
-    
-    if total_seen == 0:
-        raise ValueError("sentences cannot be empty")
-    if non_empty_count == 0:
-        raise ValueError("All sentences are empty")
-    
-    return word2idx, idx2word
-
-
 def _compute_collocation_result(target, candidate, a, b, c, d, alternative='greater'):
     """
     Compute collocation statistics for a single target-collocate pair.
@@ -483,7 +382,9 @@ def _calculate_collocations_window_cython(
         left_horizon, right_horizon = horizon[1], horizon[0]
     
     # Pass 1: build vocabulary
-    word2idx, idx2word = _build_vocab_from_iter(sentences, max_sentence_length)
+    word_counts, _, _ = build_vocab_from_iter(sentences, max_sentence_length)
+    word2idx = {w: i for i, w in enumerate(word_counts)}
+    idx2word = {i: w for w, i in word2idx.items()}
     vocab_size = len(word2idx)
     
     # Resolve target indices
@@ -500,7 +401,7 @@ def _calculate_collocations_window_cython(
     total_tokens = 0
     
     # Pass 2: batch counting
-    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+    for batch in iter_batches(sentences, batch_words, max_sentence_length):
         batch_T, batch_cand, batch_tok, batch_total = calculate_window_counts_batch(
             batch, word2idx, target_indices, left_horizon, right_horizon, vocab_size
         )
@@ -536,11 +437,11 @@ def _calculate_collocations_window_python(
     """
     Pure Python window-based collocation counting (streaming, single-pass).
     
-    Streams batches via ``_iter_batches`` and accumulates into sparse
-    Python dicts. Fallback when Cython is not available.
+    Streams batches via :func:`~qhchina.utils.iter_batches` and accumulates
+    into sparse Python dicts. Fallback when Cython is not available.
     
     Args:
-        sentences: Restartable iterable of tokenized sentences.
+        sentences: Iterable of tokenized sentences.
         target_words: Target words to find collocates for.
         horizon: int (symmetric) or tuple (left, right) window size.
         alternative: Alternative hypothesis for Fisher's exact test.
@@ -561,7 +462,7 @@ def _calculate_collocations_window_python(
     candidate_in_context = {target: Counter() for target in target_words}
     token_counter = Counter()
 
-    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+    for batch in iter_batches(sentences, batch_words, max_sentence_length):
         for sentence in batch:
             for i, token in enumerate(sentence):
                 total_tokens += 1
@@ -605,7 +506,9 @@ def _calculate_collocations_sentence_cython(
         list[dict]: Collocation statistics per target-collocate pair.
     """
     # Pass 1: build vocabulary
-    word2idx, idx2word = _build_vocab_from_iter(sentences, max_sentence_length)
+    word_counts, _, _ = build_vocab_from_iter(sentences, max_sentence_length)
+    word2idx = {w: i for i, w in enumerate(word_counts)}
+    idx2word = {i: w for w, i in word2idx.items()}
     vocab_size = len(word2idx)
     
     # Resolve target indices
@@ -621,7 +524,7 @@ def _calculate_collocations_sentence_cython(
     total_sentences = 0
     
     # Pass 2: batch counting
-    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+    for batch in iter_batches(sentences, batch_words, max_sentence_length):
         batch_cand, batch_swt, batch_n = calculate_sentence_counts_batch(
             batch, word2idx, target_indices, vocab_size
         )
@@ -656,11 +559,11 @@ def _calculate_collocations_sentence_python(
     """
     Pure Python sentence-based collocation counting (streaming, single-pass).
     
-    Streams batches via ``_iter_batches`` and accumulates into sparse
-    Python dicts. Fallback when Cython is not available.
+    Streams batches via :func:`~qhchina.utils.iter_batches` and accumulates
+    into sparse Python dicts. Fallback when Cython is not available.
     
     Args:
-        sentences: Restartable iterable of tokenized sentences.
+        sentences: Iterable of tokenized sentences.
         target_words: Target words to find collocates for.
         alternative: Alternative hypothesis for Fisher's exact test.
         batch_words: Target token count per batch.
@@ -673,7 +576,7 @@ def _calculate_collocations_sentence_python(
     candidate_in_sentences = {target: Counter() for target in target_words}
     sentences_with_token = defaultdict(int)
 
-    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+    for batch in iter_batches(sentences, batch_words, max_sentence_length):
         for sentence in batch:
             total_sentences += 1
             unique_tokens = set(sentence)
@@ -705,8 +608,8 @@ def find_collocates(
     Find collocates for target words in a corpus of sentences.
     
     Processes data in streaming batches to keep memory low even for very large
-    corpora. Requires a restartable iterable (iterated twice: once for
-    vocabulary building, once for counting). Lists, file-backed iterators, and
+    corpora. The data is iterated twice (vocabulary building, then counting), 
+    so a restartable iterable is required. Lists, file-backed iterators, and 
     restartable generator classes all work; single-use generators do not.
     
     Args:
@@ -1018,7 +921,13 @@ def cooc_matrix(
     binary: bool = False,
 ) -> CoocMatrix:
     """
-    Calculate a co-occurrence matrix from a list of documents.
+    Calculate a co-occurrence matrix from a corpus of documents.
+    
+    Processes data in streaming batches to keep memory low even for very large
+    corpora. When ``vocab`` is not provided, requires a restartable iterable
+    (iterated twice: once for vocabulary building, once for counting). Lists,
+    file-backed iterators, and restartable generator classes all work;
+    single-use generators require a pre-built ``vocab``.
     
     Returns a CoocMatrix object with flexible indexing:
     
@@ -1028,8 +937,9 @@ def cooc_matrix(
     - ``matrix.to_dense()`` - numpy array
     
     Args:
-        documents: Iterable of tokenized documents, where each document is a list of 
-            tokens. Can be a list or any other iterable.
+        documents (Iterable[list[str]]): Iterable of tokenized documents, where
+            each document is a list of tokens. Must be restartable when ``vocab``
+            is not provided (iterated twice).
         horizon: Context window size relative to each word. Only applicable for method='window'.
             If not provided, defaults to 5 for window method. Must not be provided for 
             method='document'.
@@ -1047,7 +957,8 @@ def cooc_matrix(
         vocab: Predefined vocabulary to use. If provided, this vocabulary is used exactly
             as given without any filtering (min_word_count, min_doc_count, and max_vocab_size
             are ignored). Words in vocab that don't appear in documents will still be
-            included in the matrix (with zero counts).
+            included in the matrix (with zero counts). When provided, only a single pass
+            over documents is needed (single-use generators are accepted).
         binary: If True, count co-occurrences as binary (0/1). Default False.
     
     Returns:
@@ -1064,18 +975,9 @@ def cooc_matrix(
         >>> # With predefined vocabulary (no filtering applied)
         >>> matrix = cooc_matrix(documents, vocab=["fox", "dog", "cat"])
     """
-    # Convert iterable to list if needed (supports generators, etc.)
-    if not isinstance(documents, list):
-        documents = list(documents)
-    if not documents:
-        raise ValueError("documents cannot be empty")
-    # Validate that documents are lists of tokens (not just strings)
-    if documents and not isinstance(documents[0], list):
-        raise ValueError("documents must be a list of lists (tokenized documents)")
     if method not in ('window', 'document'):
         raise ValueError("method must be 'window' or 'document'")
     
-    # Validate horizon parameter based on method
     if method == 'document':
         if horizon is not None:
             raise ValueError(
@@ -1085,19 +987,13 @@ def cooc_matrix(
             )
     elif method == 'window':
         if horizon is None:
-            horizon = 5  # Default value for window method
+            horizon = 5
     
-    # Build vocabulary
+    # Pass 1: Build vocabulary (streams through documents once)
     if vocab is not None:
-        # User-provided vocabulary: use exactly as given, no filtering
         vocab_list = sorted(set(vocab))
     else:
-        # Auto-generate vocabulary with filtering
-        word_counts = Counter()
-        document_counts = Counter()
-        for document in documents:
-            word_counts.update(document)
-            document_counts.update(set(document))
+        word_counts, document_counts, _ = build_vocab_from_iter(documents, max_length=None)
         
         filtered_vocab = {word for word, count in word_counts.items() 
                          if count >= min_word_count and document_counts[word] >= min_doc_count}
@@ -1111,9 +1007,8 @@ def cooc_matrix(
     
     word_to_index = {word: i for i, word in enumerate(vocab_list)}
     
-    # Calculate co-occurrences
+    # Pass 2: Count co-occurrences (streams through documents again)
     if method == 'window':
-        # Normalize horizon for window method
         if isinstance(horizon, int):
             left_horizon, right_horizon = horizon, horizon
         else:
@@ -1128,25 +1023,27 @@ def cooc_matrix(
 
 
 def _cooc_window(
-    documents: list[list[str]],
+    documents: Iterable[list[str]],
     word_to_index: dict[str, int],
     left_horizon: int,
     right_horizon: int,
-    binary: bool
+    binary: bool,
+    batch_words: int = 100_000,
 ) -> sparse.csr_matrix:
     """
-    Calculate window-based co-occurrences.
+    Calculate window-based co-occurrences by streaming through documents.
     
     Uses Cython acceleration when available, otherwise falls back to pure Python.
     Words not in word_to_index (OOV) are skipped for counting but preserve positional
     distances between vocabulary words.
     
     Args:
-        documents: List of tokenized documents.
+        documents: Iterable of tokenized documents.
         word_to_index: Mapping from vocabulary words to matrix indices.
         left_horizon: Number of positions to look left.
         right_horizon: Number of positions to look right.
         binary: If True, count presence (0/1) rather than frequency.
+        batch_words: Target token count per batch for Cython path.
     
     Returns:
         Sparse CSR matrix of co-occurrence counts.
@@ -1154,31 +1051,42 @@ def _cooc_window(
     vocab_size = len(word_to_index)
     
     if CYTHON_AVAILABLE and calculate_cooc_matrix_window is not None:
-        # Fast Cython path
-        row_indices, col_indices, data_values = calculate_cooc_matrix_window(
-            documents, word_to_index, left_horizon, right_horizon, binary
-        )
+        all_rows = []
+        all_cols = []
+        all_data = []
         
-        if len(row_indices) == 0:
+        for batch in iter_batches(documents, batch_words, max_length=None):
+            row_indices, col_indices, data_values = calculate_cooc_matrix_window(
+                batch, word_to_index, left_horizon, right_horizon, binary
+            )
+            if len(row_indices) > 0:
+                all_rows.append(row_indices)
+                all_cols.append(col_indices)
+                all_data.append(data_values)
+        
+        if not all_rows:
             return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
         
-        # tocsr() sums duplicate entries automatically
+        row_arr = np.concatenate(all_rows)
+        col_arr = np.concatenate(all_cols)
+        data_arr = np.concatenate(all_data)
+        
         cooc_sparse = sparse.coo_matrix(
-            (data_values, (row_indices, col_indices)), shape=(vocab_size, vocab_size), dtype=np.int64
+            (data_arr, (row_arr, col_arr)), shape=(vocab_size, vocab_size), dtype=np.int64
         ).tocsr()
         
-        # For binary mode, reset summed duplicates back to 1
         if binary:
             cooc_sparse.data = np.ones_like(cooc_sparse.data)
         
         return cooc_sparse
     
     else:
-        # Python fallback - preserves distances by keeping OOV positions
         logger.debug("Using pure Python fallback for cooc_matrix (Cython not available)")
-        cooc_dict = defaultdict(int)
+        cooc_dict: dict[tuple[int, int], int] = defaultdict(int)
         
         for document in documents:
+            if not document:
+                continue
             for i, word1 in enumerate(document):
                 if word1 not in word_to_index:
                     continue
@@ -1206,61 +1114,98 @@ def _cooc_window(
 
 
 def _cooc_document(
-    documents: list[list[str]],
+    documents: Iterable[list[str]],
     word_to_index: dict[str, int],
-    binary: bool
+    binary: bool,
+    batch_words: int = 100_000,
 ) -> sparse.csr_matrix:
     """
-    Calculate document-based (bag-of-words) co-occurrences using matrix multiplication.
+    Calculate document-based (bag-of-words) co-occurrences by streaming.
     
     Each document is treated as a bag of words. Two words co-occur if they appear
-    in the same document, regardless of their positions. Uses efficient sparse
-    matrix multiplication: cooc = X @ X.T where X is the term-document matrix.
+    in the same document, regardless of their positions. For binary=False, each
+    pair contributes count_i * count_j (matching X @ X.T semantics). Documents
+    are processed in batches; document boundaries are never crossed.
     
     Args:
-        documents: List of tokenized documents.
+        documents: Iterable of tokenized documents.
         word_to_index: Mapping from vocabulary words to matrix indices.
         binary: If True, count presence (0/1) rather than frequency.
+        batch_words: Target token count per batch for Cython path.
     
     Returns:
         Sparse CSR matrix of co-occurrence counts.
     """
     vocab_size = len(word_to_index)
-    n_docs = len(documents)
     
-    # Build term-document matrix (vocab_size x n_docs)
-    row_indices = []
-    col_indices = []
-    data = []
-    
-    for doc_idx, document in enumerate(documents):
-        doc_words = [w for w in document if w in word_to_index]
-        doc_word_counts = Counter(doc_words)
+    if CYTHON_AVAILABLE and calculate_cooc_matrix_document is not None:
+        all_rows = []
+        all_cols = []
+        all_data = []
         
-        for word, count in doc_word_counts.items():
-            word_idx = word_to_index[word]
-            row_indices.append(word_idx)
-            col_indices.append(doc_idx)
-            data.append(1 if binary else count)
+        for batch in iter_batches(documents, batch_words, max_length=None):
+            row_indices, col_indices, data_values = calculate_cooc_matrix_document(
+                batch, word_to_index, binary
+            )
+            if len(row_indices) > 0:
+                all_rows.append(row_indices)
+                all_cols.append(col_indices)
+                all_data.append(data_values)
+        
+        if not all_rows:
+            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
+        
+        row_arr = np.concatenate(all_rows)
+        col_arr = np.concatenate(all_cols)
+        data_arr = np.concatenate(all_data)
+        
+        cooc_sparse = sparse.coo_matrix(
+            (data_arr, (row_arr, col_arr)), shape=(vocab_size, vocab_size), dtype=np.int64
+        ).tocsr()
+        
+        if binary:
+            cooc_sparse.data = np.ones_like(cooc_sparse.data)
+        
+        cooc_sparse.setdiag(0)
+        cooc_sparse.eliminate_zeros()
+        
+        return cooc_sparse
     
-    if not row_indices:
-        return sparse.csr_matrix((vocab_size, vocab_size), dtype=np.int64)
-    
-    # Create sparse term-document matrix
-    X = sparse.csr_matrix(
-        (data, (row_indices, col_indices)),
-        shape=(vocab_size, n_docs),
-        dtype=np.int64
-    )
-    
-    # Co-occurrence = X @ X.T
-    cooc = X @ X.T
-    
-    # Zero out diagonal (no self-co-occurrence)
-    cooc.setdiag(0)
-    cooc.eliminate_zeros()
-    
-    return cooc
+    else:
+        logger.debug("Using pure Python fallback for cooc_matrix document method (Cython not available)")
+        cooc_dict: dict[tuple[int, int], int] = defaultdict(int)
+        
+        for document in documents:
+            if not document:
+                continue
+            doc_word_counts: dict[int, int] = {}
+            for word in document:
+                if word in word_to_index:
+                    idx = word_to_index[word]
+                    doc_word_counts[idx] = doc_word_counts.get(idx, 0) + 1
+            
+            unique_indices = list(doc_word_counts.keys())
+            n_unique = len(unique_indices)
+            
+            for a in range(n_unique):
+                idx_a = unique_indices[a]
+                for b in range(a + 1, n_unique):
+                    idx_b = unique_indices[b]
+                    if binary:
+                        cooc_dict[(idx_a, idx_b)] = 1
+                        cooc_dict[(idx_b, idx_a)] = 1
+                    else:
+                        weight = doc_word_counts[idx_a] * doc_word_counts[idx_b]
+                        cooc_dict[(idx_a, idx_b)] += weight
+                        cooc_dict[(idx_b, idx_a)] += weight
+        
+        if not cooc_dict:
+            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
+        
+        rows, cols, data = zip(*((i, j, c) for (i, j), c in cooc_dict.items()))
+        return sparse.coo_matrix(
+            (data, (rows, cols)), shape=(vocab_size, vocab_size), dtype=np.int64
+        ).tocsr()
 
 def plot_collocates(
     collocates: list[dict] | pd.DataFrame,

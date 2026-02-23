@@ -16,6 +16,7 @@ import time
 from .vectors import cosine_similarity
 from .word2vec_utils import LineSentenceFile, word2vec_c
 from ..config import get_rng, resolve_seed
+from ..utils import iter_batches
 
 logger = logging.getLogger("qhchina.analytics.word2vec")
 
@@ -506,43 +507,6 @@ class Word2Vec:
         
         return sample_ints
     
-    def _iter_batches(self, sentences: Iterable[list[str]], batch_words: int = 10240):
-        """
-        Yield batches of sentences, batched by total word count (like Gensim).
-        
-        This allows streaming through large corpora without loading everything
-        into memory at once. Batching by word count (not sentence count) ensures
-        consistent batch sizes for training regardless of sentence length.
-        
-        Args:
-            sentences: Iterable of tokenized sentences.
-            batch_words: Maximum number of words per batch (default 10240).
-        
-        Yields:
-            List of sentences where total word count <= batch_words.
-        """
-        batch = []
-        word_count = 0
-        
-        for sent in sentences:
-            sent_len = len(sent)
-            
-            # Can we fit this sentence in the current batch?
-            if word_count + sent_len <= batch_words:
-                batch.append(sent)
-                word_count += sent_len
-            else:
-                # Yield current batch if non-empty
-                if batch:
-                    yield batch
-                # Start new batch with this sentence
-                batch = [sent]
-                word_count = sent_len
-        
-        # Yield any remaining sentences
-        if batch:
-            yield batch
-    
     def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Allocate private work buffers for a worker thread.
@@ -673,7 +637,7 @@ class Word2Vec:
         words_produced = 0
         base_words = epoch * self.corpus_word_count
         
-        for batch in self._iter_batches(sentences, batch_words=self.batch_size):
+        for batch in iter_batches(sentences, batch_words=self.batch_size, max_length=None):
             if decay_alpha and total_words_all_epochs > 0:
                 global_words = base_words + words_produced
                 progress = min(global_words / total_words_all_epochs, 1.0)

@@ -18,14 +18,14 @@ class TestFindCollocatesValidation:
         """Test that empty sentences raises ValueError."""
         from qhchina.analytics.collocations import find_collocates
         
-        with pytest.raises(ValueError, match="sentences cannot be empty"):
+        with pytest.raises(ValueError, match="input cannot be empty"):
             find_collocates([], target_words=["我"])
     
     def test_all_empty_sentences_raises_error(self):
         """Test that all empty sentences raises ValueError."""
         from qhchina.analytics.collocations import find_collocates
         
-        with pytest.raises(ValueError, match="All sentences are empty"):
+        with pytest.raises(ValueError, match="all input texts are empty"):
             find_collocates([[], [], []], target_words=["我"])
     
     def test_invalid_sentences_type_raises_error(self):
@@ -1016,14 +1016,14 @@ class TestCoocMatrixValidation:
         """Test that empty documents raises ValueError."""
         from qhchina.analytics.collocations import cooc_matrix
         
-        with pytest.raises(ValueError, match="documents cannot be empty"):
+        with pytest.raises(ValueError, match="input cannot be empty"):
             cooc_matrix([])
     
     def test_invalid_documents_type_raises_error(self):
         """Test that non-list documents raises ValueError."""
         from qhchina.analytics.collocations import cooc_matrix
         
-        with pytest.raises(ValueError, match="must be a list of lists"):
+        with pytest.raises(ValueError, match="must be an iterable of lists"):
             cooc_matrix(["not", "tokenized"])
     
     def test_invalid_method_raises_error(self, sample_documents):

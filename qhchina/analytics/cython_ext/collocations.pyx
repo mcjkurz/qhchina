@@ -560,3 +560,149 @@ cdef _calculate_cooc_window_counts(
     data_arr = np.ones(n_pairs, dtype=np.int64)
     
     return row_arr, col_arr, data_arr
+
+
+def calculate_cooc_matrix_document(list documents, dict word_to_index,
+                                    bint binary=False):
+    """
+    Cython-accelerated document-based co-occurrence matrix calculation.
+    
+    Each document is treated as a bag of words. Two vocabulary words co-occur
+    if they appear in the same document. For binary=False, pair weights are
+    count_i * count_j (matching the semantics of X @ X.T on a term-document
+    matrix). For binary=True, each pair contributes 1 regardless of frequency.
+    
+    Processes documents independently within the batch (never crosses document
+    boundaries), so batching from Python is safe.
+    
+    Args:
+        documents: List of tokenized documents (list of lists of strings)
+        word_to_index: Dictionary mapping vocabulary words to indices
+        binary: If True, count co-occurrences as binary (0/1). Default False.
+        
+    Returns:
+        tuple: (row_indices, col_indices, data_values) - COO format sparse matrix data
+            All are numpy arrays ready for scipy.sparse.coo_matrix construction.
+    """
+    cdef EncodedSentences* encoded = NULL
+    cdef int vocab_size = len(word_to_index)
+    
+    if vocab_size == 0:
+        return np.array([], dtype=np.int32), np.array([], dtype=np.int32), np.array([], dtype=np.int64)
+    
+    encoded = encode_sentences_to_c_buffer(documents, word_to_index, keep_oov=False)
+    
+    try:
+        return _calculate_cooc_document_counts(encoded, vocab_size, binary)
+    finally:
+        free_encoded_sentences(encoded)
+
+
+cdef _calculate_cooc_document_counts(
+    EncodedSentences* encoded,
+    int vocab_size,
+    bint binary
+):
+    """
+    Core co-occurrence counting logic for document method.
+    
+    For each document, deduplicates tokens and collects per-document frequencies.
+    Then emits all unique pairs (i, j) where i < j as symmetric COO entries.
+    
+    Uses a dense frequency array (vocab_size) that is reset per document via an
+    epoch-based approach for O(k) reset cost where k = unique words in document.
+    """
+    cdef int n_docs = encoded.n_sentences
+    cdef int s, i, j, token_idx, n_unique
+    cdef LONG_t doc_start, doc_end, doc_len
+    cdef LONG_t weight
+    cdef INT_t idx_a, idx_b
+    
+    cdef vector[INT_t] row_vec
+    cdef vector[INT_t] col_vec
+    cdef vector[LONG_t] data_vec
+    
+    # Per-document frequency tracking: freq[token_idx] = count in current doc
+    # Reset via unique_tokens list (only touch slots that were written)
+    cdef LONG_t* freq = <LONG_t*>malloc(vocab_size * sizeof(LONG_t))
+    if freq == NULL:
+        raise MemoryError("Failed to allocate frequency array")
+    memset(freq, 0, vocab_size * sizeof(LONG_t))
+    
+    # Buffer to collect unique token indices per document
+    cdef vector[INT_t] unique_tokens
+    unique_tokens.reserve(encoded.max_sent_len if encoded.max_sent_len < vocab_size else vocab_size)
+    
+    # Rough estimate for output size
+    cdef LONG_t estimated_pairs = encoded.total_tokens * 10
+    row_vec.reserve(estimated_pairs)
+    col_vec.reserve(estimated_pairs)
+    if not binary:
+        data_vec.reserve(estimated_pairs)
+    
+    try:
+        with nogil:
+            for s in range(n_docs):
+                doc_start = encoded.offsets[s]
+                doc_end = encoded.offsets[s + 1]
+                doc_len = doc_end - doc_start
+                
+                if doc_len == 0:
+                    continue
+                
+                unique_tokens.clear()
+                
+                # Pass 1: build per-document frequencies and collect unique indices
+                for i in range(<int>doc_len):
+                    token_idx = encoded.tokens[doc_start + i]
+                    if freq[token_idx] == 0:
+                        unique_tokens.push_back(token_idx)
+                    freq[token_idx] += 1
+                
+                n_unique = <int>unique_tokens.size()
+                
+                # Pass 2: emit pairs for all unique combinations (i < j)
+                for i in range(n_unique):
+                    idx_a = unique_tokens[i]
+                    for j in range(i + 1, n_unique):
+                        idx_b = unique_tokens[j]
+                        
+                        if binary:
+                            row_vec.push_back(idx_a)
+                            col_vec.push_back(idx_b)
+                            row_vec.push_back(idx_b)
+                            col_vec.push_back(idx_a)
+                        else:
+                            weight = freq[idx_a] * freq[idx_b]
+                            row_vec.push_back(idx_a)
+                            col_vec.push_back(idx_b)
+                            data_vec.push_back(weight)
+                            row_vec.push_back(idx_b)
+                            col_vec.push_back(idx_a)
+                            data_vec.push_back(weight)
+                
+                # Reset freq for next document (O(k) cost, not O(V))
+                for i in range(n_unique):
+                    freq[unique_tokens[i]] = 0
+    finally:
+        free(freq)
+    
+    # Convert C++ vectors to NumPy arrays
+    cdef LONG_t n_pairs = row_vec.size()
+    cdef np.ndarray[INT_t, ndim=1] row_arr = np.empty(n_pairs, dtype=np.int32)
+    cdef np.ndarray[INT_t, ndim=1] col_arr = np.empty(n_pairs, dtype=np.int32)
+    cdef np.ndarray[LONG_t, ndim=1] data_arr
+    
+    cdef LONG_t idx
+    for idx in range(n_pairs):
+        row_arr[idx] = row_vec[idx]
+        col_arr[idx] = col_vec[idx]
+    
+    if binary:
+        data_arr = np.ones(n_pairs, dtype=np.int64)
+    else:
+        data_arr = np.empty(n_pairs, dtype=np.int64)
+        for idx in range(n_pairs):
+            data_arr[idx] = data_vec[idx]
+    
+    return row_arr, col_arr, data_arr
