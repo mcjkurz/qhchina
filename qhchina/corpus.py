@@ -1278,7 +1278,7 @@ class Corpus:
                 size_str = f"{size_kb / 1024:.1f} MB"
             else:
                 size_str = f"{size_kb:.1f} KB"
-            print(f"Downloaded {len(result)} file(s) ({size_str})")
+            print(f"Loaded {len(result)} file(s) ({size_str})")
         
         return result
     
@@ -1314,11 +1314,11 @@ class Corpus:
         
         Returns:
             List of dicts with cached corpus information:
-            ``[{'name': 'songshi', 'files': 3, 'size_mb': 1.5}, ...]``
+            ``[{'name': 'songshi', 'files': 3, 'size_mb': 1.5, 'path': '/path/to/cache'}, ...]``
         
         Example:
             >>> Corpus.list_cached()
-            [{'name': 'songshi', 'files': 3, 'size_mb': 1.5}]
+            [{'name': 'songshi', 'files': 3, 'size_mb': 1.5, 'path': '~/.cache/qhchina/corpora/songshi'}]
         """
         if not _CORPUS_CACHE_DIR.exists():
             return []
@@ -1332,6 +1332,7 @@ class Corpus:
                     'name': corpus_dir.name,
                     'files': len(files),
                     'size_mb': round(total_size / 1024 / 1024, 2),
+                    'path': str(corpus_dir),
                 })
         
         return result

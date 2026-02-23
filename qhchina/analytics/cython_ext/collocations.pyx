@@ -165,7 +165,7 @@ cdef EncodedCorpus* encode_corpus_to_c_buffer(list tokenized_sentences, dict wor
     
     return corpus
 
-cdef void free_encoded_corpus(EncodedCorpus* corpus) nogil:
+cdef void free_encoded_corpus(EncodedCorpus* corpus) noexcept nogil:
     """
     Free memory allocated for encoded corpus.
     

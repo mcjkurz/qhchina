@@ -57,7 +57,14 @@ from .config import set_random_seed, get_random_seed, get_rng
 from .corpus import Corpus
 
 # Import core analytics classes for convenient top-level access
-from .analytics import Word2Vec, TempRefWord2Vec, LDAGibbsSampler
+from .analytics import (
+    Word2Vec, 
+    TempRefWord2Vec, 
+    LDAGibbsSampler, 
+    compare_corpora, 
+    find_collocates, 
+    cooc_matrix,
+)
 
 # Import preprocessing entry point
 from .preprocessing import create_segmenter
@@ -67,11 +74,8 @@ from .helpers.fonts import (
     load_fonts,
     set_font,
     get_font_path,
-    current_font,
-    download_fonts,
-    list_remote_fonts,
-    list_cached_fonts,
-    clear_cache,
-    get_cache_dir,
+    current_font
 )
+
 from .helpers.texts import load_text, load_texts, load_stopwords
+
