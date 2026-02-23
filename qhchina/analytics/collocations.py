@@ -544,7 +544,9 @@ def find_collocates(
     correction: str | None = None,
     as_dataframe: bool = True,
     max_sentence_length: int | None = 256,
-    alternative: str = 'greater'
+    alternative: str = 'greater',
+    sort_by: str = 'obs_local',
+    ascending: bool = False,
 ) -> list[dict] | pd.DataFrame:
     """
     Find collocates for target words within a corpus of sentences.
@@ -603,6 +605,8 @@ def find_collocates(
             'greater' (test if observed co-occurrence is greater than expected, default),
             'less' (test if observed is less than expected), or 'two-sided' (test if 
             observed differs from expected).
+        sort_by (str): Field to sort results by. Default is 'obs_local'.
+        ascending (bool): Sort direction. Default is False (descending).
     
     Returns:
         list[dict] | pd.DataFrame: Collocation results with the following fields:
@@ -632,6 +636,18 @@ def find_collocates(
             f"Unknown correction method '{correction}'. "
             f"Valid methods are: {VALID_CORRECTIONS}"
         )
+    if not isinstance(sort_by, str):
+        raise ValueError("sort_by must be a string")
+    if not isinstance(ascending, bool):
+        raise ValueError("ascending must be a boolean")
+    valid_sort_keys = {
+        "target", "collocate", "exp_local", "obs_local",
+        "ratio_local", "obs_global", "p_value", "adjusted_p_value",
+    }
+    if sort_by not in valid_sort_keys:
+        raise ValueError(f"Invalid sort_by '{sort_by}'. Valid keys are: {valid_sort_keys}")
+    if sort_by == "adjusted_p_value" and correction is None:
+        raise ValueError("sort_by='adjusted_p_value' requires a correction method to be set")
     
     # Preprocess: filter empty sentences and trim to max length in one pass
     if max_sentence_length is not None:
@@ -837,6 +853,10 @@ def find_collocates(
 
     if as_dataframe:
         results = pd.DataFrame(results)
+        if sort_by in results.columns:
+            results = results.sort_values(sort_by, ascending=ascending, kind="mergesort")
+    else:
+        results = sorted(results, key=lambda r: r[sort_by], reverse=not ascending)
     return results
 
 def cooc_matrix(

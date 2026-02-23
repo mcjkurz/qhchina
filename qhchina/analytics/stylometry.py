@@ -1985,7 +1985,9 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
                     method: str = 'fisher', 
                     filters: dict | None = None,
                     correction: str | None = None,
-                    as_dataframe: bool = True) -> list[dict]:
+                    as_dataframe: bool = True,
+                    sort_by: str = 'rel_ratio',
+                    ascending: bool = False) -> list[dict]:
     """
     Compare two corpora to identify statistically significant differences in word usage.
     
@@ -2023,6 +2025,8 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
               recommended for corpus comparison).
             - None: No correction (default).
         as_dataframe (bool): Whether to return a pandas DataFrame.
+        sort_by (str): Field to sort results by. Default is 'rel_ratio'.
+        ascending (bool): Sort direction. Default is False (descending).
     
     Returns:
         If as_dataframe is True: pandas.DataFrame containing information about each 
@@ -2082,6 +2086,18 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             f"Unknown correction method '{correction}'. "
             f"Valid methods are: {VALID_CORRECTIONS}"
         )
+    if not isinstance(sort_by, str):
+        raise ValueError("sort_by must be a string")
+    if not isinstance(ascending, bool):
+        raise ValueError("ascending must be a boolean")
+    valid_sort_keys = {
+        "word", "abs_freqA", "abs_freqB", "rel_freqA",
+        "rel_freqB", "rel_ratio", "p_value", "adjusted_p_value",
+    }
+    if sort_by not in valid_sort_keys:
+        raise ValueError(f"Invalid sort_by '{sort_by}'. Valid keys are: {valid_sort_keys}")
+    if sort_by == "adjusted_p_value" and correction is None:
+        raise ValueError("sort_by='adjusted_p_value' requires a correction method to be set")
     
     # Validate filter keys
     valid_filter_keys = {'min_count', 'max_p', 'max_adjusted_p', 'stopwords', 'min_word_length'}
@@ -2233,4 +2249,8 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             
     if as_dataframe:
         results = pd.DataFrame(results)
+        if sort_by in results.columns:
+            results = results.sort_values(sort_by, ascending=ascending, kind="mergesort")
+    else:
+        results = sorted(results, key=lambda r: r[sort_by], reverse=not ascending)
     return results
