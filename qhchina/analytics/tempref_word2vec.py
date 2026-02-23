@@ -47,7 +47,7 @@ class TempRefWord2Vec(Word2Vec):
     
     Note:
         - Only supports Skip-gram (sg=1). CBOW is not supported.
-        - Corpus files must be UNTAGGED. Tagging is done automatically during training.
+        - Corpora must be UNTAGGED. Tagging is done automatically during training.
         - Training does NOT start automatically. Call ``train()`` explicitly after
           initialization.
     
@@ -230,13 +230,13 @@ class TempRefWord2Vec(Word2Vec):
     
     def build_vocab(self, sentences: Iterable[list[str]] | None = None) -> None:
         """
-        Build vocabulary by streaming through corpus files.
+        Build vocabulary by iterating through corpora.
         
         This override builds both period_vocab_counts and the main vocabulary
-        in a single pass through the files, then adds temporal base words.
+        in a single pass through the corpora, then adds temporal base words.
         
         Args:
-            sentences: Ignored. TempRefWord2Vec uses internal file readers instead.
+            sentences: Ignored. TempRefWord2Vec uses internal corpora instead.
                 Accepted for API compatibility with the parent class.
         """
         self._count_words()
