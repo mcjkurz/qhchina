@@ -4,6 +4,9 @@ Corpus management for qhchina analytics.
 The Corpus class provides a unified data structure for managing tokenized documents
 with metadata, while maintaining full compatibility with existing analytics modules.
 
+Corpora can be downloaded from the qhchina-data GitHub repository:
+    >>> corpus = Corpus.download('songshi')  # Download all files from corpora/songshi/
+
 Example:
     >>> from qhchina import Corpus
     >>> 
@@ -23,7 +26,7 @@ from collections import Counter
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, overload, TYPE_CHECKING
 
 import numpy as np
 
@@ -35,7 +38,155 @@ if TYPE_CHECKING:
 logger = logging.getLogger("qhchina.corpus")
 
 
-__all__ = ['Corpus', 'Document']
+# =============================================================================
+# Remote corpus download configuration
+# =============================================================================
+
+_GITHUB_API_BASE = "https://api.github.com/repos/mcjkurz/qhchina-data/contents"
+_CORPUS_CACHE_DIR = Path.home() / '.cache' / 'qhchina' / 'corpora'
+
+
+def _ensure_corpus_cache_dir() -> Path:
+    """Create corpus cache directory if it doesn't exist."""
+    _CORPUS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return _CORPUS_CACHE_DIR
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download a file from URL to destination path."""
+    try:
+        import requests
+    except ImportError as e:
+        raise ImportError(
+            "requests is required for downloading corpora. "
+            "Install it with: pip install requests"
+        ) from e
+    
+    response = requests.get(url, timeout=120, stream=True)
+    response.raise_for_status()
+    
+    with open(dest, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=65536):
+            f.write(chunk)
+
+
+def _query_github_api(path: str) -> list[dict]:
+    """
+    Query GitHub API for contents at the given path.
+    
+    Args:
+        path: Path relative to repository root (e.g., 'corpora/songshi')
+    
+    Returns:
+        List of file/directory info dicts from GitHub API
+    """
+    try:
+        import requests
+    except ImportError as e:
+        raise ImportError(
+            "requests is required for downloading corpora. "
+            "Install it with: pip install requests"
+        ) from e
+    
+    url = f"{_GITHUB_API_BASE}/{path}"
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def _get_corpus_files(corpus_path: str) -> list[dict]:
+    """
+    Get list of .txt files for a corpus path.
+    
+    Args:
+        corpus_path: Either a corpus name (e.g., 'songshi') or a full path
+                     (e.g., 'corpora/songshi/file.txt')
+    
+    Returns:
+        List of dicts with 'name', 'download_url', 'size' for each .txt file
+    """
+    # Determine if this is a full path or just a corpus name
+    if corpus_path.endswith('.txt'):
+        # Full path to a specific file
+        if not corpus_path.startswith('corpora/'):
+            corpus_path = f'corpora/{corpus_path}'
+        
+        # Query the parent directory to get file info
+        parent_path = '/'.join(corpus_path.split('/')[:-1])
+        filename = corpus_path.split('/')[-1]
+        
+        contents = _query_github_api(parent_path)
+        
+        for item in contents:
+            if item['type'] == 'file' and item['name'] == filename:
+                return [{
+                    'name': item['name'],
+                    'download_url': item['download_url'],
+                    'size': item['size'],
+                    'path': corpus_path,
+                }]
+        
+        raise ValueError(f"File '{filename}' not found in '{parent_path}'")
+    else:
+        # Corpus name - get all .txt files from directory
+        api_path = f"corpora/{corpus_path}"
+        contents = _query_github_api(api_path)
+        
+        files = []
+        for item in contents:
+            if item['type'] == 'file' and item['name'].endswith('.txt'):
+                files.append({
+                    'name': item['name'],
+                    'download_url': item['download_url'],
+                    'size': item['size'],
+                    'path': f"corpora/{corpus_path}/{item['name']}",
+                })
+        
+        if not files:
+            raise ValueError(
+                f"No .txt files found in corpus '{corpus_path}'. "
+                f"Check available corpora with Corpus.list_remote()."
+            )
+        
+        return files
+
+
+def _ensure_corpus_file_cached(
+    file_info: dict,
+    corpus_name: str,
+    force_download: bool = False
+) -> tuple[Path, bool]:
+    """
+    Ensure a corpus file is cached locally, downloading if necessary.
+    
+    Args:
+        file_info: Dict with 'name', 'download_url', 'path'
+        corpus_name: Name of the corpus (for cache subdirectory)
+        force_download: Re-download even if cached
+    
+    Returns:
+        Tuple of (path to cached file, whether it was downloaded)
+    """
+    _ensure_corpus_cache_dir()
+    
+    # Create corpus subdirectory in cache
+    corpus_cache = _CORPUS_CACHE_DIR / corpus_name
+    corpus_cache.mkdir(parents=True, exist_ok=True)
+    
+    cached_path = corpus_cache / file_info['name']
+    
+    if cached_path.exists() and not force_download:
+        return cached_path, False
+    
+    _download_file(file_info['download_url'], cached_path)
+    
+    return cached_path, True
+
+
+__all__ = [
+    'Corpus',
+    'Document',
+]
 
 
 @dataclass(slots=True)
@@ -106,7 +257,7 @@ class Corpus:
     
     __slots__ = (
         '_documents', '_default_metadata', '_doc_id_counter',
-        '_id_to_index', '_token_count_cache', '_vocab_cache'
+        '_id_to_index', '_token_count_cache', '_word_counts_cache'
     )
     
     def __init__(
@@ -121,7 +272,7 @@ class Corpus:
         
         # Cached statistics (invalidated on modification)
         self._token_count_cache: int | None = None
-        self._vocab_cache: Counter | None = None
+        self._word_counts_cache: Counter | None = None
         
         if documents is not None:
             if isinstance(documents, Corpus):
@@ -170,6 +321,13 @@ class Corpus:
         """Return True if corpus is non-empty."""
         return len(self._documents) > 0
     
+    @overload
+    def __getitem__(self, key: int) -> Document: ...
+    @overload
+    def __getitem__(self, key: str) -> Document: ...
+    @overload
+    def __getitem__(self, key: slice) -> 'Corpus': ...
+    
     def __getitem__(self, key: int | str | slice) -> Document | 'Corpus':
         """
         Get document(s) by index, ID, or slice.
@@ -196,7 +354,7 @@ class Corpus:
             result._default_metadata = self._default_metadata.copy()
             result._doc_id_counter = 0
             result._token_count_cache = None
-            result._vocab_cache = None
+            result._word_counts_cache = None
             result._rebuild_index()
             return result
         else:
@@ -388,7 +546,7 @@ class Corpus:
         result._default_metadata = self._default_metadata.copy()
         result._doc_id_counter = 0
         result._token_count_cache = None
-        result._vocab_cache = None
+        result._word_counts_cache = None
         result._id_to_index = {}
         
         for doc in self._documents:
@@ -545,7 +703,7 @@ class Corpus:
         train_corpus._default_metadata = self._default_metadata.copy()
         train_corpus._doc_id_counter = 0
         train_corpus._token_count_cache = None
-        train_corpus._vocab_cache = None
+        train_corpus._word_counts_cache = None
         train_corpus._id_to_index = {}
         
         test_corpus = Corpus.__new__(Corpus)
@@ -553,7 +711,7 @@ class Corpus:
         test_corpus._default_metadata = self._default_metadata.copy()
         test_corpus._doc_id_counter = 0
         test_corpus._token_count_cache = None
-        test_corpus._vocab_cache = None
+        test_corpus._word_counts_cache = None
         test_corpus._id_to_index = {}
         
         for i, doc in enumerate(self._documents):
@@ -583,27 +741,42 @@ class Corpus:
         return self._token_count_cache
     
     @property
-    def vocab(self) -> Counter:
+    def word_counts(self) -> Counter:
         """
-        Vocabulary with word frequencies.
+        Word frequencies across all documents.
         
         Returns a Counter mapping each unique token to its total count
         across all documents. This value is cached.
         
         Example:
-            >>> corpus.vocab.most_common(10)
+            >>> corpus.word_counts.most_common(10)
             [('的', 1523), ('是', 892), ...]
+            >>> corpus.word_counts['的']
+            1523
         """
-        if self._vocab_cache is None:
-            self._vocab_cache = Counter()
+        if self._word_counts_cache is None:
+            self._word_counts_cache = Counter()
             for doc in self._documents:
-                self._vocab_cache.update(doc.tokens)
-        return self._vocab_cache
+                self._word_counts_cache.update(doc.tokens)
+        return self._word_counts_cache
+    
+    @property
+    def vocab(self) -> set[str]:
+        """
+        Set of unique words in the corpus.
+        
+        Example:
+            >>> '的' in corpus.vocab
+            True
+            >>> len(corpus.vocab)
+            1205
+        """
+        return set(self.word_counts.keys())
     
     @property
     def vocab_size(self) -> int:
         """Number of unique tokens in the corpus."""
-        return len(self.vocab)
+        return len(self.word_counts)
     
     @property
     def metadata_keys(self) -> set[str]:
@@ -804,7 +977,7 @@ class Corpus:
             >>> print(f"Hapax ratio: {len(hapax) / corpus.vocab_size:.1%}")
             Hapax ratio: 48.2%
         """
-        return {word for word, count in self.vocab.items() if count == 1}
+        return {word for word, count in self.word_counts.items() if count == 1}
     
     def hapax_dislegomena(self) -> set[str]:
         """
@@ -821,7 +994,26 @@ class Corpus:
             >>> len(dis)
             523
         """
-        return {word for word, count in self.vocab.items() if count == 2}
+        return {word for word, count in self.word_counts.items() if count == 2}
+    
+    def count(self, word: str) -> int:
+        """
+        Return the number of times a word appears across all documents.
+        
+        Args:
+            word: The word to count.
+        
+        Returns:
+            Total count of the word in the corpus. Returns 0 if the word
+            is not found.
+        
+        Example:
+            >>> corpus.count('的')
+            1523
+            >>> corpus.count('不存在的词')
+            0
+        """
+        return self.word_counts.get(word, 0)
     
     # =========================================================================
     # Serialization
@@ -988,6 +1180,194 @@ class Corpus:
         logger.info(f"Loaded corpus with {len(corpus)} documents from {path} ({format})")
         return corpus
     
+    @staticmethod
+    def download(
+        corpus: str,
+        show_progress: bool = True,
+        force_download: bool = False
+    ) -> 'Corpus':
+        """
+        Download a corpus from the qhchina-data GitHub repository.
+        
+        Downloads .txt files from ``qhchina-data/corpora/{corpus}/`` and creates
+        a Corpus where each file becomes a Document. The raw text is stored in
+        the ``raw_text`` metadata field; tokens are initially empty (use a
+        segmenter to tokenize).
+        
+        Args:
+            corpus: Either:
+                - A corpus name (e.g., ``'songshi'``) to download all .txt files
+                  from that corpus folder
+                - A full path (e.g., ``'songshi/宋史.txt'``) to download a single file
+            show_progress: Show download progress (default True).
+            force_download: Re-download even if files are cached (default False).
+        
+        Returns:
+            Corpus with one Document per downloaded file. Each document has:
+                - ``doc_id``: filename without .txt extension (e.g., '莫言_红高粱家族')
+                - ``tokens``: empty list (raw text, needs segmentation)
+                - ``metadata``: ``{'corpus': corpus_name, 'raw_text': content}``
+        
+        Raises:
+            ValueError: If corpus or file not found in repository.
+            requests.RequestException: If download fails.
+        
+        Example:
+            >>> # Download all files from a corpus
+            >>> corpus = Corpus.download('songshi')
+            >>> print(f"Downloaded {len(corpus)} documents")
+            
+            >>> # Download a single file
+            >>> corpus = Corpus.download('宋史/宋史.txt')
+            
+            >>> # Download and tokenize in one chain (uses default jieba backend)
+            >>> corpus = Corpus.download('songshi').tokenize()
+            
+            >>> # Or use a custom segmenter
+            >>> from qhchina.preprocessing import create_segmenter
+            >>> segmenter = create_segmenter('spacy', filters={'min_word_length': 2})
+            >>> corpus = Corpus.download('songshi').tokenize(segmenter=segmenter)
+        
+        Note:
+            Files are cached in ``~/.cache/qhchina/corpora/``. Use
+            ``Corpus.list_cached()`` to see cached corpora and
+            ``Corpus.clear_cache()`` to remove them.
+        """
+        # Extract corpus name from path
+        corpus_path = corpus.strip('/')
+        if '/' in corpus_path:
+            # Path like 'songshi/file.txt' or 'corpora/songshi/file.txt'
+            parts = corpus_path.replace('corpora/', '').split('/')
+            corpus_name = parts[0]
+        else:
+            corpus_name = corpus_path
+        
+        # Get file info from GitHub
+        files = _get_corpus_files(corpus_path)
+        
+        # Download and read each file
+        result = Corpus()
+        total_size = 0
+        
+        for file_info in files:
+            cached_path, _ = _ensure_corpus_file_cached(
+                file_info,
+                corpus_name,
+                force_download=force_download
+            )
+            total_size += cached_path.stat().st_size
+            
+            # Read file content
+            with open(cached_path, 'r', encoding='utf-8') as f:
+                raw_text = f.read()
+            
+            # Create document with empty tokens (user should segment)
+            # doc_id is filename without .txt extension
+            doc_id = Path(file_info['name']).stem
+            result.add(
+                tokens=[],
+                doc_id=doc_id,
+                corpus=corpus_name,
+                raw_text=raw_text
+            )
+        
+        # Print completion message
+        if show_progress:
+            size_kb = total_size / 1024
+            if size_kb > 1024:
+                size_str = f"{size_kb / 1024:.1f} MB"
+            else:
+                size_str = f"{size_kb:.1f} KB"
+            print(f"Downloaded {len(result)} file(s) ({size_str})")
+        
+        return result
+    
+    @staticmethod
+    def list_remote() -> list[dict]:
+        """
+        List available corpora in the qhchina-data repository.
+        
+        Returns:
+            List of dicts with corpus information:
+            ``[{'name': 'songshi', 'type': 'dir'}, ...]``
+        
+        Example:
+            >>> Corpus.list_remote()
+            [{'name': 'songshi', 'type': 'dir'}, {'name': 'mingshi', 'type': 'dir'}]
+        """
+        contents = _query_github_api('corpora')
+        
+        corpora = []
+        for item in contents:
+            if item['type'] == 'dir':
+                corpora.append({
+                    'name': item['name'],
+                    'type': 'dir',
+                })
+        
+        return corpora
+    
+    @staticmethod
+    def list_cached() -> list[dict]:
+        """
+        List locally cached corpora.
+        
+        Returns:
+            List of dicts with cached corpus information:
+            ``[{'name': 'songshi', 'files': 3, 'size_mb': 1.5}, ...]``
+        
+        Example:
+            >>> Corpus.list_cached()
+            [{'name': 'songshi', 'files': 3, 'size_mb': 1.5}]
+        """
+        if not _CORPUS_CACHE_DIR.exists():
+            return []
+        
+        result = []
+        for corpus_dir in _CORPUS_CACHE_DIR.iterdir():
+            if corpus_dir.is_dir() and not corpus_dir.name.startswith('.'):
+                files = list(corpus_dir.glob('*.txt'))
+                total_size = sum(f.stat().st_size for f in files)
+                result.append({
+                    'name': corpus_dir.name,
+                    'files': len(files),
+                    'size_mb': round(total_size / 1024 / 1024, 2),
+                })
+        
+        return result
+    
+    @staticmethod
+    def clear_cache(corpus: str | None = None) -> None:
+        """
+        Clear cached corpus files.
+        
+        Args:
+            corpus: Name of corpus to clear, or None to clear all cached corpora.
+        
+        Example:
+            >>> Corpus.clear_cache('songshi')  # Clear specific corpus
+            >>> Corpus.clear_cache()           # Clear all corpora
+        """
+        if not _CORPUS_CACHE_DIR.exists():
+            return
+        
+        if corpus is None:
+            # Clear all
+            for corpus_dir in _CORPUS_CACHE_DIR.iterdir():
+                if corpus_dir.is_dir():
+                    for f in corpus_dir.glob('*'):
+                        if f.is_file():
+                            f.unlink()
+                    corpus_dir.rmdir()
+        else:
+            # Clear specific corpus
+            corpus_dir = _CORPUS_CACHE_DIR / corpus
+            if corpus_dir.exists():
+                for f in corpus_dir.glob('*'):
+                    if f.is_file():
+                        f.unlink()
+                corpus_dir.rmdir()
+    
     def to_dataframe(self) -> 'pd.DataFrame':
         """
         Convert corpus to a pandas DataFrame.
@@ -1014,6 +1394,124 @@ class Corpus:
         return pd.DataFrame(rows)
     
     # =========================================================================
+    # Tokenization
+    # =========================================================================
+    
+    def tokenize(
+        self,
+        segmenter: Any | None = None,
+        backend: str = "jieba",
+        strategy: str = "document",
+        raw_text_key: str = "raw_text",
+        skip_tokenized: bool = True,
+        **kwargs
+    ) -> 'Corpus':
+        """
+        Tokenize all documents in-place using a segmenter.
+        
+        Applies a segmenter to each document's raw text (from metadata) and
+        populates the document's tokens list. This is typically used after
+        ``Corpus.download()`` which loads raw text but leaves tokens empty.
+        
+        Args:
+            segmenter: Pre-configured segmenter instance. If provided, ``backend``,
+                ``strategy``, and ``kwargs`` are ignored.
+            backend: Segmentation backend if no segmenter provided. Options:
+                ``'spacy'``, ``'pkuseg'``, ``'jieba'`` (default), ``'bert'``, ``'llm'``.
+            strategy: Text splitting strategy. Options:
+                - ``'document'`` (default): Treat entire raw_text as one unit.
+                - ``'sentence'``: Split by sentence boundaries into separate documents.
+                - ``'line'``: Split by newlines into separate documents.
+                - ``'chunk'``: Split into fixed-size chunks as separate documents.
+                
+                For strategies other than ``'document'``, the corpus is modified
+                in-place: each original document is replaced by multiple new documents
+                (one per sentence/line/chunk). New documents inherit metadata
+                (excluding ``raw_text_key``) and get ``doc_id``s like
+                ``"{original_id}_0"``, ``"{original_id}_1"``, etc.
+            raw_text_key: Metadata key containing the raw text (default: ``'raw_text'``).
+            skip_tokenized: If True, skip documents that already have tokens
+                (default: True).
+            **kwargs: Additional arguments passed to ``create_segmenter()``
+                (e.g., ``filters``, ``user_dict``, ``chunk_size``).
+        
+        Returns:
+            Self for method chaining (always modifies in-place).
+        
+        Raises:
+            ImportError: If the specified backend is not installed.
+        
+        Example:
+            >>> # Download and tokenize in one chain
+            >>> corpus = Corpus.download('songshi').tokenize()
+            
+            >>> # Split into sentences (modifies corpus in-place)
+            >>> corpus.tokenize(strategy='sentence')
+            >>> # Original doc "宋史" is replaced by "宋史_0", "宋史_1", ...
+            
+            >>> # With filters
+            >>> corpus.tokenize(
+            ...     backend='spacy',
+            ...     filters={'stopwords': stopwords, 'min_word_length': 2}
+            ... )
+        """
+        from qhchina.preprocessing import create_segmenter
+        
+        # Create segmenter if not provided
+        if segmenter is None:
+            segmenter = create_segmenter(backend=backend, strategy=strategy, **kwargs)
+        
+        # Get strategy from the segmenter (which inherits strategy param if we created it)
+        actual_strategy = segmenter.strategy
+        
+        # For 'document' strategy: simple in-place tokenization
+        if actual_strategy == "document":
+            for doc in self._documents:
+                if skip_tokenized and doc.tokens:
+                    continue
+                
+                raw_text = doc.metadata.get(raw_text_key)
+                if raw_text is None:
+                    continue
+                
+                doc.tokens = segmenter.segment(raw_text)
+            
+            self._invalidate_cache()
+            return self
+        
+        # For other strategies: replace documents with split versions
+        new_documents: list[Document] = []
+        
+        for doc in self._documents:
+            if skip_tokenized and doc.tokens:
+                new_documents.append(doc)
+                continue
+            
+            raw_text = doc.metadata.get(raw_text_key)
+            if raw_text is None:
+                new_documents.append(doc)
+                continue
+            
+            # Segment the text (returns list of token lists)
+            token_lists = segmenter.segment(raw_text)
+            
+            # Create metadata without raw_text to avoid bloat
+            new_metadata = {k: v for k, v in doc.metadata.items() if k != raw_text_key}
+            
+            # Create a new document for each token list
+            for i, tokens in enumerate(token_lists):
+                new_doc_id = f"{doc.doc_id}_{i}"
+                new_doc = Document(tokens=tokens, metadata=new_metadata.copy(), doc_id=new_doc_id)
+                new_documents.append(new_doc)
+        
+        # Replace documents in-place
+        self._documents = new_documents
+        self._rebuild_index()
+        self._invalidate_cache()
+        
+        return self
+    
+    # =========================================================================
     # Private Helpers
     # =========================================================================
     
@@ -1037,6 +1535,6 @@ class Corpus:
     def _invalidate_cache(self) -> None:
         """Invalidate cached statistics."""
         self._token_count_cache = None
-        self._vocab_cache = None
+        self._word_counts_cache = None
 
 

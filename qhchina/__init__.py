@@ -63,5 +63,15 @@ from .analytics import Word2Vec, TempRefWord2Vec, LDAGibbsSampler
 from .preprocessing import create_segmenter
 
 # Import helper functions directly into the package namespace
-from .helpers.fonts import load_fonts, current_font, set_font, list_available_fonts, list_font_aliases, get_font_path
+from .helpers.fonts import (
+    load_fonts,
+    set_font,
+    get_font_path,
+    current_font,
+    download_fonts,
+    list_remote_fonts,
+    list_cached_fonts,
+    clear_cache,
+    get_cache_dir,
+)
 from .helpers.texts import load_text, load_texts, load_stopwords

@@ -2,7 +2,6 @@ import logging
 import os
 import tempfile
 from typing import Any
-from tqdm.auto import tqdm
 import importlib
 import importlib.util
 import re
@@ -28,8 +27,8 @@ class SegmentationWrapper:
     Base segmentation wrapper class that can be extended for different segmentation tools.
     
     Args:
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'. 
-            Default is 'whole'.
+        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'. 
+            Default is 'document'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
             - stopwords: List or set of stopwords to exclude (converted to set internally)
@@ -46,14 +45,14 @@ class SegmentationWrapper:
     # Valid filter keys
     VALID_FILTER_KEYS = {'stopwords', 'min_word_length', 'excluded_pos'}
     
-    def __init__(self, strategy: str = "whole", chunk_size: int = 512, filters: dict[str, Any] | None = None,
+    def __init__(self, strategy: str = "document", chunk_size: int = 512, filters: dict[str, Any] | None = None,
                  user_dict: str | list[str | tuple] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         if strategy is None:
             raise ValueError("strategy cannot be None")
         self.strategy = strategy.strip().lower()
-        if self.strategy not in ["line", "sentence", "chunk", "whole"]:
-            raise ValueError(f"Invalid segmentation strategy: {strategy}. Must be one of: line, sentence, chunk, whole")
+        if self.strategy not in ["line", "sentence", "chunk", "document"]:
+            raise ValueError(f"Invalid segmentation strategy: {strategy}. Must be one of: line, sentence, chunk, document")
         
         self.chunk_size = chunk_size
         self.filters = filters or {}
@@ -213,7 +212,7 @@ class SegmentationWrapper:
             text: Text to segment
             
         Returns:
-            If strategy is 'whole': A single list of tokens
+            If strategy is 'document': A single list of tokens
             If strategy is 'line', 'sentence', or 'chunk': A list of lists, where each inner list
             contains tokens for a line, sentence, or chunk respectively
         """
@@ -223,8 +222,8 @@ class SegmentationWrapper:
         # Process all units
         processed_results = self._process_all_texts(units)
         
-        # For 'whole' strategy, merge all results into a single list
-        if self.strategy == "whole" and processed_results:
+        # For 'document' strategy, merge all results into a single list
+        if self.strategy == "document" and processed_results:
             return processed_results[0]
         
         return processed_results
@@ -246,7 +245,7 @@ class SegmentationWrapper:
             return self._split_into_sentences(text)
         elif self.strategy == "chunk":
             return self._split_into_chunks(text, self.chunk_size)
-        elif self.strategy == "whole":
+        elif self.strategy == "document":
             return [text] if text.strip() else []
         else:
             raise ValueError(f"Invalid strategy: {self.strategy}")
@@ -342,9 +341,12 @@ class SpacySegmenter(SegmentationWrapper):
         disable: List of pipeline components to disable for better performance; 
             For common applications, use ["ner", "lemmatizer"]. Default is None.
         batch_size: Batch size for processing multiple texts.
+        max_doc_length: Maximum document length before internal chunking. Documents longer
+            than this will be split into chunks for processing to avoid memory issues.
+            Default is 100000 characters (~100KB). Set to None to disable chunking.
         user_dict: Custom user dictionary - either a list of words/tuples or path to a 
             dictionary file.
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
             - min_word_length: Minimum length of tokens to include (default 1)
@@ -356,8 +358,9 @@ class SpacySegmenter(SegmentationWrapper):
     def __init__(self, model_name: str = "zh_core_web_sm", 
                  disable: list[str] | None = None,
                  batch_size: int = 200,
+                 max_doc_length: int | None = 100000,
                  user_dict: str | list[str | tuple] | None = None,
-                 strategy: str = "whole", 
+                 strategy: str = "document", 
                  chunk_size: int = 512,
                  filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
@@ -366,6 +369,7 @@ class SpacySegmenter(SegmentationWrapper):
         self.model_name = model_name
         self.disable = disable or []
         self.batch_size = batch_size
+        self.max_doc_length = max_doc_length
         
         # Try to load the model, download if needed
         try:
@@ -453,10 +457,54 @@ class SpacySegmenter(SegmentationWrapper):
         return [token for token in tokens 
                 if token.pos_ not in excluded_pos 
                 and len(token.text) >= min_word_length
-                and token.text not in stopwords]
+                and token.text not in stopwords
+                and token.text.strip()]
+    
+    def _chunk_large_text(self, text: str) -> list[str]:
+        """Split a large text into smaller chunks for memory-efficient processing.
+        
+        Tries to split at sentence boundaries when possible to avoid breaking words.
+        
+        Args:
+            text: The text to chunk
+            
+        Returns:
+            List of text chunks
+        """
+        if self.max_doc_length is None or len(text) <= self.max_doc_length:
+            return [text]
+        
+        chunks = []
+        remaining = text
+        
+        while remaining:
+            if len(remaining) <= self.max_doc_length:
+                chunks.append(remaining)
+                break
+            
+            # Find a good split point (sentence boundary) near max_doc_length
+            chunk = remaining[:self.max_doc_length]
+            
+            # Look for sentence-ending punctuation to split at
+            split_pos = self.max_doc_length
+            for punct in ['。', '！', '？', '!', '?', '\n']:
+                last_punct = chunk.rfind(punct)
+                if last_punct > self.max_doc_length // 2:
+                    split_pos = last_punct + 1
+                    break
+            
+            chunks.append(remaining[:split_pos])
+            remaining = remaining[split_pos:]
+        
+        if len(chunks) > 1:
+            logger.debug(f"Split large text ({len(text)} chars) into {len(chunks)} chunks")
+        
+        return chunks
     
     def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all texts with spaCy's pipe and return results.
+        
+        Large texts are automatically chunked to avoid memory issues.
         
         Args:
             texts: List of all text units to process
@@ -466,14 +514,22 @@ class SpacySegmenter(SegmentationWrapper):
         """
         results = []
         
-        # Process each doc and add results
-        for doc in tqdm(self.nlp.pipe(texts, batch_size=self.batch_size), 
-                         total=len(texts), desc="Segmenting with spaCy"):
-            # Get filtered tokens for the doc
-            filtered_tokens = [token.text for token in self._filter_tokens(doc)]
+        for text in texts:
+            # Chunk large texts to avoid memory issues
+            chunks = self._chunk_large_text(text)
             
-            # Add to results
-            results.append(filtered_tokens)
+            if len(chunks) == 1:
+                # Single chunk - process normally
+                doc = self.nlp(chunks[0])
+                filtered_tokens = [token.text for token in self._filter_tokens(doc)]
+                results.append(filtered_tokens)
+            else:
+                # Multiple chunks - process each and combine results
+                all_tokens = []
+                for doc in self.nlp.pipe(chunks, batch_size=self.batch_size):
+                    filtered_tokens = [token.text for token in self._filter_tokens(doc)]
+                    all_tokens.extend(filtered_tokens)
+                results.append(all_tokens)
         
         return results
 
@@ -503,7 +559,7 @@ class PKUSegmenter(SegmentationWrapper):
             - list[str]: List of words
             - list[Tuple]: List of tuples (only first element/word is used)
         pos_tagging: Whether to include POS tagging in segmentation.
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
             - min_word_length: Minimum length of tokens to include (default 1)
@@ -516,7 +572,7 @@ class PKUSegmenter(SegmentationWrapper):
                  model_name: str = 'default',
                  user_dict: str | list[str | tuple] | None = None,
                  pos_tagging: bool = False,
-                 strategy: str = "whole",
+                 strategy: str = "document",
                  chunk_size: int = 512,
                  filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
@@ -593,11 +649,13 @@ class PKUSegmenter(SegmentationWrapper):
             return [word for word, tag in tokens 
                     if len(word) >= min_word_length 
                     and word not in stopwords
-                    and tag not in excluded_pos]
+                    and tag not in excluded_pos
+                    and word.strip()]
         else:
             return [token for token in tokens 
                     if len(token) >= min_word_length 
-                    and token not in stopwords]
+                    and token not in stopwords
+                    and token.strip()]
     
     def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all text units with PKUSeg and return results.
@@ -609,7 +667,7 @@ class PKUSegmenter(SegmentationWrapper):
             List of lists of tokens, one list per text unit
         """
         results = []
-        for text_to_process in tqdm(texts, desc="Segmenting with PKUSeg"):
+        for text_to_process in texts:
             # Skip empty text
             if not text_to_process.strip():
                 results.append([])
@@ -637,7 +695,7 @@ class JiebaSegmenter(SegmentationWrapper):
             - list[str]: List of words
             - list[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
         pos_tagging: Whether to include POS tagging in segmentation.
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
             - min_word_length: Minimum length of tokens to include (default 1)
@@ -649,7 +707,7 @@ class JiebaSegmenter(SegmentationWrapper):
     def __init__(self, 
                  user_dict: str | list[str | tuple] | None = None,
                  pos_tagging: bool = False,
-                 strategy: str = "whole",
+                 strategy: str = "document",
                  chunk_size: int = 512,
                  filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
@@ -755,11 +813,13 @@ class JiebaSegmenter(SegmentationWrapper):
             return [word for word, flag in tokens 
                     if len(word) >= min_word_length 
                     and word not in stopwords
-                    and flag not in excluded_pos]
+                    and flag not in excluded_pos
+                    and word.strip()]
         else:
             return [token for token in tokens 
                     if len(token) >= min_word_length 
-                    and token not in stopwords]
+                    and token not in stopwords
+                    and token.strip()]
     
     def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all text units with Jieba and return results.
@@ -771,7 +831,7 @@ class JiebaSegmenter(SegmentationWrapper):
             List of lists of tokens, one list per text unit
         """
         results = []
-        for text_to_process in tqdm(texts, desc="Segmenting with Jieba"):
+        for text_to_process in texts:
             # Skip empty text
             if not text_to_process.strip():
                 results.append([])
@@ -811,7 +871,7 @@ class BertSegmenter(SegmentationWrapper):
             the text is longer than this, it will be split into chunks.
         user_dict: Custom user dictionary (not supported for BERT segmenter, will be ignored
             with a warning).
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
             - min_word_length: Minimum length of tokens to include (default 1)
@@ -837,7 +897,7 @@ class BertSegmenter(SegmentationWrapper):
                  remove_special_tokens: bool = True,
                  max_sequence_length: int = 512,
                  user_dict: str | list[str | tuple] | None = None,
-                 strategy: str = "whole",
+                 strategy: str = "document",
                  chunk_size: int = 512,
                  filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
@@ -930,7 +990,8 @@ class BertSegmenter(SegmentationWrapper):
         
         return [word for word in words 
                 if len(word) >= min_word_length 
-                and word not in stopwords]
+                and word not in stopwords
+                and word.strip()]
     
     def _predict_tags_batch(self, texts: list[str]) -> list[list[str]]:
         """Predict segmentation tags for each character in a batch of texts."""
@@ -1122,7 +1183,7 @@ class LLMSegmenter(SegmentationWrapper):
         timeout: Timeout in seconds for API calls (default 60.0). Set to None for no timeout.
         user_dict: Custom user dictionary (not supported for LLM segmenter, will be ignored
             with a warning).
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'whole'.
+        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
         chunk_size: Size of chunks when using 'chunk' strategy.
         filters: Dictionary of filters to apply during segmentation:
             - min_word_length: Minimum length of tokens to include (default 1)
@@ -1153,7 +1214,7 @@ class LLMSegmenter(SegmentationWrapper):
                  retry_patience: int = 1,
                  timeout: float = 60.0,
                  user_dict: str | list[str | tuple] | None = None,
-                 strategy: str = "whole",
+                 strategy: str = "document",
                  chunk_size: int = 512,
                  filters: dict[str, Any] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
@@ -1293,7 +1354,8 @@ class LLMSegmenter(SegmentationWrapper):
         
         return [token for token in tokens 
                 if len(token) >= min_word_length 
-                and token not in stopwords]
+                and token not in stopwords
+                and token.strip()]
     
     def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
         """Process all text units with LLM API and return results.
@@ -1306,7 +1368,7 @@ class LLMSegmenter(SegmentationWrapper):
         """
         # Process each text unit one by one (no batching for API calls)
         results = []
-        for text_to_process in tqdm(texts, desc=f"Segmenting with {self.model}"):
+        for text_to_process in texts:
             
             # Call the LLM API for this text unit
             tokens = self._call_llm_api(text_to_process)
@@ -1318,13 +1380,13 @@ class LLMSegmenter(SegmentationWrapper):
         return results
 
 # Factory function to create appropriate segmenter based on the backend
-def create_segmenter(backend: str = "spacy", strategy: str = "whole", chunk_size: int = 512, 
+def create_segmenter(backend: str = "spacy", strategy: str = "document", chunk_size: int = 512, 
                   sentence_end_pattern: str = r"([。！？\.!?……]+)", **kwargs) -> SegmentationWrapper:
     """Create a segmenter based on the specified backend.
     
     Args:
         backend: The segmentation backend to use ('spacy', 'pkuseg', 'jieba', 'bert', 'llm')
-        strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'whole']
+        strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'document']
         chunk_size: Size of chunks when using 'chunk' strategy
         sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
         **kwargs: Additional arguments to pass to the segmenter constructor

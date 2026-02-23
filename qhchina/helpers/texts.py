@@ -100,15 +100,21 @@ def load_stopwords(language: str = "zh_sim") -> set:
     """
     Load stopwords from a file for the specified language.
     
+    Supports prefix matching: if the language code doesn't match an exact file,
+    all files starting with that prefix will be loaded and combined.
+    
     Args:
-        language: Language code (default: "zh_sim" for simplified Chinese).
+        language: Language code or prefix (default: "zh_sim" for simplified Chinese).
+                  - Exact match: "zh_sim" loads zh_sim.txt only
+                  - Prefix match: "zh" loads all files starting with "zh" (zh_sim, zh_tr, zh_cl_sim, zh_cl_tr)
+                  - Prefix match: "zh_cl" loads zh_cl_sim.txt and zh_cl_tr.txt
                   Use get_stopword_languages() to see available options.
     
     Returns:
-        Set of stopwords
+        Set of stopwords (combined from all matching files)
     
     Raises:
-        ValueError: If the specified language is not available.
+        ValueError: If no matching stopwords files are found.
     """
     import os
     
@@ -118,27 +124,45 @@ def load_stopwords(language: str = "zh_sim") -> set:
     # Go up one level to the qhchina package root and construct the path to stopwords
     package_root = os.path.abspath(os.path.join(current_dir, '..'))
     stopwords_dir = os.path.join(package_root, 'data', 'stopwords')
-    stopwords_path = os.path.join(stopwords_dir, f'{language}.txt')
     
-    # Load stopwords from file
+    # Get all available stopword files
     try:
-        with open(stopwords_path, 'r', encoding='utf-8') as f:
-            stopwords = {line.strip() for line in f if line.strip()}
-        return stopwords
+        all_files = [f for f in os.listdir(stopwords_dir) if f.endswith('.txt')]
     except FileNotFoundError:
-        # Get available stopword languages
-        available = []
-        try:
-            files = os.listdir(stopwords_dir)
-            available = sorted([f[:-4] for f in files if f.endswith('.txt')])
-        except FileNotFoundError:
-            pass
-        
+        raise ValueError(f"Stopwords directory not found: {stopwords_dir}")
+    
+    # Check for exact match first
+    exact_match = f'{language}.txt'
+    if exact_match in all_files:
+        matching_files = [exact_match]
+    else:
+        # Prefix matching: find all files starting with the language prefix
+        # Use underscore or end-of-name to ensure proper prefix matching
+        # e.g., "zh" matches "zh_sim.txt" but "zh_c" matches "zh_cl_sim.txt"
+        matching_files = [
+            f for f in all_files 
+            if f.startswith(language) and (
+                f == f'{language}.txt' or 
+                f[len(language)] == '_'
+            )
+        ]
+    
+    if not matching_files:
+        available = sorted([f[:-4] for f in all_files])
         raise ValueError(
-            f"Stopwords file not found for language '{language}'. "
+            f"No stopwords files found matching '{language}'. "
             f"Available options: {available}. "
-            f"Note: Do not include the file extension (use 'zh_sim' not 'zh_sim.txt')."
+            f"Note: Use exact names like 'zh_sim' or prefixes like 'zh' to load multiple files."
         )
+    
+    # Load and combine stopwords from all matching files
+    stopwords = set()
+    for filename in matching_files:
+        filepath = os.path.join(stopwords_dir, filename)
+        with open(filepath, 'r', encoding='utf-8') as f:
+            stopwords.update(line.strip() for line in f if line.strip())
+    
+    return stopwords
 
 def get_stopword_languages() -> list:
     """

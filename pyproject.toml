@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qhchina"
-version = "0.1.16"
+version = "0.1.17"
 authors = [
   { name = "Maciej Kurzynski", email = "makurz@gmail.com" },
 ]
@@ -42,7 +42,8 @@ dependencies = [
     "matplotlib >= 3.10.0",
     "scikit-learn >= 1.6.1",
     "tqdm >= 4.66.0",
-    "pandas >= 2.1.0"
+    "pandas >= 2.1.0",
+    "requests >= 2.28.0"
 ]
 
 [tool.setuptools.packages.find]
@@ -61,10 +62,10 @@ include-package-data = true
 zip-safe = false
 
 [tool.setuptools.package-data]
-"qhchina" = ["analytics/cython_ext/*.pyx", "data/**/*"]
+"qhchina" = ["analytics/cython_ext/*.pyx", "data/stopwords/*", "data/templates/*", "data/texts/*"]
 
 [tool.setuptools.exclude-package-data]
-"*" = ["*.c", "*.cpp", "*.so", "*.pyd"]
+"*" = ["*.c", "*.cpp", "*.so", "*.pyd", "data/fonts/*"]
 
 [tool.pytest.ini_options]
 filterwarnings = [

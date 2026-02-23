@@ -510,14 +510,31 @@ class TestCorpusStatistics:
         corpus = Corpus([['a', 'b'], ['c', 'd', 'e']])
         assert corpus.token_count == 5
     
+    def test_word_counts(self):
+        """Test word counts."""
+        corpus = Corpus([['a', 'b', 'a'], ['b', 'c']])
+        word_counts = corpus.word_counts
+        
+        assert word_counts['a'] == 2
+        assert word_counts['b'] == 2
+        assert word_counts['c'] == 1
+    
     def test_vocab(self):
-        """Test vocabulary."""
+        """Test vocabulary (set of unique words)."""
         corpus = Corpus([['a', 'b', 'a'], ['b', 'c']])
         vocab = corpus.vocab
         
-        assert vocab['a'] == 2
-        assert vocab['b'] == 2
-        assert vocab['c'] == 1
+        assert isinstance(vocab, set)
+        assert vocab == {'a', 'b', 'c'}
+    
+    def test_count(self):
+        """Test count method."""
+        corpus = Corpus([['a', 'b', 'a'], ['b', 'c']])
+        
+        assert corpus.count('a') == 2
+        assert corpus.count('b') == 2
+        assert corpus.count('c') == 1
+        assert corpus.count('nonexistent') == 0
     
     def test_vocab_size(self):
         """Test vocabulary size."""
@@ -801,3 +818,284 @@ class TestCorpusRepr:
         assert 'Corpus' in repr_str
         assert 'documents=2' in repr_str
         assert 'tokens=3' in repr_str
+
+
+class TestCorpusTokenize:
+    """Tests for corpus tokenize method."""
+    
+    @pytest.fixture
+    def jieba_available(self):
+        """Check if jieba is available."""
+        try:
+            import jieba
+            return True
+        except ImportError:
+            return False
+    
+    def test_tokenize_basic(self, jieba_available):
+        """Test basic tokenization with document strategy."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], raw_text="今天天气很好")
+        corpus.add([], raw_text="我喜欢学习")
+        
+        result = corpus.tokenize()
+        
+        # Should return self for document strategy
+        assert result is corpus
+        
+        # Tokens should be populated
+        assert len(corpus[0].tokens) > 0
+        assert len(corpus[1].tokens) > 0
+    
+    def test_tokenize_returns_self_for_document_strategy(self, jieba_available):
+        """Test that tokenize returns self for document strategy."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], raw_text="测试文本")
+        
+        result = corpus.tokenize(strategy="document")
+        assert result is corpus
+    
+    def test_tokenize_skip_already_tokenized(self, jieba_available):
+        """Test that already tokenized documents are skipped by default."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add(['existing', 'tokens'], raw_text="新的文本")
+        corpus.add([], raw_text="需要分词")
+        
+        corpus.tokenize()
+        
+        # First doc should keep original tokens
+        assert corpus[0].tokens == ['existing', 'tokens']
+        # Second doc should be tokenized
+        assert len(corpus[1].tokens) > 0
+    
+    def test_tokenize_force_retokenize(self, jieba_available):
+        """Test retokenization with skip_tokenized=False."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add(['old', 'tokens'], raw_text="新的文本")
+        
+        corpus.tokenize(skip_tokenized=False)
+        
+        # Tokens should be replaced
+        assert corpus[0].tokens != ['old', 'tokens']
+        assert len(corpus[0].tokens) > 0
+    
+    def test_tokenize_missing_raw_text(self, jieba_available):
+        """Test that documents without raw_text are skipped."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], author="test")  # No raw_text
+        corpus.add([], raw_text="有文本")
+        
+        corpus.tokenize()
+        
+        # First doc should remain empty
+        assert corpus[0].tokens == []
+        # Second doc should be tokenized
+        assert len(corpus[1].tokens) > 0
+    
+    def test_tokenize_custom_raw_text_key(self, jieba_available):
+        """Test tokenization with custom raw text key."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], content="这是内容")  # Using 'content' instead of 'raw_text'
+        
+        corpus.tokenize(raw_text_key="content")
+        
+        assert len(corpus[0].tokens) > 0
+    
+    def test_tokenize_with_segmenter(self, jieba_available):
+        """Test tokenization with pre-configured segmenter."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        from qhchina.preprocessing import create_segmenter
+        
+        corpus = Corpus()
+        corpus.add([], raw_text="测试一下")
+        
+        segmenter = create_segmenter('jieba')
+        corpus.tokenize(segmenter=segmenter)
+        
+        assert len(corpus[0].tokens) > 0
+    
+    def test_tokenize_with_filters(self, jieba_available):
+        """Test tokenization with filters."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], raw_text="我的文本很长")
+        
+        # Filter out single-character tokens
+        corpus.tokenize(filters={'min_word_length': 2})
+        
+        # All tokens should be at least 2 characters
+        for token in corpus[0].tokens:
+            assert len(token) >= 2
+    
+    def test_tokenize_invalidates_cache(self, jieba_available):
+        """Test that tokenization invalidates statistics cache."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], raw_text="测试文本")
+        
+        # Access cache first
+        _ = corpus.token_count
+        assert corpus._token_count_cache == 0
+        
+        corpus.tokenize()
+        
+        # Cache should be invalidated and recomputed
+        assert corpus._token_count_cache is None
+        assert corpus.token_count > 0
+    
+    def test_tokenize_empty_corpus(self, jieba_available):
+        """Test tokenization on empty corpus."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        result = corpus.tokenize()
+        
+        assert result is corpus
+        assert len(corpus) == 0
+    
+    def test_tokenize_chaining(self, jieba_available):
+        """Test method chaining with tokenize."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], raw_text="第一篇文章", author="A")
+        corpus.add([], raw_text="第二篇文章", author="B")
+        
+        # Chain tokenize with filter
+        filtered = corpus.tokenize().filter(author="A")
+        
+        assert len(filtered) == 1
+        assert len(filtered[0].tokens) > 0
+    
+    def test_tokenize_sentence_strategy_modifies_in_place(self, jieba_available):
+        """Test that sentence strategy modifies corpus in-place."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], doc_id="doc1", raw_text="第一句话。第二句话。第三句话。", author="A")
+        
+        result = corpus.tokenize(strategy="sentence")
+        
+        # Should return self (in-place modification)
+        assert result is corpus
+        
+        # Corpus should now have multiple documents
+        assert len(corpus) >= 1  # At least one sentence
+    
+    def test_tokenize_sentence_strategy_splits_documents(self, jieba_available):
+        """Test that sentence strategy creates separate documents."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], doc_id="mydoc", raw_text="这是第一句。这是第二句。", author="TestAuthor")
+        
+        corpus.tokenize(strategy="sentence")
+        
+        # Should have 2 documents (one per sentence)
+        assert len(corpus) == 2
+        
+        # Doc IDs should be derived from original
+        assert corpus[0].doc_id == "mydoc_0"
+        assert corpus[1].doc_id == "mydoc_1"
+        
+        # Each should have tokens
+        assert len(corpus[0].tokens) > 0
+        assert len(corpus[1].tokens) > 0
+    
+    def test_tokenize_sentence_strategy_inherits_metadata(self, jieba_available):
+        """Test that sentence strategy preserves metadata (except raw_text)."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], doc_id="mydoc", raw_text="第一句。第二句。", author="作者", year=2020)
+        
+        corpus.tokenize(strategy="sentence")
+        
+        # Metadata should be inherited
+        for doc in corpus._documents:
+            assert doc.metadata.get("author") == "作者"
+            assert doc.metadata.get("year") == 2020
+            # raw_text should NOT be inherited (to avoid bloat)
+            assert "raw_text" not in doc.metadata
+    
+    def test_tokenize_line_strategy(self, jieba_available):
+        """Test line strategy splits by newlines."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], doc_id="poem", raw_text="第一行\n第二行\n第三行", author="诗人")
+        
+        corpus.tokenize(strategy="line")
+        
+        # Should have 3 documents (one per line)
+        assert len(corpus) == 3
+        assert corpus[0].doc_id == "poem_0"
+        assert corpus[1].doc_id == "poem_1"
+        assert corpus[2].doc_id == "poem_2"
+    
+    def test_tokenize_split_preserves_already_tokenized(self, jieba_available):
+        """Test that split strategies preserve already-tokenized documents."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add(['existing', 'tokens'], doc_id="tokenized", author="A")
+        corpus.add([], doc_id="untokenized", raw_text="第一句。第二句。", author="B")
+        
+        corpus.tokenize(strategy="sentence")
+        
+        # First doc should be preserved as-is
+        assert "tokenized" in corpus
+        assert corpus["tokenized"].tokens == ['existing', 'tokens']
+        
+        # Second doc should be split
+        assert "untokenized_0" in corpus
+        assert "untokenized_1" in corpus
+    
+    def test_tokenize_split_with_missing_raw_text(self, jieba_available):
+        """Test split strategy with document missing raw_text."""
+        if not jieba_available:
+            pytest.skip("jieba not installed")
+        
+        corpus = Corpus()
+        corpus.add([], doc_id="no_text", author="A")  # No raw_text
+        corpus.add([], doc_id="has_text", raw_text="一句话。", author="B")
+        
+        corpus.tokenize(strategy="sentence")
+        
+        # Document without raw_text should be preserved as-is
+        assert "no_text" in corpus
+        assert corpus["no_text"].tokens == []
+        
+        # Document with raw_text should be split
+        assert "has_text_0" in corpus

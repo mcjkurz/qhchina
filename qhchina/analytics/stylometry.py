@@ -17,6 +17,7 @@ Two modes for supervised learning:
 import logging
 import warnings
 from collections import Counter
+from collections.abc import Iterable
 from typing import Callable
 import numpy as np
 import pandas as pd
@@ -245,7 +246,9 @@ class Stylometry:
         stylo.dendrogram()  # Hierarchical clustering
         
         # Attribute disputed text
-        author, confidence = stylo.predict(disputed_tokens)
+        author = stylo.predict_author(disputed_tokens)
+        # Or get ranked results with scores
+        results = stylo.predict(disputed_tokens, k=3)  # [(author, score), ...]
     """
     
     # Registries for extensibility
@@ -1805,8 +1808,8 @@ class Stylometry:
 # Corpus Comparison Functions
 # =============================================================================
 
-def compare_corpora(corpusA: list[str] | list[list[str]], 
-                    corpusB: list[str] | list[list[str]], 
+def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]], 
+                    corpusB: Iterable[str] | Iterable[list[str]], 
                     method: str = 'fisher', 
                     filters: dict | None = None,
                     correction: str | None = None,
@@ -1815,10 +1818,10 @@ def compare_corpora(corpusA: list[str] | list[list[str]],
     Compare two corpora to identify statistically significant differences in word usage.
     
     Args:
-        corpusA: Either a flat list of tokens or a list of sentences (each sentence 
-            being a list of tokens).
-        corpusB: Either a flat list of tokens or a list of sentences (each sentence 
-            being a list of tokens).
+        corpusA: Iterable of tokens (flat) or iterable of token lists (nested).
+            Accepts lists, Corpus objects, generators, or any iterable.
+        corpusB: Iterable of tokens (flat) or iterable of token lists (nested).
+            Accepts lists, Corpus objects, generators, or any iterable.
         method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
             for the chi-square test. All tests use two-sided alternatives.
         filters (dict, optional): Dictionary of filters to apply to results.
@@ -1861,11 +1864,11 @@ def compare_corpora(corpusA: list[str] | list[list[str]],
         Two-sided tests are used because we want to detect whether words are 
         overrepresented in either corpus.
     """
-    # Validate corpus inputs
+    # Convert iterables to lists (supports Corpus, generators, etc.)
     if not isinstance(corpusA, list):
-        raise TypeError(f"corpusA must be a list, got {type(corpusA).__name__}")
+        corpusA = list(corpusA)
     if not isinstance(corpusB, list):
-        raise TypeError(f"corpusB must be a list, got {type(corpusB).__name__}")
+        corpusB = list(corpusB)
     
     # Validate correction parameter
     if correction is not None and correction not in VALID_CORRECTIONS:

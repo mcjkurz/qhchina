@@ -1,274 +1,433 @@
+"""
+Font management for Chinese text rendering in matplotlib.
+
+Fonts are downloaded from the qhchina-data GitHub repository on first use
+and cached locally in ~/.cache/qhchina/fonts/.
+"""
+
 import logging
-import shutil
+import os
 import threading
+from pathlib import Path
+
 try:
     import matplotlib
-    import matplotlib.font_manager
-except Exception as e:
-    raise ImportError(f"Failed to import matplotlib: {e}") from e
-from pathlib import Path
-import os
+    import matplotlib.font_manager as fm
+except ImportError as e:
+    raise ImportError(f"matplotlib is required for font management: {e}") from e
+
+try:
+    import requests
+except ImportError as e:
+    raise ImportError(f"requests is required for font downloads: {e}") from e
 
 logger = logging.getLogger("qhchina.helpers.fonts")
 
 
 __all__ = [
-    'set_font',
     'load_fonts',
+    'set_font',
     'get_font_path',
     'current_font',
-    'list_available_fonts',
-    'list_font_aliases',
+    'download_fonts',
+    'list_remote_fonts',
+    'list_cached_fonts',
+    'clear_cache',
+    'get_cache_dir',
 ]
 
 
-PACKAGE_PATH = Path(__file__).parents[1].resolve() # qhchina
-CJK_FONT_PATH = Path(f'{PACKAGE_PATH}/data/fonts').resolve()
-MPL_FONT_PATH = Path(f'{matplotlib.get_data_path()}/fonts/ttf').resolve()
+# Configuration
+_DEFAULT_FONT_FILE = 'NotoSansTCSC-Regular.otf'
+_GITHUB_API_URL = "https://api.github.com/repos/mcjkurz/qhchina-data/contents/fonts"
+_CACHE_DIR = Path.home() / '.cache' / 'qhchina' / 'fonts'
 
-# Font aliases for convenient access
-FONT_ALIASES = {
-    'sans': 'Noto Sans CJK TC',
-    'sans-tc': 'Noto Sans CJK TC',
-    'sans-sc': 'Noto Sans CJK TC',  # Contains both TC and SC characters
-    'serif-tc': 'Noto Serif TC',
-    'serif-sc': 'Noto Serif SC',
-}
+# Thread safety
+_lock = threading.Lock()
+_loaded_fonts: set[str] = set()  # Track which fonts have been added to font manager
 
-# Mapping from font names to font file names
-FONT_FILES = {
-    'Noto Sans CJK TC': 'NotoSansTCSC-Regular.otf',
-    'Noto Serif TC': 'NotoSerifTC-Regular.otf',
-    'Noto Serif SC': 'NotoSerifSC-Regular.otf',
-}
 
-# Thread-safe global state for font loading
-_fonts_lock = threading.Lock()
-_fonts_loaded = False
-
-def set_font(font='Noto Sans CJK TC') -> None:
+def get_cache_dir() -> Path:
     """
-    Set the matplotlib font for Chinese text rendering.
-    
-    This function is thread-safe.
-    
-    Args:
-        font: Font name, alias, or path to font file. Can be:
-              - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
-              - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
-              - Path to font file: '/path/to/font.otf' or '/path/to/font.ttf'
-    
-    Raises:
-        FileNotFoundError: If a font file path is provided but doesn't exist.
-        ValueError: If the font cannot be loaded or set.
-    """
-    # Check if font is a file path
-    is_file_path = False
-    font_path = None
-    resolved_font = font
-    
-    # Detect if input is a font file path (must end with .otf, .ttf, .OTF, or .TTF)
-    if isinstance(font, (str, Path)):
-        font_str = str(font)
-        if font_str.endswith(('.otf', '.ttf', '.OTF', '.TTF')):
-            font_path = Path(font_str)
-            if font_path.exists() and font_path.is_file():
-                is_file_path = True
-            elif not font_path.exists():
-                raise FileNotFoundError(f"Font file not found: {font_path}")
-    
-    if is_file_path:
-        # Load custom font file
-        try:
-            matplotlib.font_manager.fontManager.addfont(str(font_path))
-            # Extract font name from the file
-            font_props = matplotlib.font_manager.FontProperties(fname=str(font_path))
-            resolved_font = font_props.get_name()
-        except Exception as e:
-            raise ValueError(f"Error loading custom font from: {font_path}") from e
-    else:
-        # Auto-load bundled fonts if not already loaded (thread-safe)
-        # Check and load within the same lock to avoid race condition
-        with _fonts_lock:
-            if not _fonts_loaded:
-                load_fonts(target_font=None, verbose=False)
-        
-        # Resolve alias to actual font name
-        resolved_font = FONT_ALIASES.get(font, font)
-    
-    try:
-        # Determine if this is a serif or sans-serif font (case-insensitive)
-        is_serif = 'serif' in resolved_font.lower()
-        
-        if is_serif:
-            # Set serif font list and family
-            matplotlib.rcParams['font.serif'] = [resolved_font, 'serif']
-            matplotlib.rcParams['font.family'] = 'serif'
-        else:
-            # Set sans-serif font list and family
-            matplotlib.rcParams['font.sans-serif'] = [resolved_font, 'sans-serif']
-            matplotlib.rcParams['font.family'] = 'sans-serif'
-        
-        matplotlib.rcParams['axes.unicode_minus'] = False
-    except Exception as e:
-        raise ValueError(f"Error setting font '{resolved_font}' (from input: '{font}')") from e
-
-def load_fonts(target_font: str = 'Noto Sans CJK TC', verbose: bool = False) -> list[dict] | None:
-    """
-    Load CJK fonts into matplotlib and optionally set a default font.
-    
-    This function is thread-safe and can be called from multiple threads simultaneously.
-    
-    Args:
-        target_font: Font name or alias to set as default. Can be:
-                     - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
-                     - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
-                     - None: Load fonts but don't set a default
-        verbose: If True, print detailed loading information and return font info
+    Get the font cache directory path.
     
     Returns:
-        list[dict] | None: Only when verbose=True, returns a list of dictionaries,
-                           each containing:
-                           - 'font_name': Full font name (e.g., 'Noto Sans CJK TC')
-                           - 'aliases': List of aliases for the font (e.g., ['sans', 'sans-tc'])
-                           - 'path': Absolute path to the font file
-                           When verbose=False, returns None.
-    
-    Raises:
-        OSError: If fonts cannot be copied to matplotlib directory.
+        Path to ~/.cache/qhchina/fonts/
     """
-    global _fonts_loaded
+    return _CACHE_DIR
+
+
+def _ensure_cache_dir() -> Path:
+    """Create cache directory if it doesn't exist."""
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return _CACHE_DIR
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download a file from URL to destination path."""
+    response = requests.get(url, timeout=120, stream=True)
+    response.raise_for_status()
     
-    if verbose:
-        logger.info(f"{PACKAGE_PATH=}")
-        logger.info(f"{CJK_FONT_PATH=}")
-        logger.info(f"{MPL_FONT_PATH=}")
-    cjk_fonts = [file.name for file in Path(f'{CJK_FONT_PATH}').glob('**/*') if not file.name.startswith(".")]
+    with open(dest, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=65536):
+            f.write(chunk)
+
+
+def _query_github_api() -> list[dict]:
+    """Query GitHub API for available fonts."""
+    response = requests.get(_GITHUB_API_URL, timeout=30)
+    response.raise_for_status()
     
-    errors = []
-    for font in cjk_fonts:
-        try:
-            source = Path(f'{CJK_FONT_PATH}/{font}').resolve()
-            target = Path(f'{MPL_FONT_PATH}/{font}').resolve()
-            # Only copy if target doesn't exist or is older than source
-            if not target.exists() or source.stat().st_mtime > target.stat().st_mtime:
-                shutil.copy(source, target)
-                if verbose:
-                    logger.info(f"Copied font: {font}")
-            matplotlib.font_manager.fontManager.addfont(f'{target}')
-            if verbose:
-                logger.info(f"Loaded font: {font}")
-        except Exception as e:
-            errors.append(f"{font}: {e}")
-    
-    with _fonts_lock:
-        if errors and not _fonts_loaded:
-            # Only raise on first load attempt if all fonts failed
-            if len(errors) == len(cjk_fonts):
-                raise OSError(f"Failed to load any fonts. Errors: {errors}")
-        
-        # Mark fonts as loaded
-        _fonts_loaded = True
-    
-    if target_font:
-        # Resolve alias before setting
-        resolved_font = FONT_ALIASES.get(target_font, target_font)
-        if verbose:
-            if target_font != resolved_font:
-                logger.info(f"Resolving alias '{target_font}' to '{resolved_font}'")
-            logger.info(f"Setting font to: {resolved_font}")
-        set_font(target_font)
-    
-    # Build list of font info dictionaries
-    # Create reverse mapping: font_name -> list of aliases
-    font_to_aliases = {}
-    for alias, font_name in FONT_ALIASES.items():
-        if font_name not in font_to_aliases:
-            font_to_aliases[font_name] = []
-        font_to_aliases[font_name].append(alias)
-    
-    if verbose:
-        font_info_list = []
-        for font_name, font_file in FONT_FILES.items():
-            font_info_list.append({
-                'font_name': font_name,
-                'aliases': font_to_aliases.get(font_name, []),
-                'path': str(MPL_FONT_PATH / font_file)
+    files = response.json()
+    fonts = []
+    for item in files:
+        if item['type'] == 'file' and item['name'].endswith(('.otf', '.ttf', '.OTF', '.TTF')):
+            fonts.append({
+                'file': item['name'],
+                'download_url': item['download_url'],
+                'size': item['size'],
             })
-        return font_info_list
+    return fonts
 
-def get_font_path(font: str = 'Noto Sans CJK TC') -> str:
+
+def _get_font_name(font_path: Path) -> str:
+    """Extract font name from a font file."""
+    props = fm.FontProperties(fname=str(font_path))
+    return props.get_name()
+
+
+def _add_to_font_manager(font_path: Path) -> str:
     """
-    Get the file path for a CJK font (for use with WordCloud, etc.).
+    Add font to matplotlib's font manager and return the font name.
+    Thread-safe, skips if already loaded.
+    """
+    path_str = str(font_path)
+    
+    with _lock:
+        if path_str not in _loaded_fonts:
+            fm.fontManager.addfont(path_str)
+            _loaded_fonts.add(path_str)
+    
+    return _get_font_name(font_path)
+
+
+def _set_rcparams(font_name: str) -> None:
+    """Set matplotlib rcParams for the given font."""
+    is_serif = 'serif' in font_name.lower()
+    
+    if is_serif:
+        matplotlib.rcParams['font.serif'] = [font_name, 'serif']
+        matplotlib.rcParams['font.family'] = 'serif'
+    else:
+        matplotlib.rcParams['font.sans-serif'] = [font_name, 'sans-serif']
+        matplotlib.rcParams['font.family'] = 'sans-serif'
+    
+    matplotlib.rcParams['axes.unicode_minus'] = False
+
+
+def _ensure_cached(font_file: str, show_progress: bool = True) -> Path:
+    """
+    Ensure a font file is in the cache, downloading if necessary.
     
     Args:
-        font: Font name or alias. Can be:
-              - Full font name: 'Noto Sans CJK TC', 'Noto Serif TC', 'Noto Serif SC'
-              - Alias: 'sans', 'sans-tc', 'sans-sc', 'serif-tc', 'serif-sc'
+        font_file: Font file name (e.g., 'NotoSerifTC-Regular.otf')
+        show_progress: Show download progress
     
     Returns:
-        str: Absolute path to the font file
+        Path to the cached font file
+    
+    Raises:
+        ValueError: If font file not found in remote repository
+        requests.RequestException: If download fails
+    """
+    _ensure_cache_dir()
+    cached_path = _CACHE_DIR / font_file
+    
+    if cached_path.exists():
+        return cached_path
+    
+    # Query GitHub for download URL
+    remote_fonts = _query_github_api()
+    font_info = next((f for f in remote_fonts if f['file'] == font_file), None)
+    
+    if font_info is None:
+        available = [f['file'] for f in remote_fonts]
+        raise ValueError(
+            f"Font file '{font_file}' not found in qhchina-data repository.\n"
+            f"Available fonts: {available}"
+        )
+    
+    if show_progress:
+        print(f"Downloading font '{font_file}'...")
+    
+    _download_file(font_info['download_url'], cached_path)
+    
+    if show_progress:
+        size_mb = cached_path.stat().st_size / 1024 / 1024
+        print(f"Font downloaded ({size_mb:.1f} MB)")
+    
+    return cached_path
+
+
+# =============================================================================
+# Public API
+# =============================================================================
+
+def load_fonts() -> str:
+    """
+    Load the default CJK font for matplotlib.
+    
+    Downloads the font from GitHub if not already cached.
+    This is the simplest way to get started with Chinese text in plots.
+    
+    Returns:
+        The font name that was set (e.g., 'Noto Sans CJK TC')
     
     Example:
-        font_path = qhchina.get_font_path()
-        wc = WordCloud(font_path=font_path, ...)
+        >>> import qhchina
+        >>> qhchina.load_fonts()
+        'Noto Sans CJK TC'
+        >>> plt.title('中文標題')  # Now works!
     """
-    # Resolve alias to font name
-    resolved_font = FONT_ALIASES.get(font, font)
+    cached_path = _ensure_cached(_DEFAULT_FONT_FILE)
+    font_name = _add_to_font_manager(cached_path)
+    _set_rcparams(font_name)
+    return font_name
+
+
+def set_font(font: str) -> str:
+    """
+    Set matplotlib to use a specific font.
     
-    # Get font file name
-    font_file = FONT_FILES.get(resolved_font)
-    if font_file is None:
-        raise ValueError(f"Unknown font: '{font}'. Available fonts: {list(FONT_FILES.keys())}")
+    Args:
+        font: One of:
+              - Font file name: 'NotoSerifTC-Regular.otf' (downloads from GitHub if needed)
+              - Local file path: '/path/to/font.otf' (must exist)
+              - Font name: 'Noto Serif TC', 'SimHei', etc. (sets rcParams directly)
     
-    return str(MPL_FONT_PATH / font_file)
+    Returns:
+        The font name that was set
+    
+    Examples:
+        >>> # Use a font from qhchina-data (downloads if needed)
+        >>> qhchina.set_font('NotoSerifTC-Regular.otf')
+        'Noto Serif TC'
+        
+        >>> # Use a local font file
+        >>> qhchina.set_font('/path/to/MyFont.otf')
+        'My Font'
+        
+        >>> # Use an already-loaded or system font by name
+        >>> qhchina.set_font('Noto Serif TC')
+        'Noto Serif TC'
+    """
+    font_str = str(font)
+    
+    if font_str.endswith(('.otf', '.ttf', '.OTF', '.TTF')):
+        # It's a font file
+        path = Path(font_str)
+        
+        if path.exists():
+            # Local file path
+            font_name = _add_to_font_manager(path)
+        elif '/' in font_str or '\\' in font_str:
+            # Looks like a path but doesn't exist
+            raise FileNotFoundError(f"Font file not found: {font_str}")
+        else:
+            # Just a filename - download from GitHub
+            cached_path = _ensure_cached(font_str)
+            font_name = _add_to_font_manager(cached_path)
+    else:
+        # It's a font name - just use it directly
+        font_name = font_str
+    
+    _set_rcparams(font_name)
+    return font_name
+
+
+def get_font_path(font: str | None = None) -> str:
+    """
+    Get the file path for a font (for use with WordCloud, etc.).
+    
+    Args:
+        font: Font file name (e.g., 'NotoSerifTC-Regular.otf') or None for default.
+              Can also be a local file path.
+    
+    Returns:
+        Absolute path to the font file
+    
+    Example:
+        >>> path = qhchina.get_font_path()  # default font
+        >>> wc = WordCloud(font_path=path, ...)
+        
+        >>> path = qhchina.get_font_path('NotoSerifTC-Regular.otf')
+    """
+    if font is None:
+        font = _DEFAULT_FONT_FILE
+    
+    font_str = str(font)
+    
+    # Check if it's an existing path
+    if Path(font_str).exists():
+        return str(Path(font_str).resolve())
+    
+    # Check if it ends with font extension
+    if font_str.endswith(('.otf', '.ttf', '.OTF', '.TTF')):
+        cached_path = _ensure_cached(font_str)
+        return str(cached_path)
+    
+    raise ValueError(
+        f"Cannot get path for '{font}'. "
+        f"Provide a font file name (e.g., 'NotoSerifTC-Regular.otf') or a local file path."
+    )
+
+
+def download_fonts(fonts: str | list[str] | None = None) -> dict[str, str]:
+    """
+    Download font files from the qhchina-data repository.
+    
+    Args:
+        fonts: Font file name(s) to download. If None, downloads ALL available fonts.
+               Examples:
+                 - None: download all fonts
+                 - 'NotoSerifTC-Regular.otf': download single font
+                 - ['NotoSerifTC-Regular.otf', 'NotoSerifSC-Regular.otf']: download multiple
+    
+    Returns:
+        Dict mapping file names to font names:
+        {'NotoSerifTC-Regular.otf': 'Noto Serif TC', ...}
+    
+    Example:
+        >>> # Download all fonts
+        >>> qhchina.download_fonts()
+        {'NotoSansTCSC-Regular.otf': 'Noto Sans CJK TC', ...}
+        
+        >>> # Download specific font
+        >>> qhchina.download_fonts('NotoSerifTC-Regular.otf')
+        {'NotoSerifTC-Regular.otf': 'Noto Serif TC'}
+    """
+    if fonts is None:
+        # Download all available fonts
+        remote = _query_github_api()
+        font_files = [f['file'] for f in remote]
+    elif isinstance(fonts, str):
+        font_files = [fonts]
+    else:
+        font_files = list(fonts)
+    
+    result = {}
+    for font_file in font_files:
+        cached_path = _ensure_cached(font_file)
+        font_name = _add_to_font_manager(cached_path)
+        result[font_file] = font_name
+    
+    return result
+
+
+def list_remote_fonts() -> list[dict]:
+    """
+    Query GitHub for available fonts in the qhchina-data repository.
+    
+    Returns:
+        List of dicts with font information:
+        [{'file': 'NotoSansTCSC-Regular.otf', 'size': 17279824, 'size_mb': 16.5}, ...]
+    
+    Example:
+        >>> qhchina.list_remote_fonts()
+        [{'file': 'NotoSansTCSC-Regular.otf', 'size': 17279824, 'size_mb': 16.5}, ...]
+    """
+    remote = _query_github_api()
+    return [
+        {
+            'file': f['file'],
+            'size': f['size'],
+            'size_mb': round(f['size'] / 1024 / 1024, 1),
+        }
+        for f in remote
+    ]
+
+
+def list_cached_fonts() -> list[dict]:
+    """
+    List fonts currently in the local cache.
+    
+    Returns:
+        List of dicts with font information:
+        [{'file': 'NotoSansTCSC-Regular.otf', 'font_name': 'Noto Sans CJK TC', 
+          'path': '/Users/.../.cache/qhchina/fonts/NotoSansTCSC-Regular.otf', 
+          'size_mb': 16.5}, ...]
+    """
+    if not _CACHE_DIR.exists():
+        return []
+    
+    result = []
+    for font_file in _CACHE_DIR.glob('*.otf'):
+        if font_file.name.startswith('.'):
+            continue
+        try:
+            font_name = _get_font_name(font_file)
+            result.append({
+                'file': font_file.name,
+                'font_name': font_name,
+                'path': str(font_file),
+                'size_mb': round(font_file.stat().st_size / 1024 / 1024, 1),
+            })
+        except Exception as e:
+            logger.warning(f"Could not read font {font_file.name}: {e}")
+    
+    # Also check for .ttf files
+    for font_file in _CACHE_DIR.glob('*.ttf'):
+        if font_file.name.startswith('.'):
+            continue
+        try:
+            font_name = _get_font_name(font_file)
+            result.append({
+                'file': font_file.name,
+                'font_name': font_name,
+                'path': str(font_file),
+                'size_mb': round(font_file.stat().st_size / 1024 / 1024, 1),
+            })
+        except Exception as e:
+            logger.warning(f"Could not read font {font_file.name}: {e}")
+    
+    return result
+
 
 def current_font() -> str | None:
     """
-    Get the currently configured font name.
+    Get the currently configured matplotlib font name.
     
     Returns:
-        The current font name, or None if no font is configured.
-    
-    Raises:
-        RuntimeError: If there's an error accessing font configuration.
+        The current font name, or None if using matplotlib defaults.
     """
     try:
-        # Check serif first if family is serif
         font_family = matplotlib.rcParams.get('font.family', [])
-        is_serif = font_family == ['serif'] or font_family == 'serif'
-        if is_serif:
+        
+        if font_family == 'serif' or font_family == ['serif']:
             fonts = matplotlib.rcParams.get('font.serif', [])
         else:
             fonts = matplotlib.rcParams.get('font.sans-serif', [])
+        
         return fonts[0] if fonts else None
     except (KeyError, IndexError):
         return None
-    except Exception as e:
-        raise RuntimeError(f"Error getting current font: {e}") from e
 
-def list_available_fonts() -> dict:
-    """
-    List all available CJK fonts bundled with the package.
-    Returns a dictionary mapping font file names to their internal font names.
-    """
-    font_info = {}
-    cjk_fonts = [file for file in Path(f'{CJK_FONT_PATH}').glob('*.otf') if not file.name.startswith(".")]
-    
-    for font_file in cjk_fonts:
-        try:
-            font_props = matplotlib.font_manager.FontProperties(fname=str(font_file))
-            font_name = font_props.get_name()
-            font_info[font_file.name] = font_name
-        except Exception as e:
-            logger.error(f"Error reading font: {font_file.name}")
-            logger.error(f"Error: {e}")
-    
-    return font_info
 
-def list_font_aliases() -> dict:
+def clear_cache() -> None:
     """
-    List all available font aliases for convenient access.
-    Returns a dictionary mapping aliases to their full font names.
+    Remove all cached fonts.
+    
+    Example:
+        >>> qhchina.clear_cache()
+        >>> qhchina.list_cached_fonts()
+        []
     """
-    return FONT_ALIASES.copy()
+    global _loaded_fonts
+    
+    if _CACHE_DIR.exists():
+        for font_file in _CACHE_DIR.glob('*'):
+            if font_file.is_file() and not font_file.name.startswith('.'):
+                font_file.unlink()
+    
+    with _lock:
+        _loaded_fonts.clear()

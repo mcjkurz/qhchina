@@ -107,7 +107,7 @@ class TestLoadStopwords:
         """Test that invalid language raises ValueError."""
         from qhchina.helpers import load_stopwords
         
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(ValueError, match="No stopwords files found"):
             load_stopwords("invalid_language_xyz")
     
     def test_load_stopwords_all_available(self):
@@ -130,6 +130,44 @@ class TestLoadStopwords:
         assert isinstance(languages, list)
         assert "zh_sim" in languages
         assert "zh_tr" in languages
+    
+    def test_load_stopwords_prefix_zh(self):
+        """Test loading all Chinese stopwords with prefix 'zh'."""
+        from qhchina.helpers import load_stopwords
+        
+        # Load all zh* stopwords
+        all_zh_stopwords = load_stopwords("zh")
+        
+        # Load individual files
+        zh_sim = load_stopwords("zh_sim")
+        zh_tr = load_stopwords("zh_tr")
+        zh_cl_sim = load_stopwords("zh_cl_sim")
+        zh_cl_tr = load_stopwords("zh_cl_tr")
+        
+        # The combined set should be the union of all individual sets
+        expected = zh_sim | zh_tr | zh_cl_sim | zh_cl_tr
+        assert all_zh_stopwords == expected
+        assert len(all_zh_stopwords) >= len(zh_sim)
+    
+    def test_load_stopwords_prefix_zh_cl(self):
+        """Test loading classical Chinese stopwords with prefix 'zh_cl'."""
+        from qhchina.helpers import load_stopwords
+        
+        # Load all zh_cl* stopwords
+        all_cl_stopwords = load_stopwords("zh_cl")
+        
+        # Load individual classical files
+        zh_cl_sim = load_stopwords("zh_cl_sim")
+        zh_cl_tr = load_stopwords("zh_cl_tr")
+        
+        # The combined set should be the union of classical files only
+        expected = zh_cl_sim | zh_cl_tr
+        assert all_cl_stopwords == expected
+        
+        # Should NOT include non-classical stopwords
+        zh_sim = load_stopwords("zh_sim")
+        # Classical files should have some stopwords not in modern simplified
+        assert isinstance(all_cl_stopwords, set)
 
 
 class TestSplitIntoChunks:
@@ -268,32 +306,49 @@ class TestDetectEncoding:
 class TestFonts:
     """Tests for font management functions."""
     
-    def test_list_available_fonts(self):
-        """Test listing available fonts (returns dict)."""
-        from qhchina.helpers import list_available_fonts
+    def test_list_remote_fonts(self):
+        """Test listing remote fonts from GitHub."""
+        from qhchina.helpers import list_remote_fonts
         
-        fonts = list_available_fonts()
+        fonts = list_remote_fonts()
         
-        assert isinstance(fonts, dict)
+        assert isinstance(fonts, list)
         assert len(fonts) > 0
+        assert 'file' in fonts[0]
+        assert 'size' in fonts[0]
+        assert 'size_mb' in fonts[0]
+    
+    def test_list_cached_fonts(self):
+        """Test listing cached fonts."""
+        from qhchina.helpers import list_cached_fonts, load_fonts
+        
+        # Ensure at least one font is cached
+        load_fonts()
+        
+        cached = list_cached_fonts()
+        assert isinstance(cached, list)
+        assert len(cached) > 0
+        assert 'file' in cached[0]
+        assert 'font_name' in cached[0]
+        assert 'path' in cached[0]
     
     def test_get_font_path(self):
         """Test getting font path."""
         from qhchina.helpers import get_font_path
         
-        # Should return a path for one of the built-in fonts
+        # Should return a path for the default font
         path = get_font_path()
         
         assert path is not None
         assert Path(path).exists()
     
-    def test_get_font_path_with_alias(self):
-        """Test getting font path with alias."""
+    def test_get_font_path_with_filename(self):
+        """Test getting font path with explicit filename."""
         from qhchina.helpers import get_font_path
         
-        # Test various aliases
-        for alias in ['sans', 'sans-tc', 'serif-tc', 'serif-sc']:
-            path = get_font_path(alias)
+        # Test with explicit font file names
+        for filename in ['NotoSansTCSC-Regular.otf', 'NotoSerifTC-Regular.otf']:
+            path = get_font_path(filename)
             assert path is not None
             assert Path(path).exists()
     
@@ -301,35 +356,27 @@ class TestFonts:
         """Test that invalid font name raises ValueError."""
         from qhchina.helpers import get_font_path
         
-        with pytest.raises(ValueError, match="Unknown font"):
+        with pytest.raises(ValueError, match="Cannot get path"):
             get_font_path("NonExistentFont")
     
     def test_load_fonts(self):
         """Test loading fonts for matplotlib."""
         from qhchina.helpers import load_fonts
         
-        # Should not raise
-        load_fonts()
+        # Should return font name
+        font_name = load_fonts()
+        assert isinstance(font_name, str)
+        assert font_name == 'Noto Sans CJK TC'
     
-    def test_load_fonts_verbose(self):
-        """Test loading fonts with verbose mode returns font info."""
-        from qhchina.helpers import load_fonts
+    def test_download_fonts_single(self):
+        """Test downloading a single font."""
+        from qhchina.helpers import download_fonts
         
-        result = load_fonts(verbose=True)
+        result = download_fonts('NotoSerifTC-Regular.otf')
         
-        assert isinstance(result, list)
-        if len(result) > 0:
-            assert 'font_name' in result[0]
-            assert 'aliases' in result[0]
-            assert 'path' in result[0]
-    
-    def test_load_fonts_with_target(self):
-        """Test loading fonts with specific target font."""
-        from qhchina.helpers import load_fonts
-        
-        # Should not raise
-        load_fonts(target_font='sans')
-        load_fonts(target_font='serif-tc')
+        assert isinstance(result, dict)
+        assert 'NotoSerifTC-Regular.otf' in result
+        assert result['NotoSerifTC-Regular.otf'] == 'Noto Serif TC'
     
     def test_current_font(self):
         """Test getting current font."""
@@ -339,36 +386,36 @@ class TestFonts:
         font = current_font()
         
         assert font is not None
+        assert font == 'Noto Sans CJK TC'
     
-    def test_set_font(self):
-        """Test setting font."""
+    def test_set_font_with_filename(self):
+        """Test setting font with filename."""
+        from qhchina.helpers.fonts import set_font, current_font
+        
+        # Set with filename (downloads if needed)
+        font_name = set_font('NotoSerifTC-Regular.otf')
+        
+        assert font_name == 'Noto Serif TC'
+        assert current_font() == 'Noto Serif TC'
+    
+    def test_set_font_with_font_name(self):
+        """Test setting font with font name."""
         from qhchina.helpers.fonts import set_font, current_font, load_fonts
         
+        # First load default font
         load_fonts()
         
-        # Set to a known font
-        set_font('Noto Sans CJK TC')
+        # Then set by name (font already in matplotlib)
+        font_name = set_font('Noto Sans CJK TC')
         
-        # Verify it was set
-        font = current_font()
-        assert font is not None
+        assert font_name == 'Noto Sans CJK TC'
+        assert current_font() == 'Noto Sans CJK TC'
     
-    def test_set_font_with_alias(self):
-        """Test setting font with alias."""
-        from qhchina.helpers.fonts import set_font, load_fonts
+    def test_get_cache_dir(self):
+        """Test getting cache directory."""
+        from qhchina.helpers import get_cache_dir
         
-        load_fonts()
-        
-        # Should not raise
-        set_font('sans')
-        set_font('serif-tc')
-    
-    def test_list_font_aliases(self):
-        """Test listing font aliases."""
-        from qhchina.helpers.fonts import list_font_aliases
-        
-        aliases = list_font_aliases()
-        
-        assert isinstance(aliases, dict)
-        assert 'sans' in aliases
-        assert 'serif-tc' in aliases
+        cache_dir = get_cache_dir()
+        assert cache_dir is not None
+        assert 'qhchina' in str(cache_dir)
+        assert 'fonts' in str(cache_dir)

@@ -19,14 +19,14 @@ class TestSegmentationWrapper:
         
         wrapper = SegmentationWrapper()
         
-        assert wrapper.strategy == "whole"
+        assert wrapper.strategy == "document"
         assert wrapper.chunk_size == 512
     
     def test_init_strategies(self):
         """Test different strategy options."""
         from qhchina.preprocessing.segmentation import SegmentationWrapper
         
-        for strategy in ["line", "sentence", "chunk", "whole"]:
+        for strategy in ["line", "sentence", "chunk", "document"]:
             wrapper = SegmentationWrapper(strategy=strategy)
             assert wrapper.strategy == strategy
     
@@ -85,14 +85,14 @@ class TestJiebaSegmenter:
         except ImportError:
             return False
     
-    def test_jieba_segment_whole(self, jieba_available, sample_chinese_text):
-        """Test whole-text segmentation with Jieba."""
+    def test_jieba_segment_document(self, jieba_available, sample_chinese_text):
+        """Test document-level segmentation with Jieba."""
         if not jieba_available:
             pytest.skip("jieba not installed")
         
         from qhchina.preprocessing.segmentation import JiebaSegmenter
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment(sample_chinese_text)
         
         assert isinstance(tokens, list)
@@ -138,7 +138,7 @@ class TestJiebaSegmenter:
         from qhchina.preprocessing.segmentation import JiebaSegmenter
         
         segmenter = JiebaSegmenter(
-            strategy="whole",
+            strategy="document",
             filters={'stopwords': sample_stopwords}
         )
         tokens = segmenter.segment(sample_chinese_text)
@@ -155,7 +155,7 @@ class TestJiebaSegmenter:
         from qhchina.preprocessing.segmentation import JiebaSegmenter
         
         segmenter = JiebaSegmenter(
-            strategy="whole",
+            strategy="document",
             filters={'min_word_length': 2}
         )
         tokens = segmenter.segment(sample_chinese_text)
@@ -272,7 +272,7 @@ class TestJiebaSegmenter:
         
         from qhchina.preprocessing.segmentation import JiebaSegmenter
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment("")
         
         assert tokens == []
@@ -285,7 +285,7 @@ class TestJiebaSegmenter:
         
         from qhchina.preprocessing.segmentation import JiebaSegmenter
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment("   \t\n   ")
         
         # Should return empty or only whitespace tokens
@@ -320,7 +320,7 @@ class TestJiebaSegmenter:
         
         # Exclude pronouns ('r')
         segmenter = JiebaSegmenter(
-            strategy="whole",
+            strategy="document",
             filters={'excluded_pos': {'r'}}  # 'r' is pronoun in Jieba
         )
         tokens = segmenter.segment(text)
@@ -340,7 +340,7 @@ class TestJiebaSegmenter:
         text = "我在年青时候也曾经做过许多梦"
         
         segmenter = JiebaSegmenter(
-            strategy="whole",
+            strategy="document",
             filters={
                 'stopwords': sample_stopwords,
                 'min_word_length': 2
@@ -369,8 +369,8 @@ class TestPKUSegmenter:
         except ImportError:
             return False
     
-    def test_pkuseg_segment_whole(self, pkuseg_available):
-        """Test whole-text segmentation with PKUSeg."""
+    def test_pkuseg_segment_document(self, pkuseg_available):
+        """Test document-level segmentation with PKUSeg."""
         if not pkuseg_available:
             pytest.skip("pkuseg not installed")
         
@@ -378,7 +378,7 @@ class TestPKUSegmenter:
         
         text = "我在年青时候也曾经做过许多梦"
         
-        segmenter = PKUSegmenter(strategy="whole")
+        segmenter = PKUSegmenter(strategy="document")
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -488,7 +488,7 @@ class TestPKUSegmenter:
         
         from qhchina.preprocessing.segmentation import PKUSegmenter
         
-        segmenter = PKUSegmenter(strategy="whole")
+        segmenter = PKUSegmenter(strategy="document")
         tokens = segmenter.segment("")
         
         assert tokens == []
@@ -609,7 +609,7 @@ class TestCreateSegmenter:
         
         from qhchina.preprocessing.segmentation import create_segmenter
         
-        for strategy in ["whole", "line", "sentence"]:
+        for strategy in ["document", "line", "sentence"]:
             segmenter = create_segmenter(backend="jieba", strategy=strategy)
             assert segmenter.strategy == strategy
             segmenter.close()
@@ -641,7 +641,7 @@ class TestSegmentationEdgeCases:
         # Text with various Unicode characters
         text = "我爱🎉编程！Hello世界。"
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -658,7 +658,7 @@ class TestSegmentationEdgeCases:
         # Text with mixed punctuation
         text = "你好！Hello, 世界。How are you?"
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -673,7 +673,7 @@ class TestSegmentationEdgeCases:
         
         text = "今天是2024年1月1日，温度是25.5度。"
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -690,7 +690,7 @@ class TestSegmentationEdgeCases:
         # Classical Chinese text
         text = "子曰：學而時習之，不亦說乎？"
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -706,7 +706,7 @@ class TestSegmentationEdgeCases:
         
         text = "Python是最好的programming语言之一"
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -723,7 +723,7 @@ class TestSegmentationEdgeCases:
         # Create a long text
         text = "我喜欢学习编程。" * 1000
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -737,7 +737,7 @@ class TestSegmentationEdgeCases:
         
         from qhchina.preprocessing.segmentation import JiebaSegmenter
         
-        segmenter = JiebaSegmenter(strategy="whole")
+        segmenter = JiebaSegmenter(strategy="document")
         tokens = segmenter.segment("我")
         
         assert isinstance(tokens, list)
@@ -757,14 +757,14 @@ class TestSpacySegmenter:
         except (ImportError, OSError):
             return False
     
-    def test_spacy_segment_whole(self, spacy_available, sample_chinese_text):
-        """Test whole-text segmentation with spaCy."""
+    def test_spacy_segment_document(self, spacy_available, sample_chinese_text):
+        """Test document-level segmentation with spaCy."""
         if not spacy_available:
             pytest.skip("spaCy with Chinese model not installed")
         
         from qhchina.preprocessing.segmentation import SpacySegmenter
         
-        segmenter = SpacySegmenter(strategy="whole")
+        segmenter = SpacySegmenter(strategy="document")
         tokens = segmenter.segment(sample_chinese_text)
         
         assert isinstance(tokens, list)
