@@ -23,16 +23,14 @@ __all__ = [
 
 try:
     from .cython_ext.collocations import (
-        calculate_cooc_matrix_window,
-        calculate_cooc_matrix_document,
+        calculate_cooc_matrix,
         calculate_window_counts_batch,
         calculate_sentence_counts_batch,
     )
     CYTHON_AVAILABLE = True
 except ImportError:
     CYTHON_AVAILABLE = False
-    calculate_cooc_matrix_window = None
-    calculate_cooc_matrix_document = None
+    calculate_cooc_matrix = None
     calculate_window_counts_batch = None
     calculate_sentence_counts_batch = None
     logger.warning("Cython extensions not available; using slower Python fallback.")
@@ -1007,83 +1005,70 @@ def cooc_matrix(
     
     word_to_index = {word: i for i, word in enumerate(vocab_list)}
     
-    # Pass 2: Count co-occurrences (streams through documents again)
+    # Parse horizon into left/right for the window method
     if method == 'window':
         if isinstance(horizon, int):
             left_horizon, right_horizon = horizon, horizon
         else:
             left_horizon, right_horizon = horizon[0], horizon[1]
-        cooc_sparse = _cooc_window(
-            documents, word_to_index, left_horizon, right_horizon, binary
+    else:
+        left_horizon, right_horizon = 0, 0
+    
+    vocab_size = len(word_to_index)
+    
+    # Pass 2: Count co-occurrences (streams through documents again)
+    if CYTHON_AVAILABLE:
+        indptr, indices, data = calculate_cooc_matrix(
+            documents, word_to_index,
+            method=method,
+            left_horizon=left_horizon,
+            right_horizon=right_horizon,
+            binary=binary,
         )
-    elif method == 'document':
-        cooc_sparse = _cooc_document(documents, word_to_index, binary)
+        cooc_sparse = sparse.csr_matrix(
+            (data, indices, indptr), shape=(vocab_size, vocab_size)
+        )
+        if method == 'document':
+            cooc_sparse.setdiag(0)
+            cooc_sparse.eliminate_zeros()
+    else:
+        cooc_sparse = _cooc_python_fallback(
+            documents, word_to_index, method, left_horizon, right_horizon, binary
+        )
         
     return CoocMatrix(cooc_sparse, vocab_list, word_to_index)
 
 
-def _cooc_window(
+def _cooc_python_fallback(
     documents: Iterable[list[str]],
     word_to_index: dict[str, int],
+    method: str,
     left_horizon: int,
     right_horizon: int,
     binary: bool,
-    batch_words: int = 100_000,
 ) -> sparse.csr_matrix:
     """
-    Calculate window-based co-occurrences by streaming through documents.
+    Pure Python fallback for co-occurrence matrix calculation.
     
-    Uses Cython acceleration when available, otherwise falls back to pure Python.
-    Words not in word_to_index (OOV) are skipped for counting but preserve positional
-    distances between vocabulary words.
+    Used when Cython extensions are not available. Supports both window and
+    document methods via a single entry point.
     
     Args:
         documents: Iterable of tokenized documents.
         word_to_index: Mapping from vocabulary words to matrix indices.
-        left_horizon: Number of positions to look left.
-        right_horizon: Number of positions to look right.
+        method: 'window' or 'document'.
+        left_horizon: Number of positions to look left (window method).
+        right_horizon: Number of positions to look right (window method).
         binary: If True, count presence (0/1) rather than frequency.
-        batch_words: Target token count per batch for Cython path.
     
     Returns:
         Sparse CSR matrix of co-occurrence counts.
     """
     vocab_size = len(word_to_index)
+    logger.debug(f"Using pure Python fallback for cooc_matrix ({method} method)")
+    cooc_dict: dict[tuple[int, int], int] = defaultdict(int)
     
-    if CYTHON_AVAILABLE and calculate_cooc_matrix_window is not None:
-        all_rows = []
-        all_cols = []
-        all_data = []
-        
-        for batch in iter_batches(documents, batch_words, max_length=None):
-            row_indices, col_indices, data_values = calculate_cooc_matrix_window(
-                batch, word_to_index, left_horizon, right_horizon, binary
-            )
-            if len(row_indices) > 0:
-                all_rows.append(row_indices)
-                all_cols.append(col_indices)
-                all_data.append(data_values)
-        
-        if not all_rows:
-            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
-        
-        row_arr = np.concatenate(all_rows)
-        col_arr = np.concatenate(all_cols)
-        data_arr = np.concatenate(all_data)
-        
-        cooc_sparse = sparse.coo_matrix(
-            (data_arr, (row_arr, col_arr)), shape=(vocab_size, vocab_size), dtype=np.int64
-        ).tocsr()
-        
-        if binary:
-            cooc_sparse.data = np.ones_like(cooc_sparse.data)
-        
-        return cooc_sparse
-    
-    else:
-        logger.debug("Using pure Python fallback for cooc_matrix (Cython not available)")
-        cooc_dict: dict[tuple[int, int], int] = defaultdict(int)
-        
+    if method == 'window':
         for document in documents:
             if not document:
                 continue
@@ -1103,78 +1088,7 @@ def _cooc_window(
                                 cooc_dict[(idx1, idx2)] = 1
                             else:
                                 cooc_dict[(idx1, idx2)] += 1
-        
-        if not cooc_dict:
-            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
-        
-        rows, cols, data = zip(*((i, j, c) for (i, j), c in cooc_dict.items()))
-        return sparse.coo_matrix(
-            (data, (rows, cols)), shape=(vocab_size, vocab_size), dtype=np.int64
-        ).tocsr()
-
-
-def _cooc_document(
-    documents: Iterable[list[str]],
-    word_to_index: dict[str, int],
-    binary: bool,
-    batch_words: int = 100_000,
-) -> sparse.csr_matrix:
-    """
-    Calculate document-based (bag-of-words) co-occurrences by streaming.
-    
-    Each document is treated as a bag of words. Two words co-occur if they appear
-    in the same document, regardless of their positions. For binary=False, each
-    pair contributes count_i * count_j (matching X @ X.T semantics). Documents
-    are processed in batches; document boundaries are never crossed.
-    
-    Args:
-        documents: Iterable of tokenized documents.
-        word_to_index: Mapping from vocabulary words to matrix indices.
-        binary: If True, count presence (0/1) rather than frequency.
-        batch_words: Target token count per batch for Cython path.
-    
-    Returns:
-        Sparse CSR matrix of co-occurrence counts.
-    """
-    vocab_size = len(word_to_index)
-    
-    if CYTHON_AVAILABLE and calculate_cooc_matrix_document is not None:
-        all_rows = []
-        all_cols = []
-        all_data = []
-        
-        for batch in iter_batches(documents, batch_words, max_length=None):
-            row_indices, col_indices, data_values = calculate_cooc_matrix_document(
-                batch, word_to_index, binary
-            )
-            if len(row_indices) > 0:
-                all_rows.append(row_indices)
-                all_cols.append(col_indices)
-                all_data.append(data_values)
-        
-        if not all_rows:
-            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
-        
-        row_arr = np.concatenate(all_rows)
-        col_arr = np.concatenate(all_cols)
-        data_arr = np.concatenate(all_data)
-        
-        cooc_sparse = sparse.coo_matrix(
-            (data_arr, (row_arr, col_arr)), shape=(vocab_size, vocab_size), dtype=np.int64
-        ).tocsr()
-        
-        if binary:
-            cooc_sparse.data = np.ones_like(cooc_sparse.data)
-        
-        cooc_sparse.setdiag(0)
-        cooc_sparse.eliminate_zeros()
-        
-        return cooc_sparse
-    
     else:
-        logger.debug("Using pure Python fallback for cooc_matrix document method (Cython not available)")
-        cooc_dict: dict[tuple[int, int], int] = defaultdict(int)
-        
         for document in documents:
             if not document:
                 continue
@@ -1198,14 +1112,20 @@ def _cooc_document(
                         weight = doc_word_counts[idx_a] * doc_word_counts[idx_b]
                         cooc_dict[(idx_a, idx_b)] += weight
                         cooc_dict[(idx_b, idx_a)] += weight
-        
-        if not cooc_dict:
-            return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
-        
-        rows, cols, data = zip(*((i, j, c) for (i, j), c in cooc_dict.items()))
-        return sparse.coo_matrix(
-            (data, (rows, cols)), shape=(vocab_size, vocab_size), dtype=np.int64
-        ).tocsr()
+    
+    if not cooc_dict:
+        return sparse.coo_matrix((vocab_size, vocab_size), dtype=np.int64).tocsr()
+    
+    rows, cols, data = zip(*((i, j, c) for (i, j), c in cooc_dict.items()))
+    cooc_sparse = sparse.coo_matrix(
+        (data, (rows, cols)), shape=(vocab_size, vocab_size), dtype=np.int64
+    ).tocsr()
+    
+    if method == 'document':
+        cooc_sparse.setdiag(0)
+        cooc_sparse.eliminate_zeros()
+    
+    return cooc_sparse
 
 def plot_collocates(
     collocates: list[dict] | pd.DataFrame,

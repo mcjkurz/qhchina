@@ -6,17 +6,24 @@
 # cython: initializedcheck=False
 
 """
-Collocation counting operations implemented in Cython.
+Collocation and co-occurrence counting operations implemented in Cython.
 
-This module provides highly optimized implementations of core counting operations
-for collocation analysis. Key optimizations include:
+This module provides optimized implementations of core counting operations:
+
+Collocation counting (find_collocates):
 - C-level sentence encoding: Flattened contiguous buffer with offset array for O(1) access
 - Zero dictionary access in hot loops: All counting operates on pure C-level integer arrays
 - Active targets tracking: Window routine only iterates over targets actually seen in window
 - Epoch-based uniqueness: O(1) duplicate detection without linear search
-- Dense NumPy arrays for direct counting in nogil blocks (no sparse-to-dense conversion)
-- GIL-free hot loops with while-based iteration for maximum performance
-- Complete separation: Python dictionary access happens before any counting routine
+- Dense NumPy arrays for direct counting in nogil blocks
+- GIL-free hot loops for maximum performance
+
+Co-occurrence matrix (cooc_matrix):
+- C++ unordered_map accumulation: Deduplicates co-occurrence pairs in-place during counting,
+  using O(nnz) memory instead of O(total_pairs). Avoids the scipy COO->CSR sort bottleneck.
+- Streaming batches: Each batch is encoded, counted into a persistent map (nogil), and freed.
+- Direct CSR construction: Map entries are sorted once by (row, col) and written directly
+  into CSR arrays — no intermediate COO format.
 """
 
 import numpy as np
@@ -24,6 +31,9 @@ cimport numpy as np
 from libc.stdlib cimport malloc, free
 from libc.string cimport memset
 from libcpp.vector cimport vector
+from libcpp.unordered_map cimport unordered_map
+from libcpp.algorithm cimport sort as cpp_sort
+from libcpp.pair cimport pair
 
 # Define C-level types for better performance
 ctypedef np.int32_t INT_t
@@ -454,255 +464,259 @@ def calculate_sentence_counts_batch(
 
 
 # =============================================================================
-# Co-occurrence Matrix Functions
+# Co-occurrence Matrix Functions (hash-map accumulation)
 # =============================================================================
 
-def calculate_cooc_matrix_window(list documents, dict word_to_index, 
-                                  int left_horizon=5, int right_horizon=5,
-                                  bint binary=False):
-    """
-    Cython-accelerated window-based co-occurrence matrix calculation.
-    
-    This function preserves word distances by keeping OOV words as sentinel values
-    during encoding. OOV words occupy their positions but are skipped for counting,
-    ensuring that distances between vocabulary words are accurate.
-    
-    Args:
-        documents: List of tokenized documents (list of lists of strings)
-        word_to_index: Dictionary mapping vocabulary words to indices
-        left_horizon: Window size on the left side
-        right_horizon: Window size on the right side
-        binary: If True, count co-occurrences as binary (0/1). Default False.
-        
-    Returns:
-        tuple: (row_indices, col_indices, data_values) - COO format sparse matrix data
-            All are numpy arrays ready for scipy.sparse.coo_matrix construction.
-    """
-    cdef EncodedSentences* encoded = NULL
-    cdef int vocab_size = len(word_to_index)
-    
-    if vocab_size == 0:
-        return np.array([], dtype=np.int32), np.array([], dtype=np.int32), np.array([], dtype=np.int64)
-    
-    encoded = encode_sentences_to_c_buffer(documents, word_to_index, keep_oov=True)
-    
-    try:
-        return _calculate_cooc_window_counts(
-            encoded, vocab_size, left_horizon, right_horizon, binary
-        )
-    finally:
-        free_encoded_sentences(encoded)
+# Struct for sorting map entries into CSR order
+cdef struct CoocEntry:
+    INT_t row
+    INT_t col
+    LONG_t value
+
+cdef inline bint _cooc_entry_less(const CoocEntry& a, const CoocEntry& b) noexcept nogil:
+    if a.row != b.row:
+        return a.row < b.row
+    return a.col < b.col
 
 
-cdef _calculate_cooc_window_counts(
+cdef void _count_window_pairs(
     EncodedSentences* encoded,
+    unordered_map[long long, long long]* counts,
     int vocab_size,
     int left_horizon,
     int right_horizon,
-    bint binary
-):
+) noexcept nogil:
     """
-    Core co-occurrence counting logic for window method.
+    Window-based co-occurrence counting into an unordered_map.
     
-    Processes encoded sentences with OOV sentinel values (-1). Sentinels occupy
-    positions (preserving distances) but are skipped for co-occurrence counting.
+    Iterates through encoded sentences with OOV sentinel values (-1). Sentinels
+    occupy positions (preserving distances) but are skipped for counting.
+    Accumulates directly into the map — no duplicate pairs are stored.
     
-    Collects all (row, col) pairs into C++ vectors with nogil, then lets the caller
-    use scipy's COO->CSR conversion which efficiently sums duplicates.
+    Args:
+        encoded: Pointer to encoded sentences structure (with keep_oov=True encoding).
+        counts: Pointer to persistent map; caller owns lifetime.
+        vocab_size: Used to compute composite key (row * vocab_size + col).
+        left_horizon: Window size on the left side.
+        right_horizon: Window size on the right side.
     """
     cdef int n_docs = encoded.n_sentences
     cdef int i, j, s, start, end, center_idx, context_idx
     cdef LONG_t doc_start, doc_end, doc_len
+    cdef long long key
+    cdef long long vs = <long long>vocab_size
     
-    cdef vector[INT_t] row_vec
-    cdef vector[INT_t] col_vec
-    
-    cdef LONG_t estimated_pairs = encoded.total_tokens * (left_horizon + right_horizon)
-    row_vec.reserve(estimated_pairs)
-    col_vec.reserve(estimated_pairs)
-    
-    with nogil:
-        for s in range(n_docs):
-            doc_start = encoded.offsets[s]
-            doc_end = encoded.offsets[s + 1]
-            doc_len = doc_end - doc_start
-            
-            for i in range(<int>doc_len):
-                center_idx = encoded.tokens[doc_start + i]
-                
-                if center_idx < 0:
-                    continue
-                
-                start = i - left_horizon if i >= left_horizon else 0
-                end = i + right_horizon + 1 if i + right_horizon + 1 <= <int>doc_len else <int>doc_len
-                
-                for j in range(start, end):
-                    if j != i:
-                        context_idx = encoded.tokens[doc_start + j]
-                        
-                        if context_idx < 0:
-                            continue
-                        
-                        row_vec.push_back(center_idx)
-                        col_vec.push_back(context_idx)
-    
-    # Convert C++ vectors to NumPy arrays
-    cdef LONG_t n_pairs = row_vec.size()
-    cdef np.ndarray[INT_t, ndim=1] row_arr = np.empty(n_pairs, dtype=np.int32)
-    cdef np.ndarray[INT_t, ndim=1] col_arr = np.empty(n_pairs, dtype=np.int32)
-    cdef np.ndarray[LONG_t, ndim=1] data_arr
-    
-    cdef LONG_t idx
-    for idx in range(n_pairs):
-        row_arr[idx] = row_vec[idx]
-        col_arr[idx] = col_vec[idx]
-    
-    data_arr = np.ones(n_pairs, dtype=np.int64)
-    
-    return row_arr, col_arr, data_arr
-
-
-def calculate_cooc_matrix_document(list documents, dict word_to_index,
-                                    bint binary=False):
-    """
-    Cython-accelerated document-based co-occurrence matrix calculation.
-    
-    Each document is treated as a bag of words. Two vocabulary words co-occur
-    if they appear in the same document. For binary=False, pair weights are
-    count_i * count_j (matching the semantics of X @ X.T on a term-document
-    matrix). For binary=True, each pair contributes 1 regardless of frequency.
-    
-    Processes documents independently within the batch (never crosses document
-    boundaries), so batching from Python is safe.
-    
-    Args:
-        documents: List of tokenized documents (list of lists of strings)
-        word_to_index: Dictionary mapping vocabulary words to indices
-        binary: If True, count co-occurrences as binary (0/1). Default False.
+    for s in range(n_docs):
+        doc_start = encoded.offsets[s]
+        doc_end = encoded.offsets[s + 1]
+        doc_len = doc_end - doc_start
         
-    Returns:
-        tuple: (row_indices, col_indices, data_values) - COO format sparse matrix data
-            All are numpy arrays ready for scipy.sparse.coo_matrix construction.
-    """
-    cdef EncodedSentences* encoded = NULL
-    cdef int vocab_size = len(word_to_index)
-    
-    if vocab_size == 0:
-        return np.array([], dtype=np.int32), np.array([], dtype=np.int32), np.array([], dtype=np.int64)
-    
-    encoded = encode_sentences_to_c_buffer(documents, word_to_index, keep_oov=False)
-    
-    try:
-        return _calculate_cooc_document_counts(encoded, vocab_size, binary)
-    finally:
-        free_encoded_sentences(encoded)
+        for i in range(<int>doc_len):
+            center_idx = encoded.tokens[doc_start + i]
+            
+            if center_idx < 0:
+                continue
+            
+            start = i - left_horizon if i >= left_horizon else 0
+            end = i + right_horizon + 1 if i + right_horizon + 1 <= <int>doc_len else <int>doc_len
+            
+            for j in range(start, end):
+                if j != i:
+                    context_idx = encoded.tokens[doc_start + j]
+                    
+                    if context_idx < 0:
+                        continue
+                    
+                    key = <long long>center_idx * vs + <long long>context_idx
+                    counts[0][key] += 1
 
 
-cdef _calculate_cooc_document_counts(
+cdef void _count_document_pairs(
     EncodedSentences* encoded,
+    unordered_map[long long, long long]* counts,
     int vocab_size,
-    bint binary
-):
+    bint binary,
+) noexcept nogil:
     """
-    Core co-occurrence counting logic for document method.
+    Document-based co-occurrence counting into an unordered_map.
     
     For each document, deduplicates tokens and collects per-document frequencies.
-    Then emits all unique pairs (i, j) where i < j as symmetric COO entries.
+    Then for all unique pairs (i, j) where i < j, accumulates symmetric entries
+    into the map with weight freq[i] * freq[j] (or 1 if binary).
     
-    Uses a dense frequency array (vocab_size) that is reset per document via an
-    epoch-based approach for O(k) reset cost where k = unique words in document.
+    Args:
+        encoded: Pointer to encoded sentences structure (with keep_oov=False encoding).
+        counts: Pointer to persistent map; caller owns lifetime.
+        vocab_size: Used to compute composite key.
+        binary: If True, each pair contributes 1 regardless of frequency.
     """
     cdef int n_docs = encoded.n_sentences
     cdef int s, i, j, token_idx, n_unique
     cdef LONG_t doc_start, doc_end, doc_len
     cdef LONG_t weight
     cdef INT_t idx_a, idx_b
+    cdef long long key_ab, key_ba
+    cdef long long vs = <long long>vocab_size
     
-    cdef vector[INT_t] row_vec
-    cdef vector[INT_t] col_vec
-    cdef vector[LONG_t] data_vec
-    
-    # Per-document frequency tracking: freq[token_idx] = count in current doc
-    # Reset via unique_tokens list (only touch slots that were written)
     cdef LONG_t* freq = <LONG_t*>malloc(vocab_size * sizeof(LONG_t))
     if freq == NULL:
-        raise MemoryError("Failed to allocate frequency array")
+        return
     memset(freq, 0, vocab_size * sizeof(LONG_t))
     
-    # Buffer to collect unique token indices per document
     cdef vector[INT_t] unique_tokens
     unique_tokens.reserve(encoded.max_sent_len if encoded.max_sent_len < vocab_size else vocab_size)
     
-    # Rough estimate for output size
-    cdef LONG_t estimated_pairs = encoded.total_tokens * 10
-    row_vec.reserve(estimated_pairs)
-    col_vec.reserve(estimated_pairs)
-    if not binary:
-        data_vec.reserve(estimated_pairs)
+    for s in range(n_docs):
+        doc_start = encoded.offsets[s]
+        doc_end = encoded.offsets[s + 1]
+        doc_len = doc_end - doc_start
+        
+        if doc_len == 0:
+            continue
+        
+        unique_tokens.clear()
+        
+        for i in range(<int>doc_len):
+            token_idx = encoded.tokens[doc_start + i]
+            if freq[token_idx] == 0:
+                unique_tokens.push_back(token_idx)
+            freq[token_idx] += 1
+        
+        n_unique = <int>unique_tokens.size()
+        
+        for i in range(n_unique):
+            idx_a = unique_tokens[i]
+            for j in range(i + 1, n_unique):
+                idx_b = unique_tokens[j]
+                
+                key_ab = <long long>idx_a * vs + <long long>idx_b
+                key_ba = <long long>idx_b * vs + <long long>idx_a
+                
+                if binary:
+                    counts[0][key_ab] = 1
+                    counts[0][key_ba] = 1
+                else:
+                    weight = freq[idx_a] * freq[idx_b]
+                    counts[0][key_ab] += weight
+                    counts[0][key_ba] += weight
+        
+        for i in range(n_unique):
+            freq[unique_tokens[i]] = 0
     
-    try:
-        with nogil:
-            for s in range(n_docs):
-                doc_start = encoded.offsets[s]
-                doc_end = encoded.offsets[s + 1]
-                doc_len = doc_end - doc_start
-                
-                if doc_len == 0:
-                    continue
-                
-                unique_tokens.clear()
-                
-                # Pass 1: build per-document frequencies and collect unique indices
-                for i in range(<int>doc_len):
-                    token_idx = encoded.tokens[doc_start + i]
-                    if freq[token_idx] == 0:
-                        unique_tokens.push_back(token_idx)
-                    freq[token_idx] += 1
-                
-                n_unique = <int>unique_tokens.size()
-                
-                # Pass 2: emit pairs for all unique combinations (i < j)
-                for i in range(n_unique):
-                    idx_a = unique_tokens[i]
-                    for j in range(i + 1, n_unique):
-                        idx_b = unique_tokens[j]
-                        
-                        if binary:
-                            row_vec.push_back(idx_a)
-                            col_vec.push_back(idx_b)
-                            row_vec.push_back(idx_b)
-                            col_vec.push_back(idx_a)
-                        else:
-                            weight = freq[idx_a] * freq[idx_b]
-                            row_vec.push_back(idx_a)
-                            col_vec.push_back(idx_b)
-                            data_vec.push_back(weight)
-                            row_vec.push_back(idx_b)
-                            col_vec.push_back(idx_a)
-                            data_vec.push_back(weight)
-                
-                # Reset freq for next document (O(k) cost, not O(V))
-                for i in range(n_unique):
-                    freq[unique_tokens[i]] = 0
-    finally:
-        free(freq)
+    free(freq)
+
+
+cdef _hashmap_to_csr(unordered_map[long long, long long]& counts, int vocab_size):
+    """
+    Extract an unordered_map of (row*V+col)->value into CSR arrays.
     
-    # Convert C++ vectors to NumPy arrays
-    cdef LONG_t n_pairs = row_vec.size()
-    cdef np.ndarray[INT_t, ndim=1] row_arr = np.empty(n_pairs, dtype=np.int32)
-    cdef np.ndarray[INT_t, ndim=1] col_arr = np.empty(n_pairs, dtype=np.int32)
-    cdef np.ndarray[LONG_t, ndim=1] data_arr
+    1. Collects all entries into a vector of CoocEntry structs
+    2. Sorts by (row, col)
+    3. Builds indptr/indices/data arrays in a single pass
     
-    cdef LONG_t idx
-    for idx in range(n_pairs):
-        row_arr[idx] = row_vec[idx]
-        col_arr[idx] = col_vec[idx]
+    Returns:
+        tuple: (indptr, indices, data) numpy arrays for scipy.sparse.csr_matrix
+    """
+    cdef LONG_t nnz = <LONG_t>counts.size()
+    cdef long long vs = <long long>vocab_size
     
-    if binary:
-        data_arr = np.ones(n_pairs, dtype=np.int64)
-    else:
-        data_arr = np.empty(n_pairs, dtype=np.int64)
-        for idx in range(n_pairs):
-            data_arr[idx] = data_vec[idx]
+    if nnz == 0:
+        return (
+            np.zeros(vocab_size + 1, dtype=np.int64),
+            np.array([], dtype=np.int32),
+            np.array([], dtype=np.int64),
+        )
     
-    return row_arr, col_arr, data_arr
+    cdef vector[CoocEntry] entries
+    entries.reserve(nnz)
+    
+    cdef CoocEntry entry
+    cdef pair[long long, long long] item
+    for item in counts:
+        entry.row = <INT_t>(item.first / vs)
+        entry.col = <INT_t>(item.first % vs)
+        entry.value = item.second
+        entries.push_back(entry)
+    
+    cpp_sort(entries.begin(), entries.end(), &_cooc_entry_less)
+    
+    cdef np.ndarray[LONG_t, ndim=1] indptr_arr = np.zeros(vocab_size + 1, dtype=np.int64)
+    cdef np.ndarray[INT_t, ndim=1] indices_arr = np.empty(nnz, dtype=np.int32)
+    cdef np.ndarray[LONG_t, ndim=1] data_arr = np.empty(nnz, dtype=np.int64)
+    
+    cdef LONG_t[::1] indptr = indptr_arr
+    cdef INT_t[::1] indices = indices_arr
+    cdef LONG_t[::1] data = data_arr
+    
+    cdef LONG_t k
+    for k in range(nnz):
+        indices[k] = entries[k].col
+        data[k] = entries[k].value
+        indptr[entries[k].row + 1] += 1
+    
+    # Convert counts-per-row to cumulative offsets
+    cdef int r
+    for r in range(vocab_size):
+        indptr[r + 1] += indptr[r]
+    
+    return indptr_arr, indices_arr, data_arr
+
+
+def calculate_cooc_matrix(documents, dict word_to_index, str method,
+                          int left_horizon=0, int right_horizon=0,
+                          bint binary=False, int batch_words=100_000):
+    """
+    Cython-accelerated co-occurrence matrix calculation with hash-map accumulation.
+    
+    Processes documents in streaming batches. Each batch is encoded to C-level
+    buffers and counted in a nogil loop that accumulates into a C++ unordered_map.
+    After all batches, the map is extracted into sorted CSR arrays. This avoids
+    the O(P log P) scipy COO->CSR sort on raw pairs and uses O(nnz) memory
+    instead of O(total_pairs).
+    
+    Args:
+        documents: Iterable of tokenized documents (list of lists of strings).
+            Consumed once in a single pass.
+        word_to_index: Dictionary mapping vocabulary words to matrix indices.
+        method: 'window' for sliding-window co-occurrence, 'document' for
+            bag-of-words co-occurrence within each document.
+        left_horizon: Window size on the left side (window method only).
+        right_horizon: Window size on the right side (window method only).
+        binary: If True, all co-occurrence counts are clamped to 1.
+        batch_words: Target number of tokens per processing batch.
+    
+    Returns:
+        tuple: (indptr, indices, data) numpy arrays for direct construction
+            of a scipy.sparse.csr_matrix with shape (vocab_size, vocab_size).
+    """
+    from qhchina.utils import iter_batches
+    
+    cdef int vocab_size = len(word_to_index)
+    cdef unordered_map[long long, long long] counts
+    cdef EncodedSentences* encoded = NULL
+    cdef bint is_window = (method == 'window')
+    
+    if vocab_size == 0:
+        return (
+            np.zeros(1, dtype=np.int64),
+            np.array([], dtype=np.int32),
+            np.array([], dtype=np.int64),
+        )
+    
+    for batch in iter_batches(documents, batch_words, max_length=None):
+        encoded = encode_sentences_to_c_buffer(batch, word_to_index, keep_oov=is_window)
+        try:
+            if is_window:
+                with nogil:
+                    _count_window_pairs(encoded, &counts, vocab_size, left_horizon, right_horizon)
+            else:
+                with nogil:
+                    _count_document_pairs(encoded, &counts, vocab_size, binary)
+        finally:
+            free_encoded_sentences(encoded)
+    
+    if binary and is_window:
+        for item in counts:
+            counts[item.first] = 1
+    
+    return _hashmap_to_csr(counts, vocab_size)

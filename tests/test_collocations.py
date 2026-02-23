@@ -1211,13 +1211,13 @@ class TestCoocMatrixCythonPythonConsistency:
         
         # Force Python fallback by temporarily disabling Cython
         import qhchina.analytics.collocations as col_module
-        original_func = col_module.calculate_cooc_matrix_window
-        col_module.calculate_cooc_matrix_window = None
+        original_flag = col_module.CYTHON_AVAILABLE
+        col_module.CYTHON_AVAILABLE = False
         
         try:
             result_python = cooc_matrix(documents, horizon=2, vocab=vocab)
         finally:
-            col_module.calculate_cooc_matrix_window = original_func
+            col_module.CYTHON_AVAILABLE = original_flag
         
         # Results should be identical
         pd.testing.assert_frame_equal(
