@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 logger = logging.getLogger("qhchina.helpers.texts")
 
@@ -10,6 +11,9 @@ __all__ = [
     'load_stopwords',
     'get_stopword_languages',
     'split_into_chunks',
+    'download_corpus',
+    'download_file',
+    'list_remote_corpora',
 ]
 
 
@@ -237,3 +241,213 @@ def split_into_chunks(sequence, chunk_size, overlap=0.0):
             i += stride
         
     return chunks
+
+def _get_requests():
+    """Lazy import of requests module."""
+    try:
+        import requests
+        return requests
+    except ImportError as e:
+        raise ImportError(
+            "requests is required for downloading from GitHub. "
+            "Install it with: pip install requests"
+        ) from e
+
+
+def download_corpus(name: str, parent_dir: str | None = None) -> Path:
+    """
+    Download a corpus folder from the qhchina-data GitHub repository.
+    
+    Downloads all .txt files from the specified corpus folder and saves them
+    to a local directory.
+    
+    Args:
+        name: Corpus name (e.g., "张爱玲", "songshi"). This corresponds to a 
+            folder name under ``corpora/`` in the qhchina-data repository.
+        parent_dir: Parent directory where the corpus folder will be created.
+            If None (default), uses the current working directory.
+            
+    Returns:
+        Path to the downloaded corpus folder.
+        
+    Raises:
+        ImportError: If requests is not installed.
+        ValueError: If the corpus is not found or contains no .txt files.
+        requests.RequestException: If the download fails.
+        
+    Example:
+        >>> from qhchina import download_corpus
+        >>> 
+        >>> # Download to current directory
+        >>> path = download_corpus("张爱玲")
+        >>> # Creates ./张爱玲/张爱玲_倾城之恋.txt, ./张爱玲/张爱玲_金锁记.txt, ...
+        >>> 
+        >>> # Download to a specific parent directory
+        >>> path = download_corpus("张爱玲", parent_dir="corpora")
+        >>> # Creates ./corpora/张爱玲/...
+    """
+    from .github import query_github_api, download_file as _download_file
+    
+    # Determine output directory
+    if parent_dir is None:
+        output_dir = Path.cwd() / name
+    else:
+        output_dir = Path(parent_dir) / name
+    
+    # Query GitHub API for corpus contents
+    api_path = f"corpora/{name}"
+    try:
+        contents = query_github_api(api_path)
+    except Exception as e:
+        available = list_remote_corpora()
+        raise ValueError(
+            f"Corpus '{name}' not found. Available corpora: {available}"
+        ) from e
+    
+    # Filter for .txt files
+    txt_files = [
+        item for item in contents 
+        if item['type'] == 'file' and item['name'].endswith('.txt')
+    ]
+    
+    if not txt_files:
+        raise ValueError(
+            f"No .txt files found in corpus '{name}'. "
+            f"Check available corpora with list_remote_corpora()."
+        )
+    
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Download each file
+    total_size = 0
+    for file_info in txt_files:
+        dest_path = output_dir / file_info['name']
+        _download_file(file_info['download_url'], dest_path)
+        total_size += dest_path.stat().st_size
+    
+    # Print summary
+    size_kb = total_size / 1024
+    if size_kb > 1024:
+        size_str = f"{size_kb / 1024:.1f} MB"
+    else:
+        size_str = f"{size_kb:.1f} KB"
+    print(f"Downloaded {len(txt_files)} file(s) ({size_str}) to {output_dir}/")
+    
+    return output_dir
+
+
+def download_file(path: str, output_dir: str | None = None) -> Path:
+    """
+    Download a single file from the qhchina-data GitHub repository.
+    
+    Args:
+        path: Path to the file in the repository (e.g., "corpora/莫言/莫言_丰乳肥臀.txt",
+            "fonts/NotoSerifSC-Regular.otf"). The path is relative to the repository root.
+        output_dir: Directory where the file will be saved. If None (default),
+            uses the current working directory.
+            
+    Returns:
+        Path to the downloaded file.
+        
+    Raises:
+        ImportError: If requests is not installed.
+        ValueError: If the file is not found.
+        requests.RequestException: If the download fails.
+        
+    Example:
+        >>> from qhchina import download_file
+        >>> 
+        >>> # Download to current directory
+        >>> path = download_file("corpora/莫言/莫言_丰乳肥臀.txt")
+        >>> # Creates ./莫言_丰乳肥臀.txt
+        >>> 
+        >>> # Download to a specific directory
+        >>> path = download_file("corpora/莫言/莫言_丰乳肥臀.txt", output_dir="texts")
+        >>> # Creates ./texts/莫言_丰乳肥臀.txt
+    """
+    from .github import download_file as _download_file, GITHUB_API_BASE
+    
+    requests = _get_requests()
+    
+    # Normalize path (remove leading slash if present)
+    path = path.lstrip('/')
+    
+    # Get file info from GitHub API
+    # We need to query the parent directory to get the download URL
+    path_parts = path.rsplit('/', 1)
+    if len(path_parts) == 2:
+        parent_path, filename = path_parts
+    else:
+        parent_path, filename = '', path_parts[0]
+    
+    api_url = f"{GITHUB_API_BASE}/{parent_path}" if parent_path else GITHUB_API_BASE
+    
+    try:
+        response = requests.get(api_url, timeout=30)
+        response.raise_for_status()
+        contents = response.json()
+    except Exception as e:
+        raise ValueError(f"Could not access path '{parent_path}': {e}") from e
+    
+    # Find the file
+    file_info = None
+    for item in contents:
+        if item['type'] == 'file' and item['name'] == filename:
+            file_info = item
+            break
+    
+    if file_info is None:
+        raise ValueError(f"File '{filename}' not found in '{parent_path}'")
+    
+    # Determine output path
+    if output_dir is None:
+        dest_path = Path.cwd() / filename
+    else:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        dest_path = output_path / filename
+    
+    # Download the file
+    _download_file(file_info['download_url'], dest_path)
+    
+    # Print summary
+    size_bytes = dest_path.stat().st_size
+    size_kb = size_bytes / 1024
+    if size_kb > 1024:
+        size_str = f"{size_kb / 1024:.1f} MB"
+    else:
+        size_str = f"{size_kb:.1f} KB"
+    print(f"Downloaded {filename} ({size_str})")
+    
+    return dest_path
+
+
+def list_remote_corpora() -> list[str]:
+    """
+    List available corpora in the qhchina-data GitHub repository.
+    
+    Returns:
+        List of corpus names (folder names under ``corpora/``).
+        
+    Raises:
+        ImportError: If requests is not installed.
+        requests.RequestException: If the API request fails.
+        
+    Example:
+        >>> from qhchina import list_remote_corpora
+        >>> corpora = list_remote_corpora()
+        >>> print(corpora)
+        ['张爱玲', '沈从文', '莫言', ...]
+    """
+    from .github import query_github_api
+    
+    contents = query_github_api('corpora')
+    
+    corpora = [
+        item['name'] 
+        for item in contents 
+        if item['type'] == 'dir'
+    ]
+    
+    return sorted(corpora)

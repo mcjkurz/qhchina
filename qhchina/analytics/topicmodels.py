@@ -482,9 +482,9 @@ class LDAGibbsSampler:
         
         Args:
             documents: Iterable of tokenized documents (each document is a list of tokens).
-                Can be a list, Corpus, or any other iterable.
+                Can be a list or any other iterable.
         """
-        # Convert iterable to list if needed (supports Corpus, generators, etc.)
+        # Convert iterable to list if needed (supports generators, etc.)
         if not isinstance(documents, list):
             documents = list(documents)
         if len(documents) == 0:

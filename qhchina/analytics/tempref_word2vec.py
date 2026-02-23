@@ -53,7 +53,7 @@ class TempRefWord2Vec(Word2Vec):
     
     Args:
         sentences: Dictionary mapping time period labels to corpora. Values can be:
-            - File paths (str): Path to corpus file (untagged, can be created with ``Corpus.save()``)
+            - File paths (str): Path to text file (one sentence per line, space-separated tokens)
             - In-memory sentences (list[list[str]]): List of tokenized sentences
             Format: ``{"label1": "path1.txt", "label2": [["word", "list"], ...], ...}``
         targets: List of target words to trace semantic change.
@@ -89,19 +89,12 @@ class TempRefWord2Vec(Word2Vec):
             )
             model.train()
         
-        Using corpus files::
+        Using text files::
         
-            from qhchina import Corpus
             from qhchina.analytics import TempRefWord2Vec
             
-            # Create and save untagged corpus files
-            song_corpus = Corpus(song_sentences)
-            song_corpus.shuffle()
-            song_corpus.save("songshi.txt")
-            
-            ming_corpus = Corpus(ming_sentences)
-            ming_corpus.shuffle()
-            ming_corpus.save("mingshi.txt")
+            # Text files with one sentence per line, space-separated tokens
+            # e.g., "songshi.txt" contains: "太祖 建隆 元年 正月\n民 安 其 业\n..."
             
             model = TempRefWord2Vec(
                 sentences={"宋": "songshi.txt", "明": "mingshi.txt"},

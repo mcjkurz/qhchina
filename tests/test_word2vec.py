@@ -20,20 +20,20 @@ def tempref_corpus_files(corpora: dict, targets: list):
     Yields:
         Dict mapping labels to file paths
     """
-    from qhchina.corpus import Corpus
-    
     temp_files = []
     file_paths = {}
     
     try:
         for label, sentences in corpora.items():
-            corpus = Corpus(sentences)
-            
             fd, path = tempfile.mkstemp(suffix='.txt', prefix=f'test_{label}_')
             os.close(fd)
             temp_files.append(path)
             
-            corpus.save(path)
+            # Write sentences to file (one sentence per line, space-separated tokens)
+            with open(path, 'w', encoding='utf-8') as f:
+                for sentence in sentences:
+                    f.write(' '.join(sentence) + '\n')
+            
             file_paths[label] = path
         
         yield file_paths

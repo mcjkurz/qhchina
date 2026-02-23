@@ -551,7 +551,7 @@ def find_collocates(
     
     Args:
         sentences (Iterable[list[str]]): Iterable of tokenized sentences, where each 
-            sentence is a list of tokens. Can be a list, Corpus, or any other iterable.
+            sentence is a list of tokens. Can be a list or any other iterable.
         target_words (str | list[str]): Target word(s) to find collocates for.
         method (str): Method to use for calculating collocations. Either 'window' or 
             'sentence'. 'window' uses a sliding window of specified horizon around each 
@@ -617,7 +617,7 @@ def find_collocates(
             - **p_value** (float): P-value from Fisher's exact test.
             - **adjusted_p_value** (float, optional): Present only if ``correction`` is set.
     """
-    # Convert iterable to list if needed (supports Corpus, generators, etc.)
+    # Convert iterable to list if needed (supports generators, etc.)
     if not isinstance(sentences, list):
         sentences = list(sentences)
     if not sentences:
@@ -861,7 +861,7 @@ def cooc_matrix(
     
     Args:
         documents: Iterable of tokenized documents, where each document is a list of 
-            tokens. Can be a list, Corpus, or any other iterable.
+            tokens. Can be a list or any other iterable.
         horizon: Context window size relative to each word. Only applicable for method='window'.
             If not provided, defaults to 5 for window method. Must not be provided for 
             method='document'.
@@ -896,7 +896,7 @@ def cooc_matrix(
         >>> # With predefined vocabulary (no filtering applied)
         >>> matrix = cooc_matrix(documents, vocab=["fox", "dog", "cat"])
     """
-    # Convert iterable to list if needed (supports Corpus, generators, etc.)
+    # Convert iterable to list if needed (supports generators, etc.)
     if not isinstance(documents, list):
         documents = list(documents)
     if not documents:

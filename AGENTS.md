@@ -15,7 +15,6 @@
 
 ## Key Classes
 
-- **`Corpus`** (`corpus.py`): Core data structure. Collection of `Document` objects. Iterable (yields token lists). Supports filtering, grouping, serialization.
 - **`Word2Vec`** (`analytics/word2vec.py`): Word embeddings with CBOW/Skip-gram.
 - **`TempRefWord2Vec`** (`analytics/word2vec.py`): Temporal semantic change analysis.
 - **`LDAGibbsSampler`** (`analytics/topicmodels.py`): Topic modeling with Gibbs sampling.
@@ -71,7 +70,7 @@ Uses modern syntax: `int | None`, `list[str]`, `TYPE_CHECKING` for conditional i
 ## Common Entry Points
 
 ```python
-from qhchina import Corpus, load_text, load_stopwords, set_log_level
+from qhchina import load_text, load_stopwords, set_log_level
 from qhchina.analytics import Word2Vec, LDAGibbsSampler, Stylometry
 from qhchina.preprocessing import create_segmenter
 ```

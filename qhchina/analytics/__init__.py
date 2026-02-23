@@ -20,7 +20,7 @@ from .tempref_word2vec import TempRefWord2Vec
 from .topicmodels import LDAGibbsSampler
 
 # Stylometry
-from .stylometry import Stylometry, compare_corpora
+from .stylometry import Stylometry, compare_corpora, type_token_ratio, mattr
 
 # Collocations
 from .collocations import find_collocates, cooc_matrix, plot_collocates
@@ -34,6 +34,8 @@ __all__ = [
     # Stylometry
     'Stylometry',
     'compare_corpora',
+    'type_token_ratio',
+    'mattr',
     # Collocations
     'find_collocates',
     'cooc_matrix',

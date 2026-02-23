@@ -53,9 +53,6 @@ def set_log_level(level: str) -> None:
 # Import global configuration functions
 from .config import set_random_seed, get_random_seed, get_rng
 
-# Import Corpus class
-from .corpus import Corpus
-
 # Import core analytics classes for convenient top-level access
 from .analytics import (
     Word2Vec, 
@@ -64,6 +61,8 @@ from .analytics import (
     compare_corpora, 
     find_collocates, 
     cooc_matrix,
+    type_token_ratio,
+    mattr,
 )
 
 # Import preprocessing entry point
@@ -77,5 +76,12 @@ from .helpers.fonts import (
     current_font
 )
 
-from .helpers.texts import load_text, load_texts, load_stopwords
+from .helpers.texts import (
+    load_text, 
+    load_texts, 
+    load_stopwords,
+    download_corpus,
+    download_file,
+    list_remote_corpora,
+)
 

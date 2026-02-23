@@ -35,7 +35,7 @@ class Word2Vec:
     Args:
         sentences: Tokenized sentences for training. Can be:
             - An iterable of sentences (each sentence is a list of tokens)
-            - A file path (str) to a corpus file (created via ``Corpus.save("file.txt")``)
+            - A file path (str) to a text file with one sentence per line (space-separated tokens)
             Note: Iterables must be restartable (can be iterated multiple times).
         vector_size (int): Dimensionality of the word vectors (default: 100).
         window (int): Maximum distance between the current and predicted word (default: 5).
@@ -74,9 +74,8 @@ class Word2Vec:
         # Explicitly start training
         model.train()
         
-        # Or train from a corpus file (memory-efficient for large corpora)
-        corpus = Corpus(sentences)
-        corpus.save("corpus.txt")
+        # Or train from a text file (memory-efficient for large corpora)
+        # File format: one sentence per line, tokens separated by spaces
         model = Word2Vec("corpus.txt", vector_size=100, epochs=5)
         model.train()
         

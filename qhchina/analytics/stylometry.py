@@ -42,6 +42,8 @@ __all__ = [
     'eder_delta',
     'get_relative_frequencies',
     'compute_yule_k',
+    'type_token_ratio',
+    'mattr',
 ]
 
 
@@ -188,6 +190,142 @@ def compute_yule_k(tokens: list[str]) -> float:
     # Yule's K formula
     k = 10000 * (m2 - m1) / (m1 * m1)
     return k
+
+
+def type_token_ratio(tokens: Iterable[str], variant: str = 'standard') -> float:
+    """
+    Calculate Type-Token Ratio (TTR) for lexical diversity.
+    
+    TTR measures lexical diversity - the ratio of unique words (types)
+    to total words (tokens). Higher values indicate more diverse vocabulary.
+    
+    Note: Standard TTR is sensitive to text length (longer texts tend to
+    have lower TTR). Use 'root' or 'log' variants for length-normalized
+    measures, or use ``mattr()`` for comparing texts of different lengths.
+    
+    Args:
+        tokens: Iterable of string tokens (e.g., list of words from a text).
+        variant: Calculation method:
+            - 'standard': types / tokens (range: 0.0 to 1.0)
+            - 'root': types / sqrt(tokens) - Guiraud's R
+            - 'log': log(types) / log(tokens) - Herdan's C
+    
+    Returns:
+        The TTR value. For 'standard', this is between 0.0 and 1.0.
+        For 'root' and 'log', values vary based on text size.
+    
+    Raises:
+        ValueError: If variant is not recognized or tokens is empty.
+    
+    Example:
+        >>> from qhchina.analytics import type_token_ratio
+        >>> tokens = ['我', '爱', '北京', '天安门', '天安门', '上', '太阳', '升']
+        >>> type_token_ratio(tokens)
+        0.875
+        >>> type_token_ratio(tokens, variant='root')
+        2.474...
+    """
+    if variant not in ('standard', 'root', 'log'):
+        raise ValueError(
+            f"variant must be 'standard', 'root', or 'log', got '{variant}'"
+        )
+    
+    # Convert to list if needed (to allow multiple iterations)
+    if not isinstance(tokens, list):
+        tokens = list(tokens)
+    
+    n_tokens = len(tokens)
+    if n_tokens == 0:
+        raise ValueError("Cannot calculate TTR for empty token sequence")
+    
+    n_types = len(set(tokens))
+    
+    if variant == 'standard':
+        return n_types / n_tokens
+    elif variant == 'root':
+        # Guiraud's R: types / sqrt(tokens)
+        return n_types / np.sqrt(n_tokens)
+    else:  # log
+        # Herdan's C: log(types) / log(tokens)
+        if n_tokens == 1:
+            return 1.0  # Edge case: single token
+        return np.log(n_types) / np.log(n_tokens)
+
+
+def mattr(tokens: Iterable[str], window_size: int = 500) -> float:
+    """
+    Calculate Moving Average Type-Token Ratio (MATTR).
+    
+    MATTR is more reliable than standard TTR for comparing texts of
+    different lengths. It calculates TTR for a sliding window across
+    the token sequence and returns the mean.
+    
+    Args:
+        tokens: Iterable of string tokens (e.g., list of words from a text).
+        window_size: Number of tokens per window. Default is 500,
+            which is standard in the literature. Smaller windows
+            give higher MATTR values.
+    
+    Returns:
+        Mean TTR across all windows (0.0 to 1.0).
+    
+    Raises:
+        ValueError: If tokens has fewer than window_size elements.
+    
+    Example:
+        >>> from qhchina.analytics import mattr
+        >>> tokens = ['word'] * 1000  # 1000 identical tokens
+        >>> mattr(tokens, window_size=100)
+        0.01
+        >>> 
+        >>> # More diverse text
+        >>> diverse_tokens = [f'word_{i}' for i in range(1000)]
+        >>> mattr(diverse_tokens, window_size=100)
+        1.0
+    
+    Reference:
+        Covington, M. A., & McFall, J. D. (2010). Cutting the Gordian knot:
+        The moving-average type-token ratio (MATTR). Journal of Quantitative
+        Linguistics, 17(2), 94-100.
+    """
+    if window_size < 1:
+        raise ValueError(f"window_size must be positive, got {window_size}")
+    
+    # Convert to list for indexing
+    if not isinstance(tokens, list):
+        tokens = list(tokens)
+    
+    n_tokens = len(tokens)
+    
+    if n_tokens < window_size:
+        raise ValueError(
+            f"Token sequence has {n_tokens} tokens, but window_size is {window_size}. "
+            f"Use a smaller window_size or provide more tokens."
+        )
+    
+    # Calculate TTR for each window position
+    n_windows = n_tokens - window_size + 1
+    ttr_sum = 0.0
+    
+    # Use a sliding window with incremental updates for efficiency
+    window_counts: Counter = Counter(tokens[:window_size])
+    ttr_sum += len(window_counts) / window_size
+    
+    for i in range(1, n_windows):
+        # Remove token leaving the window
+        leaving = tokens[i - 1]
+        window_counts[leaving] -= 1
+        if window_counts[leaving] == 0:
+            del window_counts[leaving]
+        
+        # Add token entering the window
+        entering = tokens[i + window_size - 1]
+        window_counts[entering] += 1
+        
+        # Calculate TTR for this window
+        ttr_sum += len(window_counts) / window_size
+    
+    return ttr_sum / n_windows
 
 
 # =============================================================================
@@ -1819,9 +1957,9 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     
     Args:
         corpusA: Iterable of tokens (flat) or iterable of token lists (nested).
-            Accepts lists, Corpus objects, generators, or any iterable.
+            Accepts lists, generators, or any iterable.
         corpusB: Iterable of tokens (flat) or iterable of token lists (nested).
-            Accepts lists, Corpus objects, generators, or any iterable.
+            Accepts lists, generators, or any iterable.
         method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
             for the chi-square test. All tests use two-sided alternatives.
         filters (dict, optional): Dictionary of filters to apply to results.
@@ -1864,7 +2002,7 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         Two-sided tests are used because we want to detect whether words are 
         overrepresented in either corpus.
     """
-    # Convert iterables to lists (supports Corpus, generators, etc.)
+    # Convert iterables to lists (supports generators, etc.)
     if not isinstance(corpusA, list):
         corpusA = list(corpusA)
     if not isinstance(corpusB, list):
