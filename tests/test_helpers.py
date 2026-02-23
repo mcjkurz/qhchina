@@ -419,3 +419,62 @@ class TestFonts:
         assert cache_dir is not None
         assert 'qhchina' in str(cache_dir)
         assert 'fonts' in str(cache_dir)
+
+
+class TestGithubErrorSemantics:
+    """Tests that distinguish not-found from transport/API failures."""
+
+    def test_query_github_api_404_maps_to_valueerror(self, monkeypatch):
+        """404 responses should map to ValueError with not-found semantics."""
+        from qhchina.helpers import github
+
+        class FakeResponse:
+            status_code = 404
+
+            def raise_for_status(self):
+                raise AssertionError("raise_for_status should not be called for 404 mapping test")
+
+        class FakeRequests:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        monkeypatch.setattr(github, "_get_requests", lambda: FakeRequests())
+
+        with pytest.raises(ValueError, match="Repository path not found"):
+            github.query_github_api("corpora/not_real")
+
+    def test_download_file_404_maps_to_valueerror(self, monkeypatch, tmp_path):
+        """404 download responses should map to ValueError."""
+        from qhchina.helpers import github
+
+        class FakeResponse:
+            status_code = 404
+
+            def raise_for_status(self):
+                raise AssertionError("raise_for_status should not be called for 404 mapping test")
+
+            def iter_content(self, chunk_size=65536):
+                return iter(())
+
+        class FakeRequests:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        monkeypatch.setattr(github, "_get_requests", lambda: FakeRequests())
+
+        with pytest.raises(ValueError, match="Resource not found at URL"):
+            github.download_file("https://example.invalid/missing.txt", tmp_path / "out.txt")
+
+    def test_query_github_api_network_error_bubbles_up(self, monkeypatch):
+        """Transport/network failures should propagate as requests exceptions."""
+        import requests
+        from qhchina.helpers import github
+
+        class FakeRequests:
+            def get(self, *args, **kwargs):
+                raise requests.ConnectionError("network down")
+
+        monkeypatch.setattr(github, "_get_requests", lambda: FakeRequests())
+
+        with pytest.raises(requests.RequestException):
+            github.query_github_api("corpora")

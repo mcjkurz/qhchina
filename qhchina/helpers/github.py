@@ -70,6 +70,8 @@ def download_file(url: str, dest: Path, timeout: int = 120) -> None:
     requests = _get_requests()
     
     response = requests.get(url, timeout=timeout, stream=True)
+    if response.status_code == 404:
+        raise ValueError(f"Resource not found at URL: {url}")
     response.raise_for_status()
     
     with open(dest, 'wb') as f:
@@ -95,5 +97,7 @@ def query_github_api(path: str, timeout: int = 30) -> list[dict]:
     
     url = f"{GITHUB_API_BASE}/{path}"
     response = requests.get(url, timeout=timeout)
+    if response.status_code == 404:
+        raise ValueError(f"Repository path not found: '{path}'")
     response.raise_for_status()
     return response.json()

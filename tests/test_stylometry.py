@@ -358,6 +358,29 @@ class TestCompareCorpora:
             # At least some differences should exist
             assert len(result) > 0
 
+    def test_compare_corpora_with_one_time_generators(self):
+        """Test compare_corpora with one-time nested generators."""
+        from qhchina.analytics.stylometry import compare_corpora
+
+        def corpus_a():
+            yield ["甲", "乙", "甲"]
+            yield []
+            yield ["丙", "甲"]
+
+        def corpus_b():
+            yield ["甲", "丁", "丁"]
+            yield ["乙"]
+
+        result = compare_corpora(
+            corpusA=corpus_a(),
+            corpusB=corpus_b(),
+            method='fisher',
+            as_dataframe=True
+        )
+
+        assert len(result) > 0
+        assert {"甲", "乙", "丙", "丁"}.issubset(set(result["word"].values))
+
 
 class TestStylometryEdgeCases:
     """Tests for edge cases and error conditions."""
@@ -502,6 +525,17 @@ class TestStylometryPredictionSVM:
         for author, prob in results:
             assert author in fitted_stylo_svm.authors
             assert 0 <= prob <= 1
+
+    def test_predict_svm_single_class_raises_clear_error(self):
+        """SVM should fail fast with a clear message for one-class corpora."""
+        from qhchina.analytics.stylometry import Stylometry
+
+        docs = [list("第一篇测试文"), list("第二篇测试文")]
+        stylo = Stylometry(n_features=10, classifier='svm')
+        stylo.fit_transform(docs)  # list input without labels -> single 'unk' class
+
+        with pytest.raises(ValueError, match="requires at least 2 classes/authors"):
+            stylo.predict(list("测试文本"), classifier='svm')
 
 
 class TestStylometryBootstrap:

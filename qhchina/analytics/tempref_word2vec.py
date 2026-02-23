@@ -702,6 +702,7 @@ class TempRefWord2Vec(Word2Vec):
             'temporal_word_map': self.temporal_word_map,
             'reverse_temporal_map': self.reverse_temporal_map,
             'period_vocab_counts': {label: dict(counter) for label, counter in self.period_vocab_counts.items()},
+            '_sampling_strategy': self._sampling_strategy,
             'model_type': 'TempRefWord2Vec'
         }
         
@@ -748,6 +749,11 @@ class TempRefWord2Vec(Word2Vec):
         # Extract TempRefWord2Vec-specific data
         labels = model_data['labels']
         targets = model_data['targets']
+        if '_sampling_strategy' not in model_data:
+            raise ValueError(
+                "Invalid TempRefWord2Vec model format: missing '_sampling_strategy'. "
+                "Re-save the model with the current qhchina version."
+            )
         
         # Get base model parameters with defaults
         shrink_windows = model_data.get('shrink_windows', False)
@@ -790,6 +796,7 @@ class TempRefWord2Vec(Word2Vec):
             label: Counter(counts_dict) 
             for label, counts_dict in model_data['period_vocab_counts'].items()
         }
+        model._sampling_strategy = model_data['_sampling_strategy']
         
         # Build temporal index map for Cython acceleration
         model._build_temporal_index_map()

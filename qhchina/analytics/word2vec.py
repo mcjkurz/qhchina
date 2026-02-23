@@ -166,6 +166,18 @@ class Word2Vec:
         self.sample = sample  # Threshold for subsampling
         self.shrink_windows = shrink_windows  # Dynamic window size
         self.max_vocab_size = max_vocab_size  # Maximum vocabulary size
+
+        # Validate core hyperparameters early to prevent invalid model states.
+        if not isinstance(vector_size, int) or vector_size <= 0:
+            raise ValueError("vector_size must be a positive integer")
+        if not isinstance(window, int) or window <= 0:
+            raise ValueError("window must be a positive integer")
+        if not isinstance(negative, int) or negative <= 0:
+            raise ValueError("negative must be a positive integer")
+        if not isinstance(epochs, int) or epochs <= 0:
+            raise ValueError("epochs must be a positive integer")
+        if not isinstance(min_word_count, int) or min_word_count < 0:
+            raise ValueError("min_word_count must be a non-negative integer")
         
         # Set dtype for weight matrices (float32 for Cython BLAS compatibility)
         self.dtype = np.float32
@@ -356,8 +368,8 @@ class Word2Vec:
         if self.verbose:
             logger.info(f"Initializing vectors: 2 matrices of shape ({vocab_size:,}, {self.vector_size})...")
         
-        # Use default_rng (PCG64) for reproducible initialization
-        init_rng = np.random.default_rng(seed=self.seed)
+        # Resolve seed consistently with model-level RNG behavior.
+        init_rng = np.random.default_rng(seed=resolve_seed(self.seed))
         self.W = init_rng.random((vocab_size, self.vector_size), dtype=self.dtype)
         self.W *= 2.0
         self.W -= 1.0

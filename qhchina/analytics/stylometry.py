@@ -18,6 +18,7 @@ import logging
 import warnings
 from collections import Counter
 from collections.abc import Iterable
+from itertools import chain
 from typing import Callable
 import numpy as np
 import pandas as pd
@@ -1056,6 +1057,12 @@ class Stylometry:
         
         X = np.array(self.document_vectors)
         y = np.array(self.document_labels)
+        unique_classes = np.unique(y)
+        if len(unique_classes) < 2:
+            raise ValueError(
+                "SVM classifier requires at least 2 classes/authors. "
+                f"Found {len(unique_classes)}: {unique_classes.tolist()}"
+            )
         
         # SVM with probability=True for predict_proba
         # Use global seed if set, otherwise use None for sklearn's default behavior
@@ -1946,6 +1953,33 @@ class Stylometry:
 # Corpus Comparison Functions
 # =============================================================================
 
+_EMPTY = object()
+
+
+def _iter_corpus_tokens(corpus: Iterable[str] | Iterable[Iterable[str]]) -> Iterable[str]:
+    """
+    Yield tokens from a flat token iterable or nested sentence/doc iterable.
+    """
+    iterator = iter(corpus)
+    first = next(iterator, _EMPTY)
+    if first is _EMPTY:
+        return iter(())
+
+    # Flat token stream (e.g., list[str], generator[str])
+    if isinstance(first, str):
+        return chain((first,), iterator)
+
+    # Nested stream (e.g., list[list[str]], generator[list[str]])
+    def _flattened_tokens() -> Iterable[str]:
+        for sentence in chain((first,), iterator):
+            if not sentence:
+                continue
+            for token in sentence:
+                yield token
+
+    return _flattened_tokens()
+
+
 def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]], 
                     corpusB: Iterable[str] | Iterable[list[str]], 
                     method: str = 'fisher', 
@@ -1963,9 +1997,9 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
             for the chi-square test. All tests use two-sided alternatives.
         filters (dict, optional): Dictionary of filters to apply to results.
-            All filters (except ``max_adjusted_p``) are applied BEFORE multiple testing 
-            correction, defining the "family" of hypotheses being tested. This maximizes 
-            statistical power by not correcting for words that were never of interest.
+            All filters (except ``max_adjusted_p``) are applied AFTER the computation of the p-value, but 
+            BEFORE multiple testing correction, defining the "family" of hypotheses being tested. 
+            This maximizes statistical power by not correcting for words that were never of interest.
             
             Available filters:
             
@@ -2042,12 +2076,6 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             )
             results.sort_values("rel_freqA", ascending=False).head(20)
     """
-    # Convert iterables to lists (supports generators, etc.)
-    if not isinstance(corpusA, list):
-        corpusA = list(corpusA)
-    if not isinstance(corpusB, list):
-        corpusB = list(corpusB)
-    
     # Validate correction parameter
     if correction is not None and correction not in VALID_CORRECTIONS:
         raise ValueError(
@@ -2106,25 +2134,12 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             filter_strs.append(f"min_word_length={filters['min_word_length']}")
         logger.info(f"Filters: {', '.join(filter_strs)}")
     
-    # Helper function to flatten list of sentences if needed
-    def flatten(corpus):
-        if not corpus:
-            return []
-        if isinstance(corpus[0], list): # if a list of sentences
-            # Filter out empty sentences
-            return [word for sentence in corpus if sentence for word in sentence]
-        return corpus
-    
-    # Flatten corpora if they are lists of sentences
-    corpusA = flatten(corpusA)
-    abs_freqA = Counter(corpusA)
+    # Consume each corpus once; supports one-time generators.
+    abs_freqA = Counter(_iter_corpus_tokens(corpusA))
     totalA = sum(abs_freqA.values())
-    del corpusA
     
-    corpusB = flatten(corpusB)
-    abs_freqB = Counter(corpusB)
+    abs_freqB = Counter(_iter_corpus_tokens(corpusB))
     totalB = sum(abs_freqB.values())
-    del corpusB
     
     if totalA == 0:
         raise ValueError("corpusA is empty or contains only empty sentences")

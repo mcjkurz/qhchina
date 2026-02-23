@@ -327,7 +327,7 @@ def download_corpus(name: str, parent_dir: str | None = None, show_progress: boo
     api_path = f"corpora/{name}"
     try:
         contents = query_github_api(api_path)
-    except Exception as e:
+    except ValueError as e:
         available = list_remote_corpora()
         raise ValueError(
             f"Corpus '{name}' not found. Available corpora: {available}"
@@ -427,8 +427,8 @@ def download_file(path: str, output_dir: str | None = None) -> None:
     
     try:
         contents = query_github_api(parent_path) if parent_path else query_github_api('')
-    except Exception as e:
-        raise ValueError(f"Could not access path '{parent_path}': {e}") from e
+    except ValueError as e:
+        raise ValueError(f"Repository path not found: '{parent_path}'") from e
     
     # Find the file
     file_info = None

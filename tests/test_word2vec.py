@@ -1527,3 +1527,129 @@ class TestTempRefWord2VecMultithreading:
         assert not np.any(np.isnan(vec2))
 
 
+class TestWord2VecRobustnessFixes:
+    """Regression tests for robustness hardening patches."""
+
+    def test_global_seed_reproducibility_with_seed_none(self):
+        """Global seed should make seed=None runs reproducible."""
+        from qhchina import set_random_seed
+        from qhchina.analytics.word2vec import Word2Vec
+
+        # Use unique token frequencies to avoid tie-order effects in vocab mapping.
+        sentences = [
+            ["a"] * 20 + ["b"] * 11 + ["c"] * 7 + ["d"] * 3,
+            ["a"] * 5 + ["b"] * 2 + ["c"],
+        ]
+        params = dict(
+            sentences=sentences,
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            sg=1,
+            epochs=2,
+            workers=1,
+            seed=None,
+            shuffle=False,
+        )
+
+        set_random_seed(2026)
+        model1 = Word2Vec(**params)
+        model1.train()
+
+        set_random_seed(2026)
+        model2 = Word2Vec(**params)
+        model2.train()
+
+        assert model1.vocab == model2.vocab
+        for word in model1.vocab:
+            np.testing.assert_allclose(model1.get_vector(word), model2.get_vector(word))
+
+    @pytest.mark.parametrize(
+        ("kwargs", "msg"),
+        [
+            ({"vector_size": 0}, "vector_size must be a positive integer"),
+            ({"window": 0}, "window must be a positive integer"),
+            ({"negative": 0}, "negative must be a positive integer"),
+            ({"epochs": 0}, "epochs must be a positive integer"),
+            ({"min_word_count": -1}, "min_word_count must be a non-negative integer"),
+        ],
+    )
+    def test_invalid_hyperparameters_raise(self, kwargs, msg):
+        """Invalid core hyperparameters should fail fast."""
+        from qhchina.analytics.word2vec import Word2Vec
+
+        with pytest.raises(ValueError, match=msg):
+            Word2Vec([["a", "b"]], **kwargs)
+
+    def test_tempref_sampling_strategy_persists_save_load(self):
+        """TempRefWord2Vec must preserve sampling strategy on load."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 20,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            sampling_strategy="proportional",
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            sg=1,
+            seed=42,
+            epochs=1,
+            workers=1,
+        )
+        model.train()
+
+        with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            model.save(temp_path)
+            loaded = TempRefWord2Vec.load(temp_path)
+            assert loaded._sampling_strategy == "proportional"
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_tempref_load_requires_sampling_strategy_field(self):
+        """Loading should fail for model files missing _sampling_strategy."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 10,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            sg=1,
+            seed=42,
+            epochs=1,
+            workers=1,
+        )
+        model.train()
+
+        with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            model.save(temp_path)
+            payload = np.load(temp_path, allow_pickle=True).item()
+            payload.pop("_sampling_strategy", None)
+            np.save(temp_path, payload, allow_pickle=True)
+
+            with pytest.raises(ValueError, match="missing '_sampling_strategy'"):
+                TempRefWord2Vec.load(temp_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
