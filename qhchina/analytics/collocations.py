@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 from scipy.stats import fisher_exact as scipy_fisher_exact
-from tqdm.auto import tqdm
 
 from ..utils import apply_p_value_correction, VALID_CORRECTIONS
 
@@ -24,16 +23,16 @@ __all__ = [
 
 try:
     from .cython_ext.collocations import (
-        calculate_collocations_window,
-        calculate_collocations_sentence,
-        calculate_cooc_matrix_window
+        calculate_cooc_matrix_window,
+        calculate_window_counts_batch,
+        calculate_sentence_counts_batch,
     )
     CYTHON_AVAILABLE = True
 except ImportError:
     CYTHON_AVAILABLE = False
-    calculate_collocations_window = None
-    calculate_collocations_sentence = None
     calculate_cooc_matrix_window = None
+    calculate_window_counts_batch = None
+    calculate_sentence_counts_batch = None
     logger.warning("Cython extensions not available; using slower Python fallback.")
 
 
@@ -265,25 +264,128 @@ class FilterOptions(TypedDict, total=False):
     max_obs_global: int
 
 
+# =============================================================================
+# Streaming / Batching Helpers
+# =============================================================================
+
+def _iter_batches(
+    sentences: Iterable[list[str]],
+    batch_words: int = 100_000,
+    max_sentence_length: int | None = 256,
+):
+    """
+    Yield batches of sentences grouped by total word count.
+    
+    Streams through the iterable without materializing the full corpus.
+    Truncates sentences exceeding *max_sentence_length* and skips empty ones.
+    
+    Args:
+        sentences: Restartable iterable of tokenized sentences.
+        batch_words: Target token count per batch.
+        max_sentence_length: Truncate longer sentences. None disables.
+    
+    Yields:
+        list[list[str]]: Batches where total tokens <= *batch_words*.
+    """
+    batch = []
+    word_count = 0
+    validated = False
+    
+    for sent in sentences:
+        if not validated and sent:
+            if not isinstance(sent, list):
+                raise ValueError(
+                    "sentences must be an iterable of lists (tokenized sentences), "
+                    f"but got an iterable of {type(sent).__name__}"
+                )
+            validated = True
+        if not sent:
+            continue
+        if max_sentence_length is not None:
+            sent = sent[:max_sentence_length]
+        sent_len = len(sent)
+        
+        if word_count + sent_len <= batch_words:
+            batch.append(sent)
+            word_count += sent_len
+        else:
+            if batch:
+                yield batch
+            batch = [sent]
+            word_count = sent_len
+    
+    if batch:
+        yield batch
+
+
+def _build_vocab_from_iter(sentences: Iterable[list[str]], max_sentence_length: int | None = 256):
+    """
+    Build vocabulary by streaming through sentences (pass 1 of 2).
+    
+    Args:
+        sentences: Restartable iterable of tokenized sentences.
+        max_sentence_length: Truncate longer sentences. None disables.
+    
+    Returns:
+        tuple: (word2idx, idx2word) dictionaries.
+    
+    Raises:
+        ValueError: If the iterable is empty or yields only empty sentences.
+    """
+    word2idx = {}
+    idx2word = {}
+    idx = 0
+    total_seen = 0
+    non_empty_count = 0
+    validated = False
+    
+    for sent in sentences:
+        total_seen += 1
+        if not validated and sent:
+            if not isinstance(sent, list):
+                raise ValueError(
+                    "sentences must be an iterable of lists (tokenized sentences), "
+                    f"but got an iterable of {type(sent).__name__}"
+                )
+            validated = True
+        if not sent:
+            continue
+        if max_sentence_length is not None:
+            sent = sent[:max_sentence_length]
+        non_empty_count += 1
+        for word in sent:
+            if word not in word2idx:
+                word2idx[word] = idx
+                idx2word[idx] = word
+                idx += 1
+    
+    if total_seen == 0:
+        raise ValueError("sentences cannot be empty")
+    if non_empty_count == 0:
+        raise ValueError("All sentences are empty")
+    
+    return word2idx, idx2word
+
+
 def _compute_collocation_result(target, candidate, a, b, c, d, alternative='greater'):
     """
     Compute collocation statistics for a single target-collocate pair.
     
-    This is the shared statistical computation used by both window and sentence methods,
-    and by both Python and Cython implementations.
+    Shared by both window/sentence methods and Python/Cython backends.
+    Builds a 2x2 contingency table and runs Fisher's exact test.
     
     Args:
-        target: Target word string
-        candidate: Collocate word string
-        a: Co-occurrence count (target with collocate)
-        b: Target without collocate count  
-        c: Collocate without target count
-        d: Neither target nor collocate count
-        alternative: Alternative hypothesis for Fisher's exact test
+        target: Target word.
+        candidate: Collocate word.
+        a: Co-occurrence count (target with collocate).
+        b: Target without collocate.
+        c: Collocate without target.
+        d: Neither target nor collocate.
+        alternative: Alternative hypothesis for Fisher's exact test.
     
     Returns:
-        Dictionary with collocation statistics: target, collocate, exp_local,
-        obs_local, ratio_local, obs_global, p_value
+        dict with keys: target, collocate, exp_local, obs_local,
+        ratio_local, obs_global, p_value.
     """
     # N = sample size from contingency table (a + b + c + d)
     # For window method: N excludes positions where target is at center (per Evert)
@@ -308,22 +410,21 @@ def _compute_collocation_result(target, candidate, a, b, c, d, alternative='grea
 
 def _build_results_from_counts(target_words, target_counts, candidate_counts, global_counts, total, alternative='greater', method='window'):
     """
-    Build result list from Python-collected collocation counts.
+    Build collocation result dicts from Python-accumulated counts.
     
-    This is the shared result-building logic used by both window and sentence
-    Python implementations.
+    Shared by both Python window and sentence backends.
     
     Args:
-        target_words: List of target words to process
-        target_counts: Dict mapping target -> count of contexts containing target
-        candidate_counts: Dict mapping target -> Counter of candidate co-occurrences
-        global_counts: Dict/Counter mapping token -> global count
-        total: Total count (tokens for window, sentences for sentence method)
-        alternative: Alternative hypothesis for Fisher's exact test
-        method: 'window' or 'sentence' - determines how d is calculated
+        target_words: Target words to process.
+        target_counts: {target: context count containing target}.
+        candidate_counts: {target: Counter of candidate co-occurrences}.
+        global_counts: {token: global count}.
+        total: Total tokens (window) or sentences (sentence method).
+        alternative: Alternative hypothesis for Fisher's exact test.
+        method: 'window' or 'sentence' (affects *d* cell calculation).
     
     Returns:
-        List of dictionaries with collocation statistics
+        list[dict]: Collocation statistics per target-collocate pair.
     """
     results = []
     
@@ -353,54 +454,74 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
     return results
 
 
-def _calculate_collocations_window_cython(tokenized_sentences, target_words, horizon=5, alternative='greater'):
+def _calculate_collocations_window_cython(
+    sentences, target_words, horizon=5, alternative='greater',
+    batch_words=100_000, max_sentence_length=256,
+):
     """
-    Cython implementation of window-based collocation calculation.
+    Cython-accelerated window-based collocation counting (two-pass, streaming).
+    
+    Pass 1 builds vocabulary; pass 2 streams batches through Cython nogil
+    counting and accumulates into pre-allocated numpy arrays.
     
     Args:
-        tokenized_sentences: List of tokenized sentences (already preprocessed)
-        target_words: List or set of target words
-        horizon: Window size - int for symmetric, or tuple (left, right) where left/right
-                 indicate how many words to look on each side OF THE TARGET WORD.
-                 E.g., (0, 5) finds collocates up to 5 words to the RIGHT of target.
-        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
+        sentences: Restartable iterable of tokenized sentences.
+        target_words: Target words to find collocates for.
+        horizon: int (symmetric) or tuple (left, right) window size.
+        alternative: Alternative hypothesis for Fisher's exact test.
+        batch_words: Target token count per batch.
+        max_sentence_length: Truncate longer sentences. None disables.
     
     Returns:
-        List of dictionaries with collocation statistics
+        list[dict]: Collocation statistics per target-collocate pair.
     """
-    # Normalize horizon to (left, right) tuple
-    # User specifies (left, right) relative to TARGET, but internally we need to
-    # swap because the algorithm iterates over candidates and looks for targets
+    # Normalize horizon
     if isinstance(horizon, int):
         left_horizon, right_horizon = horizon, horizon
     else:
-        # Swap: user's "right of target" becomes algorithm's "left from candidate"
+        # Swap: user's "right of target" = algorithm's "left from candidate"
         left_horizon, right_horizon = horizon[1], horizon[0]
     
-    T_count_total, candidate_counts_total, token_counter_total, total_tokens, word2idx, idx2word, target_indices = calculate_collocations_window(
-        tokenized_sentences, target_words, left_horizon, right_horizon
-    )
+    # Pass 1: build vocabulary
+    word2idx, idx2word = _build_vocab_from_iter(sentences, max_sentence_length)
+    vocab_size = len(word2idx)
     
-    if T_count_total is None:
+    # Resolve target indices
+    target_words_filtered = [w for w in target_words if w in word2idx]
+    if not target_words_filtered:
         return []
+    target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
+    n_targets = len(target_indices)
     
-    target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
-
+    # Pre-allocate accumulators
+    T_count_total = np.zeros(n_targets, dtype=np.int64)
+    candidate_counts_total = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    token_counter_total = np.zeros(vocab_size, dtype=np.int64)
+    total_tokens = 0
+    
+    # Pass 2: batch counting
+    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+        batch_T, batch_cand, batch_tok, batch_total = calculate_window_counts_batch(
+            batch, word2idx, target_indices, left_horizon, right_horizon, vocab_size
+        )
+        T_count_total += batch_T
+        candidate_counts_total += batch_cand
+        token_counter_total += batch_tok
+        total_tokens += batch_total
+    
+    # Build results from accumulated counts
     results = []
     for t_idx, target in enumerate(target_words_filtered):
         target_word_idx = target_indices[t_idx]
-        # Only iterate over candidates with non-zero co-occurrence counts
         nonzero = np.nonzero(candidate_counts_total[t_idx])[0]
         for candidate_idx in nonzero:
             if candidate_idx == target_word_idx:
                 continue
-            
             a = candidate_counts_total[t_idx, candidate_idx]
             candidate = idx2word[int(candidate_idx)]
             b = T_count_total[t_idx] - a
             c = token_counter_total[candidate_idx] - a
             d = (total_tokens - token_counter_total[target_word_idx]) - (a + b + c)
-            
             results.append(_compute_collocation_result(
                 target, candidate, a, b, c, d, alternative
             ))
@@ -408,28 +529,30 @@ def _calculate_collocations_window_cython(tokenized_sentences, target_words, hor
     return results
 
 
-def _calculate_collocations_window_python(tokenized_sentences, target_words, horizon=5, alternative='greater'):
+def _calculate_collocations_window_python(
+    sentences, target_words, horizon=5, alternative='greater',
+    batch_words=100_000, max_sentence_length=256,
+):
     """
-    Pure Python window-based collocation calculation.
+    Pure Python window-based collocation counting (streaming, single-pass).
+    
+    Streams batches via ``_iter_batches`` and accumulates into sparse
+    Python dicts. Fallback when Cython is not available.
     
     Args:
-        tokenized_sentences: List of tokenized sentences (already preprocessed)
-        target_words: List or set of target words
-        horizon: Window size - int for symmetric, or tuple (left, right) where left/right
-                 indicate how many words to look on each side OF THE TARGET WORD.
-                 E.g., (0, 5) finds collocates up to 5 words to the RIGHT of target.
-        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
+        sentences: Restartable iterable of tokenized sentences.
+        target_words: Target words to find collocates for.
+        horizon: int (symmetric) or tuple (left, right) window size.
+        alternative: Alternative hypothesis for Fisher's exact test.
+        batch_words: Target token count per batch.
+        max_sentence_length: Truncate longer sentences. None disables.
     
     Returns:
-        List of dictionaries with collocation statistics
+        list[dict]: Collocation statistics per target-collocate pair.
     """
-    # Normalize horizon to (left, right) tuple
-    # User specifies (left, right) relative to TARGET, but internally we need to
-    # swap because the algorithm iterates over candidates and looks for targets
     if isinstance(horizon, int):
         left_horizon, right_horizon = horizon, horizon
     else:
-        # Swap: user's "right of target" becomes algorithm's "left from candidate"
         left_horizon, right_horizon = horizon[1], horizon[0]
     
     total_tokens = 0
@@ -438,68 +561,87 @@ def _calculate_collocations_window_python(tokenized_sentences, target_words, hor
     candidate_in_context = {target: Counter() for target in target_words}
     token_counter = Counter()
 
-    for sentence in tqdm(tokenized_sentences):
-        for i, token in enumerate(sentence):
-            total_tokens += 1
-            token_counter[token] += 1
+    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+        for sentence in batch:
+            for i, token in enumerate(sentence):
+                total_tokens += 1
+                token_counter[token] += 1
 
-            start = max(0, i - left_horizon)
-            end = min(len(sentence), i + right_horizon + 1)
+                start = max(0, i - left_horizon)
+                end = min(len(sentence), i + right_horizon + 1)
 
-            # Scan window once; O(1) set lookup replaces per-target rescanning
-            seen_targets = set()
-            for j in range(start, end):
-                if j != i:
-                    word = sentence[j]
-                    if word in target_set and word not in seen_targets:
-                        seen_targets.add(word)
-                        T_count[word] += 1
-                        candidate_in_context[word][token] += 1
+                seen_targets = set()
+                for j in range(start, end):
+                    if j != i:
+                        word = sentence[j]
+                        if word in target_set and word not in seen_targets:
+                            seen_targets.add(word)
+                            T_count[word] += 1
+                            candidate_in_context[word][token] += 1
 
     return _build_results_from_counts(
         target_words, T_count, candidate_in_context, token_counter, total_tokens, alternative, method='window'
     )
 
 
-def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, alternative='greater'):
+def _calculate_collocations_sentence_cython(
+    sentences, target_words, alternative='greater',
+    batch_words=100_000, max_sentence_length=256,
+):
     """
-    Cython implementation of sentence-based collocation calculation.
+    Cython-accelerated sentence-based collocation counting (two-pass, streaming).
     
-    Pre-converts all sentences to integer arrays and uses lightweight buffers
-    for uniqueness checks. All hot loops run with nogil using memoryviews.
+    Pass 1 builds vocabulary; pass 2 streams batches through Cython nogil
+    counting and accumulates into pre-allocated numpy arrays.
     
     Args:
-        tokenized_sentences: List of tokenized sentences (already preprocessed)
-        target_words: List or set of target words
-        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
+        sentences: Restartable iterable of tokenized sentences.
+        target_words: Target words to find collocates for.
+        alternative: Alternative hypothesis for Fisher's exact test.
+        batch_words: Target token count per batch.
+        max_sentence_length: Truncate longer sentences. None disables.
     
     Returns:
-        List of dictionaries with collocation statistics
+        list[dict]: Collocation statistics per target-collocate pair.
     """
-    candidate_sentences_total, sentences_with_token_total, total_sentences, word2idx, idx2word, target_indices = calculate_collocations_sentence(
-        tokenized_sentences, target_words
-    )
+    # Pass 1: build vocabulary
+    word2idx, idx2word = _build_vocab_from_iter(sentences, max_sentence_length)
+    vocab_size = len(word2idx)
     
-    if candidate_sentences_total is None:
+    # Resolve target indices
+    target_words_filtered = [w for w in target_words if w in word2idx]
+    if not target_words_filtered:
         return []
+    target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
+    n_targets = len(target_indices)
     
-    target_words_filtered = [idx2word[int(idx)] for idx in target_indices] if len(target_indices) > 0 else []
-
+    # Pre-allocate accumulators
+    candidate_sentences_total = np.zeros((n_targets, vocab_size), dtype=np.int64)
+    sentences_with_token_total = np.zeros(vocab_size, dtype=np.int64)
+    total_sentences = 0
+    
+    # Pass 2: batch counting
+    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+        batch_cand, batch_swt, batch_n = calculate_sentence_counts_batch(
+            batch, word2idx, target_indices, vocab_size
+        )
+        candidate_sentences_total += batch_cand
+        sentences_with_token_total += batch_swt
+        total_sentences += batch_n
+    
+    # Build results from accumulated counts
     results = []
     for t_idx, target in enumerate(target_words_filtered):
         target_word_idx = target_indices[t_idx]
-        # Only iterate over candidates with non-zero co-occurrence counts
         nonzero = np.nonzero(candidate_sentences_total[t_idx])[0]
         for candidate_idx in nonzero:
             if candidate_idx == target_word_idx:
                 continue
-            
             a = candidate_sentences_total[t_idx, candidate_idx]
             candidate = idx2word[int(candidate_idx)]
             b = sentences_with_token_total[target_word_idx] - a
             c = sentences_with_token_total[candidate_idx] - a
             d = total_sentences - a - b - c
-            
             results.append(_compute_collocation_result(
                 target, candidate, a, b, c, d, alternative
             ))
@@ -507,29 +649,39 @@ def _calculate_collocations_sentence_cython(tokenized_sentences, target_words, a
     return results
 
 
-def _calculate_collocations_sentence_python(tokenized_sentences, target_words, alternative='greater'):
+def _calculate_collocations_sentence_python(
+    sentences, target_words, alternative='greater',
+    batch_words=100_000, max_sentence_length=256,
+):
     """
-    Pure Python sentence-based collocation calculation.
+    Pure Python sentence-based collocation counting (streaming, single-pass).
+    
+    Streams batches via ``_iter_batches`` and accumulates into sparse
+    Python dicts. Fallback when Cython is not available.
     
     Args:
-        tokenized_sentences: List of tokenized sentences (already preprocessed)
-        target_words: List or set of target words
-        alternative: Alternative hypothesis for Fisher's exact test (default 'greater')
+        sentences: Restartable iterable of tokenized sentences.
+        target_words: Target words to find collocates for.
+        alternative: Alternative hypothesis for Fisher's exact test.
+        batch_words: Target token count per batch.
+        max_sentence_length: Truncate longer sentences. None disables.
     
     Returns:
-        List of dictionaries with collocation statistics
+        list[dict]: Collocation statistics per target-collocate pair.
     """
-    total_sentences = len(tokenized_sentences)
+    total_sentences = 0
     candidate_in_sentences = {target: Counter() for target in target_words}
     sentences_with_token = defaultdict(int)
 
-    for sentence in tqdm(tokenized_sentences):
-        unique_tokens = set(sentence)
-        for token in unique_tokens:
-            sentences_with_token[token] += 1
-        for target in target_words:
-            if target in unique_tokens:
-                candidate_in_sentences[target].update(unique_tokens)
+    for batch in _iter_batches(sentences, batch_words, max_sentence_length):
+        for sentence in batch:
+            total_sentences += 1
+            unique_tokens = set(sentence)
+            for token in unique_tokens:
+                sentences_with_token[token] += 1
+            for target in target_words:
+                if target in unique_tokens:
+                    candidate_in_sentences[target].update(unique_tokens)
 
     return _build_results_from_counts(
         target_words, sentences_with_token, candidate_in_sentences, sentences_with_token, total_sentences, alternative, method='sentence'
@@ -547,13 +699,19 @@ def find_collocates(
     alternative: str = 'greater',
     sort_by: str = 'obs_local',
     ascending: bool = False,
+    batch_words: int = 100_000,
 ) -> list[dict] | pd.DataFrame:
     """
-    Find collocates for target words within a corpus of sentences.
+    Find collocates for target words in a corpus of sentences.
+    
+    Processes data in streaming batches to keep memory low even for very large
+    corpora. Requires a restartable iterable (iterated twice: once for
+    vocabulary building, once for counting). Lists, file-backed iterators, and
+    restartable generator classes all work; single-use generators do not.
     
     Args:
-        sentences (Iterable[list[str]]): Iterable of tokenized sentences, where each 
-            sentence is a list of tokens. Can be a list or any other iterable.
+        sentences (Iterable[list[str]]): Restartable iterable of tokenized
+            sentences (each sentence a list of string tokens).
         target_words (str | list[str]): Target word(s) to find collocates for.
         method (str): Method to use for calculating collocations. Either 'window' or 
             'sentence'. 'window' uses a sliding window of specified horizon around each 
@@ -598,15 +756,17 @@ def find_collocates(
             - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).
             - None: No correction (default).
         as_dataframe (bool): If True, return results as a pandas DataFrame. Default is True.
-        max_sentence_length (int | None): Maximum sentence length for preprocessing. 
-            Used by both 'window' and 'sentence' methods. Longer sentences will be truncated 
-            to avoid memory bloat from outliers. Set to None for no limit. Default is 256.
+        max_sentence_length (int | None): Maximum sentence length. Longer sentences 
+            are truncated to avoid memory bloat from outliers. Set to None for no limit.
+            Default is 256.
         alternative (str): Alternative hypothesis for Fisher's exact test. Options are:
             'greater' (test if observed co-occurrence is greater than expected, default),
             'less' (test if observed is less than expected), or 'two-sided' (test if 
             observed differs from expected).
         sort_by (str): Field to sort results by. Default is 'obs_local'.
         ascending (bool): Sort direction. Default is False (descending).
+        batch_words (int): Target number of tokens per processing batch. Larger values
+            use more memory but reduce per-batch overhead. Default is 100,000.
     
     Returns:
         list[dict] | pd.DataFrame: Collocation results with the following fields:
@@ -621,16 +781,7 @@ def find_collocates(
             - **p_value** (float): P-value from Fisher's exact test.
             - **adjusted_p_value** (float, optional): Present only if ``correction`` is set.
     """
-    # Convert iterable to list if needed (supports generators, etc.)
-    if not isinstance(sentences, list):
-        sentences = list(sentences)
-    if not sentences:
-        raise ValueError("sentences cannot be empty")
-    # Validate that sentences are lists of tokens (not just strings)
-    if sentences and not isinstance(sentences[0], list):
-        raise ValueError("sentences must be a list of lists (tokenized sentences)")
-    
-    # Validate correction parameter
+    # Validate parameters that don't require data access
     if correction is not None and correction not in VALID_CORRECTIONS:
         raise ValueError(
             f"Unknown correction method '{correction}'. "
@@ -649,14 +800,6 @@ def find_collocates(
     if sort_by == "adjusted_p_value" and correction is None:
         raise ValueError("sort_by='adjusted_p_value' requires a correction method to be set")
     
-    # Preprocess: filter empty sentences and trim to max length in one pass
-    if max_sentence_length is not None:
-        sentences = [s[:max_sentence_length] for s in sentences if s]
-    else:
-        sentences = [s for s in sentences if s]
-    if not sentences:
-        raise ValueError("All sentences are empty")
-    
     if not isinstance(target_words, list):
         target_words = [target_words]
     target_words = list(set(target_words))
@@ -667,7 +810,6 @@ def find_collocates(
     if method not in ['window', 'sentence']:
         raise ValueError(f"Invalid method: {method}. Valid methods are 'window' and 'sentence'.")
 
-    # Validate horizon parameter based on method
     if method == 'sentence':
         if horizon is not None:
             raise ValueError(
@@ -677,9 +819,8 @@ def find_collocates(
             )
     elif method == 'window':
         if horizon is None:
-            horizon = 5  # Default value for window method
+            horizon = 5
     
-    # Print filters if provided
     if filters:
         filter_strs = []
         if 'max_p' in filters:
@@ -706,24 +847,31 @@ def find_collocates(
             filter_strs.append(f"max_obs_global={filters['max_obs_global']}")
         logger.info(f"Filters: {', '.join(filter_strs)}")
     
+    # Dispatch to backend (all backends now accept iterables and handle batching)
+    backend_kwargs = dict(
+        alternative=alternative,
+        batch_words=batch_words,
+        max_sentence_length=max_sentence_length,
+    )
+    
     if CYTHON_AVAILABLE:
         if method == 'window':
             results = _calculate_collocations_window_cython(
-                sentences, target_words, horizon=horizon, alternative=alternative
+                sentences, target_words, horizon=horizon, **backend_kwargs
             )
         elif method == 'sentence':
             results = _calculate_collocations_sentence_cython(
-                sentences, target_words, alternative=alternative
+                sentences, target_words, **backend_kwargs
             )
     else:
         logger.debug("Using pure Python fallback for find_collocates (Cython not available)")
         if method == 'window':
             results = _calculate_collocations_window_python(
-                sentences, target_words, horizon=horizon, alternative=alternative
+                sentences, target_words, horizon=horizon, **backend_kwargs
             )
         elif method == 'sentence':
             results = _calculate_collocations_sentence_python(
-                sentences, target_words, alternative=alternative
+                sentences, target_words, **backend_kwargs
             )
 
     # =========================================================================

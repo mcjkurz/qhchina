@@ -32,7 +32,7 @@ class TestFindCollocatesValidation:
         """Test that non-list sentences raises ValueError."""
         from qhchina.analytics.collocations import find_collocates
         
-        with pytest.raises(ValueError, match="must be a list of lists"):
+        with pytest.raises(ValueError, match="must be an iterable of lists"):
             find_collocates(["not", "tokenized"], target_words=["我"])
     
     def test_empty_target_words_raises_error(self, sample_documents):
@@ -83,6 +83,105 @@ class TestFindCollocatesValidation:
         
         # Should not raise - string is converted to list internally
         results = find_collocates(sample_documents, target_words="人")
+        assert isinstance(results, pd.DataFrame)
+
+
+# =============================================================================
+# Streaming / Batching Tests
+# =============================================================================
+
+class TestStreamingAndBatching:
+    """Tests for restartable iterator and batch processing support."""
+    
+    def test_restartable_iterator_class(self, sample_documents):
+        """Test that a restartable iterator class works."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        class RestartableCorpus:
+            def __init__(self, docs):
+                self._docs = docs
+            def __iter__(self):
+                return iter(self._docs)
+        
+        corpus = RestartableCorpus(sample_documents)
+        results = find_collocates(corpus, target_words=["人"])
+        assert isinstance(results, pd.DataFrame)
+        assert len(results) > 0
+    
+    def test_restartable_iterator_sentence_method(self, sample_documents):
+        """Test that a restartable iterator works with sentence method."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        class RestartableCorpus:
+            def __init__(self, docs):
+                self._docs = docs
+            def __iter__(self):
+                return iter(self._docs)
+        
+        corpus = RestartableCorpus(sample_documents)
+        results = find_collocates(corpus, target_words=["人"], method='sentence')
+        assert isinstance(results, pd.DataFrame)
+        assert len(results) > 0
+    
+    def test_list_still_works(self, sample_documents):
+        """Test that plain lists still work as before."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        results = find_collocates(sample_documents, target_words=["人"])
+        assert isinstance(results, pd.DataFrame)
+        assert len(results) > 0
+    
+    def test_batch_equivalence_window(self, sample_documents):
+        """Test that small and large batch sizes produce identical results."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        results_big = find_collocates(
+            sample_documents, target_words=["人"], method='window',
+            batch_words=999_999, as_dataframe=False, sort_by='collocate', ascending=True
+        )
+        results_small = find_collocates(
+            sample_documents, target_words=["人"], method='window',
+            batch_words=10, as_dataframe=False, sort_by='collocate', ascending=True
+        )
+        
+        assert len(results_big) == len(results_small)
+        for r_big, r_small in zip(results_big, results_small):
+            assert r_big["target"] == r_small["target"]
+            assert r_big["collocate"] == r_small["collocate"]
+            assert r_big["obs_local"] == r_small["obs_local"]
+            assert r_big["obs_global"] == r_small["obs_global"]
+            assert abs(r_big["p_value"] - r_small["p_value"]) < 1e-10
+    
+    def test_batch_equivalence_sentence(self, sample_documents):
+        """Test that small and large batch sizes produce identical results for sentence method."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        results_big = find_collocates(
+            sample_documents, target_words=["人"], method='sentence',
+            batch_words=999_999, as_dataframe=False, sort_by='collocate', ascending=True
+        )
+        results_small = find_collocates(
+            sample_documents, target_words=["人"], method='sentence',
+            batch_words=10, as_dataframe=False, sort_by='collocate', ascending=True
+        )
+        
+        assert len(results_big) == len(results_small)
+        for r_big, r_small in zip(results_big, results_small):
+            assert r_big["target"] == r_small["target"]
+            assert r_big["collocate"] == r_small["collocate"]
+            assert r_big["obs_local"] == r_small["obs_local"]
+            assert r_big["obs_global"] == r_small["obs_global"]
+            assert abs(r_big["p_value"] - r_small["p_value"]) < 1e-10
+    
+    def test_max_sentence_length_applied_in_batches(self):
+        """Test that max_sentence_length truncation works in batch mode."""
+        from qhchina.analytics.collocations import find_collocates
+        
+        long_sent = list("人" + "啊" * 300)
+        short_sent = list("人是好的")
+        docs = [long_sent, short_sent]
+        
+        results = find_collocates(docs, target_words=["人"], max_sentence_length=10)
         assert isinstance(results, pd.DataFrame)
 
 
