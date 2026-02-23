@@ -391,7 +391,7 @@ class TestCoocMatrix:
             assert isinstance(count, int)
     
     def test_cooc_matrix_row_lookup(self, sample_documents):
-        """Test getting a row from CoocMatrix as dict."""
+        """Test getting a row from CoocMatrix as 1D array."""
         from qhchina.analytics.collocations import cooc_matrix
         
         result = cooc_matrix(sample_documents, horizon=2)
@@ -399,7 +399,68 @@ class TestCoocMatrix:
         vocab = result.vocab
         if len(vocab) >= 1:
             row = result[vocab[0]]
-            assert isinstance(row, dict)
+            assert isinstance(row, np.ndarray)
+            assert row.shape == (result.shape[1],)
+    
+    def test_cooc_matrix_row_slice_lookup(self, sample_documents):
+        """Test matrix[word, :] returns same 1D row as matrix[word]."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        vocab = result.vocab
+        if len(vocab) >= 1:
+            row = result[vocab[0], :]
+            assert isinstance(row, np.ndarray)
+            assert row.shape == (result.shape[1],)
+            np.testing.assert_array_equal(row, result[vocab[0]])
+    
+    def test_cooc_matrix_column_lookup(self, sample_documents):
+        """Test matrix[:, word] returns 1D column vector."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        vocab = result.vocab
+        if len(vocab) >= 1:
+            col = result[:, vocab[0]]
+            assert isinstance(col, np.ndarray)
+            assert col.shape == (result.shape[0],)
+    
+    def test_cooc_matrix_list_row_lookup(self, sample_documents):
+        """Test matrix[["w1", "w2"]] returns 2D submatrix (N, V)."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        vocab = result.vocab
+        if len(vocab) >= 2:
+            sub = result[[vocab[0], vocab[1]]]
+            assert isinstance(sub, np.ndarray)
+            assert sub.shape == (2, result.shape[1])
+            np.testing.assert_array_equal(sub[0], result[vocab[0]])
+            np.testing.assert_array_equal(sub[1], result[vocab[1]])
+    
+    def test_cooc_matrix_list_col_lookup(self, sample_documents):
+        """Test matrix[:, ["w1", "w2"]] returns 2D submatrix (V, N)."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        vocab = result.vocab
+        if len(vocab) >= 2:
+            sub = result[:, [vocab[0], vocab[1]]]
+            assert isinstance(sub, np.ndarray)
+            assert sub.shape == (result.shape[0], 2)
+            np.testing.assert_array_equal(sub[:, 0], result[:, vocab[0]])
+            np.testing.assert_array_equal(sub[:, 1], result[:, vocab[1]])
+    
+    def test_cooc_matrix_list_row_with_slice(self, sample_documents):
+        """Test matrix[["w1", "w2"], :] returns same as matrix[["w1", "w2"]]."""
+        from qhchina.analytics.collocations import cooc_matrix
+        
+        result = cooc_matrix(sample_documents, horizon=2)
+        vocab = result.vocab
+        if len(vocab) >= 2:
+            sub1 = result[[vocab[0], vocab[1]]]
+            sub2 = result[[vocab[0], vocab[1]], :]
+            np.testing.assert_array_equal(sub1, sub2)
     
     def test_cooc_matrix_with_vocabulary(self, sample_documents):
         """Test co-occurrence matrix with specified vocabulary."""

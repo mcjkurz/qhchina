@@ -38,15 +38,16 @@ except ImportError:
 
 class CoocMatrix:
     """
-    Co-occurrence matrix with flexible indexing by word or index.
+    Co-occurrence matrix with numpy-like indexing by word or index.
     
-    Supports flexible indexing:
+    Indexing:
     
-    - ``matrix["word1", "word2"]`` - single count (int)
-    - ``matrix[132, 5234]`` - single count (int)
-    - ``matrix["word1"]`` - row as dict {word: count}
-    - ``matrix["word1", :]`` - row as dict {word: count}
-    - ``matrix[:, "word2"]`` - column as dict {word: count}
+    - ``matrix[w]`` or ``matrix[i]`` → 1D row vector, shape ``(V,)``
+    - ``matrix[w1, w2]`` or ``matrix[i, j]`` → scalar ``int``
+    - ``matrix[[w1, w2]]`` → 2D row submatrix, shape ``(N, V)``
+    - ``matrix[w, :]`` → 1D row vector, shape ``(V,)``
+    - ``matrix[:, w]`` → 1D column vector, shape ``(V,)``
+    - ``matrix[:, [w1, w2]]`` → 2D column submatrix, shape ``(V, N)``
     
     Internally stores data as a scipy sparse CSR matrix for memory efficiency.
     
@@ -61,8 +62,10 @@ class CoocMatrix:
         >>> matrix = cooc_matrix(documents, horizon=5)
         >>> matrix["fox", "dog"]
         42
-        >>> matrix["fox"]
-        {'quick': 10, 'brown': 8, 'dog': 42, ...}
+        >>> matrix["fox"]                          # 1D row vector
+        array([0, 0, 10, 8, 42, ...])
+        >>> matrix[["fox", "dog"]]                 # 2D submatrix
+        array([[0, 0, 10, ...], [0, 3, 0, ...]])
         >>> df = matrix.to_dataframe()
         >>> arr = matrix.to_dense()
     """
@@ -99,63 +102,52 @@ class CoocMatrix:
         else:
             raise TypeError(f"Index must be str or int, got {type(key).__name__}")
     
+    def _resolve_indices(self, keys: list) -> list[int]:
+        """Convert a list of word strings or ints to matrix indices."""
+        return [self._resolve_index(k) for k in keys]
+    
     def __getitem__(self, key):
         """
-        Flexible indexing for co-occurrence lookups.
+        Numpy-like indexing for co-occurrence lookups.
         
-        Args:
-            key: Can be:
-                - (word1, word2) or (idx1, idx2): Returns single count
-                - word or idx: Returns row as dict
-                - (word, slice) or (slice, word): Returns row/column as dict
+        - ``matrix["fox"]`` → 1D row vector, shape ``(V,)``
+        - ``matrix["fox", "dog"]`` → scalar ``int``
+        - ``matrix[["fox", "dog"]]`` → 2D row submatrix, shape ``(N, V)``
+        - ``matrix["fox", :]`` → 1D row vector, shape ``(V,)``
+        - ``matrix[:, "dog"]`` → 1D column vector, shape ``(V,)``
+        - ``matrix[:, ["fox", "dog"]]`` → 2D column submatrix, shape ``(V, N)``
         
         Returns:
-            int for single cell lookup, dict for row/column lookup.
-        
-        Examples:
-            >>> matrix["fox", "dog"]      # Single count
-            42
-            >>> matrix["fox"]             # Row as dict
-            {'quick': 10, 'brown': 8, ...}
-            >>> matrix["fox", :]          # Same as above
-            >>> matrix[:, "dog"]          # Column as dict
+            int for single cell, np.ndarray for vector/submatrix lookups.
         """
-        # Handle single key (row lookup)
         if not isinstance(key, tuple):
-            row_idx = self._resolve_index(key)
-            return self._row_to_dict(row_idx)
+            if isinstance(key, list):
+                indices = self._resolve_indices(key)
+                return self._matrix[indices].toarray()
+            idx = self._resolve_index(key)
+            return self._matrix.getrow(idx).toarray().ravel()
         
-        # Handle tuple key
         if len(key) != 2:
             raise IndexError("Index must be a single key or a pair (row, col)")
         
         row_key, col_key = key
+        row_is_slice = isinstance(row_key, slice) and row_key == slice(None)
+        col_is_slice = isinstance(col_key, slice) and col_key == slice(None)
         
-        # Handle slice cases
-        if isinstance(row_key, slice) and row_key == slice(None):
-            # [:, col] - column lookup
-            col_idx = self._resolve_index(col_key)
-            return self._col_to_dict(col_idx)
+        if row_is_slice and isinstance(col_key, list):
+            indices = self._resolve_indices(col_key)
+            return self._matrix[:, indices].toarray()
+        if row_is_slice:
+            idx = self._resolve_index(col_key)
+            return self._matrix.getcol(idx).toarray().ravel()
+        if col_is_slice:
+            if isinstance(row_key, list):
+                indices = self._resolve_indices(row_key)
+                return self._matrix[indices].toarray()
+            idx = self._resolve_index(row_key)
+            return self._matrix.getrow(idx).toarray().ravel()
         
-        if isinstance(col_key, slice) and col_key == slice(None):
-            # [row, :] - row lookup
-            row_idx = self._resolve_index(row_key)
-            return self._row_to_dict(row_idx)
-        
-        # Both are concrete indices - single cell lookup
-        row_idx = self._resolve_index(row_key)
-        col_idx = self._resolve_index(col_key)
-        return int(self._matrix[row_idx, col_idx])
-    
-    def _row_to_dict(self, row_idx: int) -> dict[str, int]:
-        """Convert a matrix row to a dict of {word: count} for non-zero entries."""
-        row = self._matrix.getrow(row_idx)
-        return {self._i2w[col]: int(val) for col, val in zip(row.indices, row.data)}
-    
-    def _col_to_dict(self, col_idx: int) -> dict[str, int]:
-        """Convert a matrix column to a dict of {word: count} for non-zero entries."""
-        col = self._matrix.getcol(col_idx)
-        return {self._i2w[row]: int(val) for row, val in zip(col.indices, col.data)}
+        return int(self._matrix[self._resolve_index(row_key), self._resolve_index(col_key)])
     
     def get(self, row_key, col_key, default: int = 0) -> int:
         """
@@ -927,10 +919,11 @@ def cooc_matrix(
     file-backed iterators, and restartable generator classes all work;
     single-use generators require a pre-built ``vocab``.
     
-    Returns a CoocMatrix object with flexible indexing:
+    Returns a CoocMatrix object with numpy-like indexing:
     
-    - ``matrix["word1", "word2"]`` - single count
-    - ``matrix["word1"]`` - row as dict {word: count}
+    - ``matrix["word1", "word2"]`` - single count (int)
+    - ``matrix["word1"]`` - 1D row vector, shape (V,)
+    - ``matrix[["word1", "word2"]]`` - 2D row submatrix, shape (N, V)
     - ``matrix.to_dataframe()`` - pandas DataFrame
     - ``matrix.to_dense()`` - numpy array
     
@@ -964,11 +957,13 @@ def cooc_matrix(
     
     Example:
         >>> matrix = cooc_matrix(documents, horizon=5)
-        >>> matrix["fox", "dog"]      # Get count for word pair
+        >>> matrix["fox", "dog"]      # Scalar count
         42
-        >>> matrix["fox"]             # Get all co-occurrences for "fox"
-        {'quick': 10, 'brown': 8, 'dog': 42, ...}
-        >>> df = matrix.to_dataframe()  # Convert to DataFrame if needed
+        >>> matrix["fox"]             # 1D row vector, shape (V,)
+        array([0, 0, 10, 8, 42, ...])
+        >>> matrix[["fox", "dog"]]    # 2D submatrix, shape (2, V)
+        array([[0, 0, 10, ...], [0, 3, 0, ...]])
+        >>> df = matrix.to_dataframe()
         
         >>> # With predefined vocabulary (no filtering applied)
         >>> matrix = cooc_matrix(documents, vocab=["fox", "dog", "cat"])
