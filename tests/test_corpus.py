@@ -173,11 +173,20 @@ class TestCorpusDocumentManagement:
         assert doc.metadata['author'] == 'Author1'
         assert doc.metadata['year'] == 2020
     
-    def test_add_invalid_tokens_raises(self):
-        """Test that non-list tokens raise error."""
+    def test_add_invalid_content_raises(self):
+        """Test that invalid content type raises error."""
         corpus = Corpus()
-        with pytest.raises(TypeError, match="must be a list"):
-            corpus.add("not a list")
+        with pytest.raises(TypeError, match="must be a list of tokens or a string"):
+            corpus.add(12345)  # Neither list nor string
+    
+    def test_add_string_as_raw_text(self):
+        """Test that adding a string stores it as raw_text."""
+        corpus = Corpus()
+        doc_id = corpus.add("这是原始文本", doc_id='test')
+        
+        assert doc_id == 'test'
+        assert corpus['test'].tokens == []  # No tokens yet
+        assert corpus['test'].metadata['raw_text'] == "这是原始文本"
     
     def test_add_many(self):
         """Test adding multiple documents."""
@@ -913,9 +922,9 @@ class TestCorpusTokenize:
             pytest.skip("jieba not installed")
         
         corpus = Corpus()
-        corpus.add([], content="这是内容")  # Using 'content' instead of 'raw_text'
+        corpus.add([], text_content="这是内容")  # Using 'text_content' instead of 'raw_text'
         
-        corpus.tokenize(raw_text_key="content")
+        corpus.tokenize(raw_text_key="text_content")
         
         assert len(corpus[0].tokens) > 0
     
@@ -1099,3 +1108,222 @@ class TestCorpusTokenize:
         
         # Document with raw_text should be split
         assert "has_text_0" in corpus
+
+
+class TestCorpusFolderSerialization:
+    """Tests for corpus save_folder/load_folder methods."""
+    
+    def test_save_load_folder_json_roundtrip(self):
+        """Test save_folder and load_folder roundtrip with JSON format."""
+        corpus = Corpus()
+        corpus.add(['a', 'b'], doc_id='doc1', author='A', year=2020)
+        corpus.add(['c', 'd', 'e'], doc_id='doc2', author='B')
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir) / 'test_corpus'
+            
+            corpus.save_folder(folder_path)
+            
+            # Check files were created
+            assert (folder_path / '_meta.json').exists()
+            assert (folder_path / 'doc1.json').exists()
+            assert (folder_path / 'doc2.json').exists()
+            
+            # Load and verify
+            loaded = Corpus.load_folder(folder_path)
+            
+            assert len(loaded) == 2
+            assert list(loaded) == [['a', 'b'], ['c', 'd', 'e']]
+            assert loaded['doc1'].metadata['author'] == 'A'
+            assert loaded['doc1'].metadata['year'] == 2020
+            assert loaded['doc2'].metadata['author'] == 'B'
+    
+    def test_save_load_folder_txt_roundtrip(self):
+        """Test save_folder and load_folder roundtrip with TXT format."""
+        corpus = Corpus()
+        corpus.add(['a', 'b'], doc_id='doc1')
+        corpus.add(['c', 'd', 'e'], doc_id='doc2')
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir) / 'test_corpus'
+            
+            corpus.save_folder(folder_path, format='txt')
+            
+            # Check files were created
+            assert (folder_path / '_meta.json').exists()
+            assert (folder_path / 'doc1.txt').exists()
+            assert (folder_path / 'doc2.txt').exists()
+            
+            # Load and verify
+            loaded = Corpus.load_folder(folder_path)
+            
+            assert len(loaded) == 2
+            assert list(loaded) == [['a', 'b'], ['c', 'd', 'e']]
+    
+    def test_save_folder_preserves_order(self):
+        """Test that save_folder and load_folder preserve document order."""
+        corpus = Corpus()
+        corpus.add(['z'], doc_id='zzz')
+        corpus.add(['a'], doc_id='aaa')
+        corpus.add(['m'], doc_id='mmm')
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir) / 'test_corpus'
+            
+            corpus.save_folder(folder_path)
+            loaded = Corpus.load_folder(folder_path)
+            
+            # Order should be preserved (zzz, aaa, mmm), not alphabetical
+            assert [d.doc_id for d in loaded._documents] == ['zzz', 'aaa', 'mmm']
+    
+    def test_save_folder_handles_filename_collision(self):
+        """Test that save_folder handles doc_id filename collisions."""
+        # Different doc_ids that sanitize to the same filename
+        corpus = Corpus()
+        corpus.add(['a'], doc_id='path/to/file')  # Sanitizes to path_to_file
+        corpus.add(['b'], doc_id='path:to:file')  # Also sanitizes to path_to_file
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir) / 'test_corpus'
+            
+            corpus.save_folder(folder_path)
+            
+            # Should have two different files
+            assert (folder_path / 'path_to_file.json').exists()
+            assert (folder_path / 'path_to_file_1.json').exists()
+            
+            # Load and verify both documents present
+            loaded = Corpus.load_folder(folder_path)
+            assert len(loaded) == 2
+    
+    def test_save_folder_sanitizes_unsafe_chars(self):
+        """Test that save_folder sanitizes unsafe filename characters."""
+        corpus = Corpus()
+        corpus.add(['a'], doc_id='file/with:unsafe*chars')
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir) / 'test_corpus'
+            
+            corpus.save_folder(folder_path)
+            
+            # Filename should be sanitized
+            assert (folder_path / 'file_with_unsafe_chars.json').exists()
+            
+            # Load should restore original doc_id
+            loaded = Corpus.load_folder(folder_path)
+            assert 'file/with:unsafe*chars' in loaded
+    
+    def test_load_folder_without_meta(self):
+        """Test that load_folder works without _meta.json."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir)
+            
+            # Create files directly without _meta.json
+            doc1 = {'doc_id': 'alpha', 'tokens': ['a', 'b'], 'metadata': {'x': 1}}
+            doc2 = {'doc_id': 'beta', 'tokens': ['c'], 'metadata': {'x': 2}}
+            
+            with open(folder_path / 'alpha.json', 'w') as f:
+                json.dump(doc1, f)
+            with open(folder_path / 'beta.json', 'w') as f:
+                json.dump(doc2, f)
+            
+            loaded = Corpus.load_folder(folder_path)
+            
+            # Should load in alphabetical order
+            assert len(loaded) == 2
+            assert loaded[0].doc_id == 'alpha'
+            assert loaded[1].doc_id == 'beta'
+    
+    def test_load_folder_with_pattern(self):
+        """Test that load_folder pattern filtering works."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir)
+            
+            # Create mixed files
+            with open(folder_path / 'doc1.json', 'w') as f:
+                json.dump({'doc_id': 'doc1', 'tokens': ['a'], 'metadata': {}}, f)
+            with open(folder_path / 'doc2.txt', 'w') as f:
+                f.write('b c d')
+            with open(folder_path / 'doc3.json', 'w') as f:
+                json.dump({'doc_id': 'doc3', 'tokens': ['e'], 'metadata': {}}, f)
+            
+            # Load only JSON files
+            loaded = Corpus.load_folder(folder_path, pattern='*.json')
+            
+            assert len(loaded) == 2
+            assert all('doc2' not in d.doc_id for d in loaded._documents)
+    
+    def test_load_folder_mixed_formats(self):
+        """Test that load_folder can load mixed JSON and TXT files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir)
+            
+            # Create mixed files
+            with open(folder_path / 'doc1.json', 'w') as f:
+                json.dump({'doc_id': 'doc1', 'tokens': ['a', 'b'], 'metadata': {'source': 'json'}}, f)
+            with open(folder_path / 'doc2.txt', 'w') as f:
+                f.write('c d e')
+            
+            loaded = Corpus.load_folder(folder_path)
+            
+            assert len(loaded) == 2
+            # JSON file has metadata
+            assert loaded['doc1'].metadata.get('source') == 'json'
+            # TXT file has no metadata
+            assert loaded['doc2'].metadata == {}
+    
+    def test_load_folder_empty_folder(self):
+        """Test that load_folder handles empty folder."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir) / 'empty'
+            folder_path.mkdir()
+            
+            loaded = Corpus.load_folder(folder_path)
+            
+            assert len(loaded) == 0
+    
+    def test_load_folder_not_directory_raises(self):
+        """Test that load_folder raises error for non-directory path."""
+        with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
+            path = f.name
+        
+        try:
+            with pytest.raises(ValueError, match="not a directory"):
+                Corpus.load_folder(path)
+        finally:
+            Path(path).unlink()
+    
+    def test_save_folder_invalid_format_raises(self):
+        """Test that save_folder raises error for invalid format."""
+        corpus = Corpus([['a']])
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with pytest.raises(ValueError, match="must be 'json' or 'txt'"):
+                corpus.save_folder(tmpdir, format='pickle')
+    
+    def test_save_folder_preserves_default_metadata(self):
+        """Test that save_folder preserves corpus default_metadata."""
+        corpus = Corpus(metadata={'source': 'test_source'})
+        corpus.add(['a'], doc_id='doc1')
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder_path = Path(tmpdir) / 'test_corpus'
+            
+            corpus.save_folder(folder_path)
+            loaded = Corpus.load_folder(folder_path)
+            
+            assert loaded._default_metadata == {'source': 'test_source'}
+
+
+class TestCorpusLoadCached:
+    """Tests for corpus load_cached method."""
+    
+    def test_load_cached_not_found_raises(self):
+        """Test that load_cached raises error when corpus not in cache."""
+        with pytest.raises(FileNotFoundError, match="not found in cache"):
+            Corpus.load_cached('nonexistent_corpus_12345')
+    
+    def test_load_cached_error_message_helpful(self):
+        """Test that load_cached error message includes download hint."""
+        with pytest.raises(FileNotFoundError, match="Corpus.download"):
+            Corpus.load_cached('nonexistent_corpus_12345')

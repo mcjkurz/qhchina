@@ -42,56 +42,19 @@ logger = logging.getLogger("qhchina.corpus")
 # Remote corpus download configuration
 # =============================================================================
 
-_GITHUB_API_BASE = "https://api.github.com/repos/mcjkurz/qhchina-data/contents"
-_CORPUS_CACHE_DIR = Path.home() / '.cache' / 'qhchina' / 'corpora'
+from qhchina.helpers.github import (
+    ensure_cache_dir as _ensure_cache_dir,
+    download_file as _download_file,
+    query_github_api as _query_github_api,
+    CACHE_BASE as _CACHE_BASE,
+)
+
+_CORPUS_CACHE_DIR = _CACHE_BASE / 'corpora'
 
 
 def _ensure_corpus_cache_dir() -> Path:
     """Create corpus cache directory if it doesn't exist."""
-    _CORPUS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return _CORPUS_CACHE_DIR
-
-
-def _download_file(url: str, dest: Path) -> None:
-    """Download a file from URL to destination path."""
-    try:
-        import requests
-    except ImportError as e:
-        raise ImportError(
-            "requests is required for downloading corpora. "
-            "Install it with: pip install requests"
-        ) from e
-    
-    response = requests.get(url, timeout=120, stream=True)
-    response.raise_for_status()
-    
-    with open(dest, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=65536):
-            f.write(chunk)
-
-
-def _query_github_api(path: str) -> list[dict]:
-    """
-    Query GitHub API for contents at the given path.
-    
-    Args:
-        path: Path relative to repository root (e.g., 'corpora/songshi')
-    
-    Returns:
-        List of file/directory info dicts from GitHub API
-    """
-    try:
-        import requests
-    except ImportError as e:
-        raise ImportError(
-            "requests is required for downloading corpora. "
-            "Install it with: pip install requests"
-        ) from e
-    
-    url = f"{_GITHUB_API_BASE}/{path}"
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    return response.json()
+    return _ensure_cache_dir('corpora')
 
 
 def _get_corpus_files(corpus_path: str) -> list[dict]:
@@ -373,7 +336,7 @@ class Corpus:
     
     def add(
         self,
-        tokens: list[str],
+        content: list[str] | str,
         doc_id: str | None = None,
         **metadata: Any
     ) -> str:
@@ -381,7 +344,8 @@ class Corpus:
         Add a document to the corpus.
         
         Args:
-            tokens: List of string tokens (the segmented text).
+            content: Either a list of tokens (already segmented) or a string
+                (raw text to be tokenized later with ``.tokenize()``).
             doc_id: Optional document ID. If not provided, one is auto-generated.
             **metadata: Metadata key-value pairs (author, date, source, etc.).
         
@@ -389,21 +353,32 @@ class Corpus:
             The document ID (generated or provided).
         
         Raises:
-            TypeError: If tokens is not a list.
+            TypeError: If content is neither a list nor a string.
             ValueError: If doc_id already exists in corpus.
         
         Example:
+            >>> # Add tokenized document
             >>> corpus.add(['没有', '吃', '过', '人', '的', '孩子'], author='鲁迅')
             'doc_0'
-            >>> corpus.add(['小溪', '流', '下去'], doc_id='边城', author='沈从文')
-            '边城'
-            >>> corpus[0].tokens      # Access by index
-            ['没有', '吃', '过', '人', '的', '孩子']
+            
+            >>> # Add raw text (call .tokenize() later)
+            >>> corpus.add('原始文本，需要分词。', doc_id='raw_doc', author='作者')
+            'raw_doc'
+            >>> corpus.tokenize()  # Tokenize all documents with raw_text
+            
             >>> corpus['边城'].tokens  # Access by doc_id
             ['小溪', '流', '下去']
         """
-        if not isinstance(tokens, list):
-            raise TypeError(f"tokens must be a list, got {type(tokens).__name__}")
+        if isinstance(content, str):
+            # Raw text: store in metadata, tokens empty
+            tokens = []
+            metadata['raw_text'] = content
+        elif isinstance(content, list):
+            tokens = content
+        else:
+            raise TypeError(
+                f"content must be a list of tokens or a string, got {type(content).__name__}"
+            )
         
         self._invalidate_cache()
         
@@ -428,7 +403,7 @@ class Corpus:
     
     def add_many(
         self,
-        documents: list[list[str]],
+        documents: list[list[str]] | list[str],
         metadata_list: list[dict[str, Any]] | None = None,
         **shared_metadata: Any
     ) -> list[str]:
@@ -436,7 +411,8 @@ class Corpus:
         Add multiple documents efficiently.
         
         Args:
-            documents: List of token lists.
+            documents: Either a list of token lists (already segmented) or a list
+                of strings (raw texts to be tokenized later with ``.tokenize()``).
             metadata_list: Optional per-document metadata. Must match length of documents.
             **shared_metadata: Metadata applied to all documents.
         
@@ -447,9 +423,16 @@ class Corpus:
             ValueError: If metadata_list length doesn't match documents length.
         
         Example:
+            >>> # Add tokenized documents
             >>> docs = [['word1'], ['word2', 'word3']]
             >>> corpus.add_many(docs, period='民国')
             ['doc_0', 'doc_1']
+            
+            >>> # Add raw texts
+            >>> texts = ['第一篇文章的内容。', '第二篇文章的内容。']
+            >>> corpus.add_many(texts, source='测试')
+            ['doc_2', 'doc_3']
+            >>> corpus.tokenize()  # Tokenize all
         """
         if metadata_list is not None:
             if len(metadata_list) != len(documents):
@@ -459,10 +442,10 @@ class Corpus:
                 )
         
         doc_ids = []
-        for i, tokens in enumerate(documents):
+        for i, content in enumerate(documents):
             per_doc_meta = metadata_list[i] if metadata_list else {}
             merged = {**shared_metadata, **per_doc_meta}
-            doc_id = self.add(tokens, **merged)
+            doc_id = self.add(content, **merged)
             doc_ids.append(doc_id)
         
         return doc_ids
@@ -1019,6 +1002,22 @@ class Corpus:
     # Serialization
     # =========================================================================
     
+    @staticmethod
+    def _sanitize_filename(name: str) -> str:
+        """
+        Make a string safe for use as a filename.
+        
+        Replaces characters that are invalid in filenames on common filesystems.
+        """
+        for char in r'/\:*?"<>|':
+            name = name.replace(char, '_')
+        # Truncate if too long (most filesystems limit to 255 bytes)
+        if len(name.encode('utf-8')) > 200:
+            # Truncate safely for UTF-8
+            encoded = name.encode('utf-8')[:200]
+            name = encoded.decode('utf-8', errors='ignore')
+        return name
+    
     def save(self, path: str | Path, format: str | None = None) -> None:
         """
         Save corpus to a file.
@@ -1105,6 +1104,104 @@ class Corpus:
                 pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
             logger.info(f"Saved corpus with {len(self._documents)} documents to {path} (pickle)")
     
+    def save_folder(
+        self,
+        path: str | Path,
+        format: str = "json",
+        clear: bool = True
+    ) -> None:
+        """
+        Save corpus as a folder with one file per document.
+        
+        Creates a folder containing individual files for each document, plus a
+        ``_meta.json`` file with corpus-level metadata and document order.
+        
+        Args:
+            path: Output folder path. Created if it doesn't exist.
+            format: File format for documents - ``'json'`` (default) or ``'txt'``.
+                
+                - json: Each document saved as ``{doc_id}.json`` with tokens and metadata
+                - txt: Each document saved as ``{doc_id}.txt`` with space-separated tokens
+            clear: If True (default), remove existing ``.json`` and ``.txt`` files
+                from the folder before saving. This prevents stale files from
+                being loaded by ``load_folder()``. Set to False to preserve
+                existing files (useful for incremental updates).
+        
+        Example:
+            >>> corpus.save_folder('my_corpus/')              # JSON files
+            >>> corpus.save_folder('my_corpus/', format='txt') # Text files
+        
+        Note:
+            Document filenames are derived from ``doc_id``. Characters unsafe for
+            filenames are replaced with underscores. If two documents have the same
+            sanitized filename, a numeric suffix is added (e.g., ``doc_1.json``).
+            
+            The ``_meta.json`` file stores corpus-level metadata and the original
+            document order, which is used by ``load_folder()`` to preserve ordering.
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        
+        # Clear existing corpus files if requested
+        if clear:
+            for existing_file in path.glob('*.json'):
+                if existing_file.name != '_meta.json':
+                    existing_file.unlink()
+            for existing_file in path.glob('*.txt'):
+                existing_file.unlink()
+        
+        format = format.lower()
+        if format not in ('json', 'txt'):
+            raise ValueError(f"format must be 'json' or 'txt' for folder mode, got '{format}'")
+        
+        ext = '.json' if format == 'json' else '.txt'
+        
+        # Track used filenames to handle collisions
+        used_filenames: dict[str, int] = {}
+        document_order: list[str] = []
+        filename_mapping: dict[str, str] = {}  # doc_id -> actual filename
+        
+        for doc in self._documents:
+            # Sanitize doc_id for filename
+            base_name = self._sanitize_filename(doc.doc_id) if doc.doc_id else 'document'
+            
+            # Handle collisions
+            if base_name in used_filenames:
+                used_filenames[base_name] += 1
+                filename = f"{base_name}_{used_filenames[base_name]}{ext}"
+            else:
+                used_filenames[base_name] = 0
+                filename = f"{base_name}{ext}"
+            
+            filepath = path / filename
+            document_order.append(doc.doc_id)
+            filename_mapping[doc.doc_id] = filename
+            
+            if format == 'json':
+                doc_data = {
+                    'doc_id': doc.doc_id,
+                    'tokens': doc.tokens,
+                    'metadata': doc.metadata,
+                }
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(doc_data, f, ensure_ascii=False, indent=2)
+            else:  # txt
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(' '.join(doc.tokens))
+        
+        # Save corpus-level metadata
+        meta = {
+            'version': '1.0',
+            'format': format,
+            'default_metadata': self._default_metadata,
+            'document_order': document_order,
+            'filename_mapping': filename_mapping,
+        }
+        with open(path / '_meta.json', 'w', encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"Saved corpus with {len(self._documents)} documents to {path}/ ({format})")
+    
     @classmethod
     def load(cls, path: str | Path, format: str | None = None) -> 'Corpus':
         """
@@ -1179,6 +1276,175 @@ class Corpus:
         
         logger.info(f"Loaded corpus with {len(corpus)} documents from {path} ({format})")
         return corpus
+    
+    @classmethod
+    def load_folder(cls, path: str | Path, pattern: str | None = None) -> 'Corpus':
+        """
+        Load corpus from a folder of document files.
+        
+        Loads all supported files (``.json``, ``.txt``) from a folder. If a
+        ``_meta.json`` file exists, it is used to restore document order and
+        corpus-level metadata; otherwise documents are sorted alphabetically
+        by filename.
+        
+        Args:
+            path: Input folder path.
+            pattern: Optional glob pattern to filter files (e.g., ``'*.txt'``,
+                ``'chapter_*.json'``). If None, loads all ``.json`` and ``.txt`` files.
+        
+        Returns:
+            Loaded Corpus object.
+        
+        Example:
+            >>> corpus = Corpus.load_folder('my_corpus/')
+            >>> corpus = Corpus.load_folder('texts/', pattern='*.txt')
+        
+        Note:
+            For ``.txt`` files, the filename (without extension) becomes the ``doc_id``
+            and tokens are split by whitespace. ``.txt`` files have no metadata.
+            
+            For ``.json`` files, the file should contain ``doc_id``, ``tokens``,
+            and optionally ``metadata``.
+        """
+        path = Path(path)
+        
+        if not path.is_dir():
+            raise ValueError(f"Path '{path}' is not a directory. Use load() for single files.")
+        
+        # Check for _meta.json
+        meta_path = path / '_meta.json'
+        meta = None
+        if meta_path.exists():
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+        
+        # Find files to load
+        if pattern:
+            files = list(path.glob(pattern))
+        else:
+            files = list(path.glob('*.json')) + list(path.glob('*.txt'))
+        
+        # Exclude _meta.json
+        files = [f for f in files if f.name != '_meta.json' and f.is_file()]
+        
+        if not files:
+            logger.warning(f"No supported files found in {path}")
+            return cls(metadata=meta.get('default_metadata') if meta else None)
+        
+        # Determine load order
+        if meta and 'filename_mapping' in meta:
+            # Use filename_mapping to restore original order
+            filename_to_docid = {v: k for k, v in meta['filename_mapping'].items()}
+            doc_order = meta.get('document_order', [])
+            
+            # Build ordered file list
+            ordered_files = []
+            remaining_files = set(files)
+            
+            for doc_id in doc_order:
+                filename = meta['filename_mapping'].get(doc_id)
+                if filename:
+                    filepath = path / filename
+                    if filepath in remaining_files:
+                        ordered_files.append((filepath, doc_id))
+                        remaining_files.remove(filepath)
+            
+            # Add any remaining files not in meta (sorted alphabetically)
+            for f in sorted(remaining_files, key=lambda x: x.name):
+                doc_id = filename_to_docid.get(f.name, f.stem)
+                ordered_files.append((f, doc_id))
+            
+            files_with_ids = ordered_files
+        else:
+            # No meta or no mapping - sort alphabetically, use filename as doc_id
+            files = sorted(files, key=lambda x: x.name)
+            files_with_ids = [(f, f.stem) for f in files]
+        
+        # Create corpus
+        corpus = cls(metadata=meta.get('default_metadata') if meta else None)
+        
+        for filepath, doc_id in files_with_ids:
+            suffix = filepath.suffix.lower()
+            
+            if suffix == '.json':
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    doc_data = json.load(f)
+                corpus.add(
+                    doc_data.get('tokens', []),
+                    doc_id=doc_data.get('doc_id', doc_id),
+                    **doc_data.get('metadata', {})
+                )
+            elif suffix == '.txt':
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                tokens = content.split() if content else []
+                corpus.add(tokens, doc_id=doc_id)
+            else:
+                logger.warning(f"Skipping unsupported file: {filepath}")
+        
+        logger.info(f"Loaded corpus with {len(corpus)} documents from {path}/")
+        return corpus
+    
+    @classmethod
+    def load_cached(cls, corpus: str) -> 'Corpus':
+        """
+        Load a corpus from local cache without network access.
+        
+        This loads a previously downloaded corpus from the cache directory
+        (``~/.cache/qhchina/corpora/{corpus}/``). The corpus must have been
+        downloaded earlier using ``Corpus.download()``.
+        
+        Args:
+            corpus: Name of the cached corpus (e.g., ``'songshi'``).
+        
+        Returns:
+            Corpus with raw text in metadata (same as ``download()`` returns).
+            Tokens are empty; use ``.tokenize()`` to segment.
+        
+        Raises:
+            FileNotFoundError: If the corpus is not in cache.
+        
+        Example:
+            >>> # First time: download and cache
+            >>> corpus = Corpus.download('songshi')
+            >>> corpus.tokenize().save('songshi_tokenized.json')
+            
+            >>> # Later: load from cache (no network needed)
+            >>> corpus = Corpus.load_cached('songshi')
+            >>> corpus.tokenize()
+        
+        Note:
+            Use ``Corpus.list_cached()`` to see available cached corpora.
+        """
+        cache_path = _CORPUS_CACHE_DIR / corpus
+        
+        if not cache_path.exists():
+            raise FileNotFoundError(
+                f"Corpus '{corpus}' not found in cache at {cache_path}. "
+                f"Download it first with: Corpus.download('{corpus}')"
+            )
+        
+        # Load all .txt files from cache (same structure as download creates)
+        txt_files = sorted(cache_path.glob('*.txt'))
+        
+        if not txt_files:
+            raise FileNotFoundError(
+                f"No .txt files found in cache for corpus '{corpus}'. "
+                f"The cache may be corrupted. Try: Corpus.clear_cache('{corpus}') "
+                f"and then Corpus.download('{corpus}')"
+            )
+        
+        result = cls()
+        
+        for filepath in txt_files:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                raw_text = f.read()
+            
+            doc_id = filepath.stem
+            result.add(raw_text, doc_id=doc_id, corpus=corpus)
+        
+        logger.info(f"Loaded corpus '{corpus}' with {len(result)} documents from cache")
+        return result
     
     @staticmethod
     def download(
@@ -1261,15 +1527,10 @@ class Corpus:
             with open(cached_path, 'r', encoding='utf-8') as f:
                 raw_text = f.read()
             
-            # Create document with empty tokens (user should segment)
+            # Create document with raw text (user should segment with .tokenize())
             # doc_id is filename without .txt extension
             doc_id = Path(file_info['name']).stem
-            result.add(
-                tokens=[],
-                doc_id=doc_id,
-                corpus=corpus_name,
-                raw_text=raw_text
-            )
+            result.add(raw_text, doc_id=doc_id, corpus=corpus_name)
         
         # Print completion message
         if show_progress:

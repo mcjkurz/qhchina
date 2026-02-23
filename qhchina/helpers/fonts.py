@@ -16,10 +16,12 @@ try:
 except ImportError as e:
     raise ImportError(f"matplotlib is required for font management: {e}") from e
 
-try:
-    import requests
-except ImportError as e:
-    raise ImportError(f"requests is required for font downloads: {e}") from e
+from qhchina.helpers.github import (
+    ensure_cache_dir as _ensure_github_cache_dir,
+    download_file as _download_file,
+    query_github_api as _query_github_api_raw,
+    CACHE_BASE as _CACHE_BASE,
+)
 
 logger = logging.getLogger("qhchina.helpers.fonts")
 
@@ -39,8 +41,7 @@ __all__ = [
 
 # Configuration
 _DEFAULT_FONT_FILE = 'NotoSansTCSC-Regular.otf'
-_GITHUB_API_URL = "https://api.github.com/repos/mcjkurz/qhchina-data/contents/fonts"
-_CACHE_DIR = Path.home() / '.cache' / 'qhchina' / 'fonts'
+_CACHE_DIR = _CACHE_BASE / 'fonts'
 
 # Thread safety
 _lock = threading.Lock()
@@ -59,26 +60,12 @@ def get_cache_dir() -> Path:
 
 def _ensure_cache_dir() -> Path:
     """Create cache directory if it doesn't exist."""
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return _CACHE_DIR
-
-
-def _download_file(url: str, dest: Path) -> None:
-    """Download a file from URL to destination path."""
-    response = requests.get(url, timeout=120, stream=True)
-    response.raise_for_status()
-    
-    with open(dest, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=65536):
-            f.write(chunk)
+    return _ensure_github_cache_dir('fonts')
 
 
 def _query_github_api() -> list[dict]:
     """Query GitHub API for available fonts."""
-    response = requests.get(_GITHUB_API_URL, timeout=30)
-    response.raise_for_status()
-    
-    files = response.json()
+    files = _query_github_api_raw('fonts')
     fonts = []
     for item in files:
         if item['type'] == 'file' and item['name'].endswith(('.otf', '.ttf', '.OTF', '.TTF')):
@@ -361,34 +348,20 @@ def list_cached_fonts() -> list[dict]:
         return []
     
     result = []
-    for font_file in _CACHE_DIR.glob('*.otf'):
-        if font_file.name.startswith('.'):
-            continue
-        try:
-            font_name = _get_font_name(font_file)
-            result.append({
-                'file': font_file.name,
-                'font_name': font_name,
-                'path': str(font_file),
-                'size_mb': round(font_file.stat().st_size / 1024 / 1024, 1),
-            })
-        except Exception as e:
-            logger.warning(f"Could not read font {font_file.name}: {e}")
-    
-    # Also check for .ttf files
-    for font_file in _CACHE_DIR.glob('*.ttf'):
-        if font_file.name.startswith('.'):
-            continue
-        try:
-            font_name = _get_font_name(font_file)
-            result.append({
-                'file': font_file.name,
-                'font_name': font_name,
-                'path': str(font_file),
-                'size_mb': round(font_file.stat().st_size / 1024 / 1024, 1),
-            })
-        except Exception as e:
-            logger.warning(f"Could not read font {font_file.name}: {e}")
+    for ext in ('*.otf', '*.ttf', '*.OTF', '*.TTF'):
+        for font_file in _CACHE_DIR.glob(ext):
+            if font_file.name.startswith('.'):
+                continue
+            try:
+                font_name = _get_font_name(font_file)
+                result.append({
+                    'file': font_file.name,
+                    'font_name': font_name,
+                    'path': str(font_file),
+                    'size_mb': round(font_file.stat().st_size / 1024 / 1024, 1),
+                })
+            except Exception as e:
+                logger.warning(f"Could not read font {font_file.name}: {e}")
     
     return result
 
