@@ -53,8 +53,8 @@ def set_log_level(level: str) -> None:
 # Import global configuration functions
 from .config import set_random_seed, get_random_seed, get_rng
 
-# Import Corpus classes
-from .corpus import Corpus, TempRefCorpus
+# Import Corpus class
+from .corpus import Corpus
 
 # Import core analytics classes for convenient top-level access
 from .analytics import Word2Vec, TempRefWord2Vec, LDAGibbsSampler

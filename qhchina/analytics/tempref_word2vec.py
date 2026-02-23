@@ -47,15 +47,19 @@ class TempRefWord2Vec(Word2Vec):
     
     Note:
         - Only supports Skip-gram (sg=1). CBOW is not supported.
-        - Requires pre-tagged corpus files. Use ``TempRefCorpus`` to create them.
+        - Corpus files must be UNTAGGED. Tagging is done automatically during training.
         - Training does NOT start automatically. Call ``train()`` explicitly after
           initialization.
     
     Args:
-        sentences: Dictionary mapping time period labels to file paths.
-            Files must be pre-tagged using ``TempRefCorpus``.
-            Format: ``{"label1": "path1.txt", "label2": "path2.txt", ...}``
+        sentences: Dictionary mapping time period labels to corpora. Values can be:
+            - File paths (str): Path to corpus file (untagged, can be created with ``Corpus.save()``)
+            - In-memory sentences (list[list[str]]): List of tokenized sentences
+            Format: ``{"label1": "path1.txt", "label2": [["word", "list"], ...], ...}``
         targets: List of target words to trace semantic change.
+        sampling_strategy: How to sample from corpora during training:
+            - "balanced" (default): Equal tokens from each corpus, stops at smallest corpus.
+            - "proportional": Proportional tokens from each corpus, uses all data.
         **kwargs: Arguments passed to Word2Vec. Common options:
             - vector_size (int): Dimensionality of word vectors (default: 100)
             - window (int): Context window size (default: 5)
@@ -69,42 +73,54 @@ class TempRefWord2Vec(Word2Vec):
             Note: sg must be 1 (Skip-gram).
     
     Example:
-        from qhchina import TempRefCorpus
-        from qhchina.analytics import TempRefWord2Vec
+        Using in-memory sentences::
         
-        # Step 1: Create tagged corpus files
-        targets = ["bread", "food"]
+            from qhchina.analytics import TempRefWord2Vec
+            
+            # Tokenized sentences from 宋史 and 明史 (untagged)
+            song_sentences = [["太祖", "建隆", "元年", "正月"], ["民", "安", "其", "业"]]
+            ming_sentences = [["太祖", "洪武", "元年", "春"], ["民", "困", "于", "役"]]
+            
+            model = TempRefWord2Vec(
+                sentences={"宋": song_sentences, "明": ming_sentences},
+                targets=["民", "太祖"],
+                vector_size=100,
+                sg=1
+            )
+            model.train()
         
-        corpus1 = TempRefCorpus(label="1800s", targets=targets)
-        corpus1.add_many(sentences_1800s)
-        corpus1.shuffle()
-        corpus1.save("1800s.txt")
+        Using corpus files::
         
-        corpus2 = TempRefCorpus(label="1900s", targets=targets)
-        corpus2.add_many(sentences_1900s)
-        corpus2.shuffle()
-        corpus2.save("1900s.txt")
-        
-        # Step 2: Initialize the model
-        model = TempRefWord2Vec(
-            sentences={"1800s": "1800s.txt", "1900s": "1900s.txt"},
-            targets=targets,
-            vector_size=100,
-            sg=1
-        )
-        
-        # Step 3: Train the model (explicit call required)
-        model.train()
-        
-        # Step 4: Analyze semantic change
-        model.most_similar("bread_1800s")  # Words similar to "bread" in 1800s
-        model.most_similar("bread_1900s")  # Words similar to "bread" in 1900s
+            from qhchina import Corpus
+            from qhchina.analytics import TempRefWord2Vec
+            
+            # Create and save untagged corpus files
+            song_corpus = Corpus(song_sentences)
+            song_corpus.shuffle()
+            song_corpus.save("songshi.txt")
+            
+            ming_corpus = Corpus(ming_sentences)
+            ming_corpus.shuffle()
+            ming_corpus.save("mingshi.txt")
+            
+            model = TempRefWord2Vec(
+                sentences={"宋": "songshi.txt", "明": "mingshi.txt"},
+                targets=["民", "太祖"],
+                vector_size=100,
+                sg=1
+            )
+            model.train()
+            
+            # Analyze semantic change
+            model.most_similar("民_宋")  # Words similar to "民" in 宋史
+            model.most_similar("民_明")  # Words similar to "民" in 明史
     """
 
     def __init__(
         self,
-        sentences: dict[str, str],
+        sentences: dict[str, str | list[list[str]]],
         targets: list[str],
+        sampling_strategy: str = "balanced",
         _skip_init: bool = False,
         **kwargs
     ):
@@ -115,40 +131,37 @@ class TempRefWord2Vec(Word2Vec):
         initialization to begin training.
         
         Args:
-            sentences: Dictionary mapping time period labels to file paths.
-                Files must be pre-tagged using ``TempRefCorpus``.
+            sentences: Dictionary mapping time period labels to corpora.
+                Values can be file paths (str) or in-memory sentences (list[list[str]]).
+                Files must be UNTAGGED - tagging is done automatically during training.
             targets: List of target words to trace semantic change.
+            sampling_strategy: How to sample from corpora during training.
+                "balanced" (default) or "proportional".
             _skip_init: Internal. Used by load() to skip initialization.
             **kwargs: Arguments passed to Word2Vec (vector_size, window, etc.).
         """
         # _skip_init is used by load() to create an empty shell
         if _skip_init:
             self.labels = []
-            self.targets = targets
+            self.targets = list(targets) if targets else []
+            self._target_set = set(self.targets)
             self.period_vocab_counts = {}
             self.temporal_word_map = {}
             self.reverse_temporal_map = {}
-            self._file_readers = None
+            self._corpora = None
+            self._sampling_strategy = "balanced"
             super().__init__(_skip_init=True, **kwargs)
             return
         
         # Validate sentences (must be dict for TempRefWord2Vec)
         if not isinstance(sentences, dict):
             raise TypeError(
-                f"sentences must be a dictionary mapping labels to file paths, "
+                f"sentences must be a dictionary mapping labels to corpora, "
                 f"got {type(sentences).__name__}"
             )
         
         if not sentences:
             raise ValueError("sentences cannot be empty")
-        
-        # Validate all values are file paths (strings)
-        for label, path in sentences.items():
-            if not isinstance(path, str):
-                raise TypeError(
-                    f"sentences values must be file paths (str), got {type(path).__name__} "
-                    f"for label '{label}'. Use TempRefCorpus to create tagged corpus files."
-                )
         
         # Check sg=1 requirement
         if kwargs.get('sg') != 1:
@@ -163,24 +176,43 @@ class TempRefWord2Vec(Word2Vec):
             raise ValueError(
                 "shuffle=True is not supported for TempRefWord2Vec. "
                 "Sentences are shuffled within each batch by the balanced iterator. "
-                "For corpus-level shuffling, pre-shuffle your data files."
+                "For corpus-level shuffling, pre-shuffle your data files or in-memory lists."
+            )
+        
+        # Validate sampling strategy
+        if sampling_strategy not in ("balanced", "proportional"):
+            raise ValueError(
+                f"sampling_strategy must be 'balanced' or 'proportional', got {sampling_strategy!r}"
             )
         
         verbose = kwargs.get('verbose', False)
         
         # Store instance attributes
         self.labels = list(sentences.keys())
-        self.targets = targets
+        self.targets = list(targets)
+        self._target_set = set(targets)
+        self._sampling_strategy = sampling_strategy
         
-        # Create file readers
-        self._file_readers = {
-            label: LineSentenceFile(path) for label, path in sentences.items()
-        }
+        # Convert inputs to iterables: file paths -> LineSentenceFile, lists stay as-is
+        self._corpora = {}
+        for label, corpus in sentences.items():
+            if isinstance(corpus, str):
+                self._corpora[label] = LineSentenceFile(corpus)
+            elif isinstance(corpus, list):
+                self._corpora[label] = corpus
+            else:
+                raise TypeError(
+                    f"sentences values must be file paths (str) or list of sentences "
+                    f"(list[list[str]]), got {type(corpus).__name__} for label '{label}'"
+                )
         
         if verbose:
-            logger.info("Loading corpus files:")
-            for label, reader in self._file_readers.items():
-                logger.info(f"  {label}: {reader.sentence_count:,} documents, {reader.token_count:,} tokens")
+            logger.info("Loading corpora:")
+            for label, corpus in self._corpora.items():
+                if hasattr(corpus, 'sentence_count'):
+                    logger.info(f"  {label}: {corpus.sentence_count:,} documents, {corpus.token_count:,} tokens (file)")
+                else:
+                    logger.info(f"  {label}: {len(corpus):,} documents (in-memory)")
         
         # Build temporal word mappings
         self.temporal_word_map = {
@@ -213,31 +245,50 @@ class TempRefWord2Vec(Word2Vec):
     
     def _count_words(self, sentences: Iterable[list[str]] | None = None) -> None:
         """
-        Count word occurrences from corpus files with balanced token limits.
+        Count word occurrences from corpora respecting the sampling strategy.
         
-        Streams through files, counting only up to min_token_count per corpus
-        to match the balanced training data. This ensures word frequencies,
-        subsampling thresholds, and negative sampling distributions are computed
-        correctly for balanced training.
+        With "balanced" strategy: counts only up to min_token_count per corpus.
+        With "proportional" strategy: counts all tokens from each corpus.
+        
+        This ensures word frequencies, subsampling thresholds, and negative 
+        sampling distributions match the actual training data.
+        
+        Target words are tagged with their corpus label during counting (e.g.,
+        "bread" from corpus "1800s" is counted as "bread_1800s").
         
         Args:
-            sentences: Ignored. TempRefWord2Vec uses internal file readers instead.
+            sentences: Ignored. TempRefWord2Vec uses internal corpora instead.
                 Accepted for API compatibility with the parent class.
         
         Raises:
-            ValueError: If corpus files contain no words.
+            ValueError: If corpora contain no words.
         """
-        min_token_count = min(reader.token_count for reader in self._file_readers.values())
+        # Determine token counts for each corpus
+        token_counts = {}
+        for label, corpus in self._corpora.items():
+            if hasattr(corpus, 'token_count'):
+                token_counts[label] = corpus.token_count
+            else:
+                token_counts[label] = sum(len(sent) for sent in corpus)
+        
+        # Set token limits based on strategy
+        if self._sampling_strategy == "balanced":
+            min_count = min(token_counts.values())
+            token_limits = {label: min_count for label in token_counts}
+        else:  # proportional
+            token_limits = token_counts
         
         self.period_vocab_counts = {}
         self.word_counts = Counter()
         
-        for label, reader in self._file_readers.items():
+        for label, corpus in self._corpora.items():
             period_counter = Counter()
             tokens_counted = 0
+            suffix = "_" + label
+            token_limit = token_limits[label]
             
-            for sentence in reader:
-                remaining = min_token_count - tokens_counted
+            for sentence in corpus:
+                remaining = token_limit - tokens_counted
                 if remaining <= 0:
                     break
                 
@@ -245,14 +296,20 @@ class TempRefWord2Vec(Word2Vec):
                 if len(sentence) > remaining:
                     sentence = sentence[:remaining]
                 
-                period_counter.update(sentence)
+                # Tag target words with corpus label
+                tagged_sentence = [
+                    tok + suffix if tok in self._target_set else tok 
+                    for tok in sentence
+                ]
+                
+                period_counter.update(tagged_sentence)
                 tokens_counted += len(sentence)
             
             self.period_vocab_counts[label] = period_counter
             self.word_counts.update(period_counter)
         
         if not self.word_counts:
-            raise ValueError("Corpus files contain no words.")
+            raise ValueError("Corpora contain no words.")
         
         if self.verbose:
             for label, counter in self.period_vocab_counts.items():
@@ -460,8 +517,9 @@ class TempRefWord2Vec(Word2Vec):
         """
         Train the TempRefWord2Vec model.
         
-        Uses balanced batch sampling from corpus files. Each batch contains
+        Uses balanced batch sampling from corpora. Each batch contains
         equal numbers of tokens from each time period, shuffled together.
+        Target words are automatically tagged with their corpus label during training.
         
         All training configuration (epochs, batch_size, alpha, min_alpha, etc.) is read
         from instance attributes set during initialization via ``**kwargs``.
@@ -473,11 +531,13 @@ class TempRefWord2Vec(Word2Vec):
         if not self.vocab:
             self.build_vocab()
         
-        # Create balanced sentence iterator from file readers
+        # Create sentence iterator with automatic tagging
         training_corpus = BalancedSentenceIterator(
-            self._file_readers,
+            self._corpora,
             token_budget=self.batch_size,
-            seed=self.seed
+            targets=self._target_set,
+            seed=self.seed,
+            strategy=self._sampling_strategy
         )
         
         # Set the training corpus and call the parent's train method

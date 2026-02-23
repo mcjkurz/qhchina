@@ -11,24 +11,23 @@ from contextlib import contextmanager
 @contextmanager
 def tempref_corpus_files(corpora: dict, targets: list):
     """
-    Context manager that creates temporary TempRefCorpus files for testing.
+    Context manager that creates temporary untagged corpus files for testing.
     
     Args:
         corpora: Dict mapping labels to lists of sentences
-        targets: List of target words to tag
+        targets: List of target words (not used for tagging, kept for API compatibility)
         
     Yields:
         Dict mapping labels to file paths
     """
-    from qhchina.corpus import TempRefCorpus
+    from qhchina.corpus import Corpus
     
     temp_files = []
     file_paths = {}
     
     try:
         for label, sentences in corpora.items():
-            corpus = TempRefCorpus(label=label, targets=targets)
-            corpus.add_many(sentences)
+            corpus = Corpus(sentences)
             
             fd, path = tempfile.mkstemp(suffix='.txt', prefix=f'test_{label}_')
             os.close(fd)
@@ -637,223 +636,17 @@ class TestWord2VecTrainingModes:
 class TestTempRefWord2Vec:
     """Tests for TempRefWord2Vec temporal semantic change analysis."""
     
-    def test_tempref_init(self, song_ming_corpora):
-        """Test TempRefWord2Vec initialization with 宋史/明史."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        # Find common words in both corpora for target tracking
-        song_tokens = set(token for sent in song_ming_corpora['song'] for token in sent)
-        ming_tokens = set(token for sent in song_ming_corpora['ming'] for token in sent)
-        common_words = list(song_tokens & ming_tokens)[:5]
-        
-        if len(common_words) < 1:
-            pytest.skip("No common words found between corpora")
-        
-        with tempref_corpus_files(song_ming_corpora, common_words) as file_paths:
-            model = TempRefWord2Vec(
-                sentences=file_paths,
-                targets=common_words,
-                vector_size=30,
-                window=3,
-                min_word_count=2,
-                sg=1,
-                seed=42,
-            )
-            
-            assert model.labels == ['song', 'ming']
-            assert set(model.targets) == set(common_words)
-    
-    def test_tempref_train(self, song_ming_corpora):
-        """Test TempRefWord2Vec training."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        # Find common words
-        song_tokens = set(token for sent in song_ming_corpora['song'] for token in sent)
-        ming_tokens = set(token for sent in song_ming_corpora['ming'] for token in sent)
-        common_words = list(song_tokens & ming_tokens)[:3]
-        
-        if len(common_words) < 1:
-            pytest.skip("No common words found between corpora")
-        
-        with tempref_corpus_files(song_ming_corpora, common_words) as file_paths:
-            model = TempRefWord2Vec(
-                sentences=file_paths,
-                targets=common_words,
-                vector_size=20,
-                window=2,
-                min_word_count=2,
-                sg=1,
-                seed=42,
-                epochs=2
-            )
-            
-            model.train()
-            
-            # Check temporal variants in vocabulary
-            for target in common_words:
-                if f"{target}_song" in model.vocab or f"{target}_ming" in model.vocab:
-                    break
-            
-            assert len(model.vocab) > 0
-    
-    def test_tempref_temporal_variants(self, song_ming_corpora):
-        """Test that temporal variants are correctly created."""
+    def test_tempref_with_file_paths(self, song_ming_corpora):
+        """Test TempRefWord2Vec with file-based corpora."""
         from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         from collections import Counter
         
-        # Find words that appear at least 5 times in each corpus
+        # Find frequent common words
         song_tokens = [token for sent in song_ming_corpora['song'] for token in sent]
         ming_tokens = [token for sent in song_ming_corpora['ming'] for token in sent]
         song_counts = Counter(song_tokens)
         ming_counts = Counter(ming_tokens)
         
-        common_frequent = [
-            w for w in song_counts 
-            if song_counts[w] >= 5 and ming_counts.get(w, 0) >= 5
-        ][:2]
-        
-        if len(common_frequent) < 1:
-            pytest.skip("No frequent common words found")
-        
-        with tempref_corpus_files(song_ming_corpora, common_frequent) as file_paths:
-            model = TempRefWord2Vec(
-                sentences=file_paths,
-                targets=common_frequent,
-                vector_size=20,
-                window=2,
-                min_word_count=3,
-                sg=1,
-                seed=42,
-                epochs=2
-            )
-            
-            model.train()
-            
-            # Check temporal mapping
-            assert len(model.temporal_word_map) > 0
-            
-            for target in common_frequent:
-                if target in model.temporal_word_map:
-                    variants = model.temporal_word_map[target]
-                    assert f"{target}_song" in variants
-                    assert f"{target}_ming" in variants
-    
-    def test_tempref_save_load(self, song_ming_corpora):
-        """Test saving and loading TempRefWord2Vec model."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        song_tokens = set(token for sent in song_ming_corpora['song'] for token in sent)
-        ming_tokens = set(token for sent in song_ming_corpora['ming'] for token in sent)
-        common_words = list(song_tokens & ming_tokens)[:2]
-        
-        if len(common_words) < 1:
-            pytest.skip("No common words found")
-        
-        with tempref_corpus_files(song_ming_corpora, common_words) as file_paths:
-            model = TempRefWord2Vec(
-                sentences=file_paths,
-                targets=common_words,
-                vector_size=15,
-                window=2,
-                min_word_count=2,
-                sg=1,
-                seed=42,
-                epochs=1
-            )
-            
-            model.train()
-            
-            with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as f:
-                temp_path = f.name
-            
-            try:
-                model.save(temp_path)
-                
-                loaded = TempRefWord2Vec.load(temp_path)
-                
-                assert loaded.labels == model.labels
-                assert loaded.targets == model.targets
-                assert len(loaded.vocab) == len(model.vocab)
-                assert loaded.vector_size == model.vector_size
-            finally:
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
-    
-    def test_tempref_requires_skipgram(self, song_ming_corpora):
-        """Test that TempRefWord2Vec raises error for CBOW."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        with tempref_corpus_files(song_ming_corpora, ['天']) as file_paths:
-            with pytest.raises(NotImplementedError):
-                TempRefWord2Vec(
-                    sentences=file_paths,
-                    targets=['天'],
-                    sg=0,  # CBOW not supported
-                )
-    
-    def test_tempref_invalid_sentences_type(self, song_ming_corpora):
-        """Test that non-dict sentences raises TypeError."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        with pytest.raises(TypeError):
-            TempRefWord2Vec(
-                sentences=["/path/to/file1.txt", "/path/to/file2.txt"],  # List instead of dict
-                targets=['天'],
-                sg=1,
-            )
-    
-    def test_tempref_invalid_sentences_values(self, song_ming_corpora):
-        """Test that non-string sentences values raise TypeError."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        with pytest.raises(TypeError, match="must be file paths"):
-            TempRefWord2Vec(
-                sentences={'song': song_ming_corpora['song']},  # List instead of path
-                targets=['天'],
-                sg=1,
-            )
-    
-    def test_tempref_shuffle_true_raises_error(self, song_ming_corpora):
-        """Test that shuffle=True raises ValueError."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        with tempref_corpus_files(song_ming_corpora, ['天']) as file_paths:
-            with pytest.raises(ValueError, match="shuffle=True is not supported"):
-                TempRefWord2Vec(
-                    sentences=file_paths,
-                    targets=['天'],
-                    sg=1,
-                    shuffle=True,
-                )
-    
-    def test_tempref_empty_targets_raises_error(self, song_ming_corpora):
-        """Test that empty targets list raises ValueError."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        
-        with tempref_corpus_files(song_ming_corpora, ['天']) as file_paths:
-            with pytest.raises(ValueError, match="targets cannot be empty"):
-                TempRefWord2Vec(
-                    sentences=file_paths,
-                    targets=[],  # Empty targets
-                    sg=1,
-                )
-    
-    def test_tempref_base_word_count_equals_variant_sum(self, song_ming_corpora):
-        """Test that base word counts equal the sum of their temporal variant counts.
-        
-        This verifies the temporal referencing implementation correctly aggregates
-        word frequencies from all time periods for proper negative sampling.
-        """
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        from collections import Counter
-        
-        # Find words that appear frequently in both corpora
-        song_tokens = [token for sent in song_ming_corpora['song'] for token in sent]
-        ming_tokens = [token for sent in song_ming_corpora['ming'] for token in sent]
-        song_counts = Counter(song_tokens)
-        ming_counts = Counter(ming_tokens)
-        
-        # Find common frequent words
         common_frequent = [
             w for w in song_counts 
             if song_counts[w] >= 5 and ming_counts.get(w, 0) >= 5
@@ -871,77 +664,147 @@ class TestTempRefWord2Vec:
                 min_word_count=2,
                 sg=1,
                 seed=42,
+                epochs=2
             )
             model.train()
             
-            # For each target, verify base word count = sum of variant counts
+            # Check basic properties
+            assert model.labels == ['song', 'ming']
+            assert set(model.targets) == set(common_frequent)
+            assert len(model.vocab) > 0
+            
+            # Check temporal variants are created
             for target in common_frequent:
-                if target not in model.vocab:
-                    continue  # Skip if base word not in vocab
-                
-                base_count = model.word_counts[target]
-                variant_count_sum = 0
-                
-                for label in model.labels:
-                    variant = f"{target}_{label}"
-                    if variant in model.word_counts:
-                        variant_count_sum += model.word_counts[variant]
-                
-                # Base word count should equal sum of variants
-                assert base_count == variant_count_sum, \
-                    f"Base word '{target}' count ({base_count}) != sum of variants ({variant_count_sum})"
+                if target in model.temporal_word_map:
+                    variants = model.temporal_word_map[target]
+                    assert f"{target}_song" in variants
+                    assert f"{target}_ming" in variants
     
-    def test_tempref_temporal_variants_have_different_embeddings(self, song_ming_corpora):
-        """Test that temporal variants of the same word have distinct embeddings.
-        
-        After training, word_period1 and word_period2 should have different vectors,
-        reflecting potential semantic change across time periods.
-        """
+    def test_tempref_with_in_memory_lists(self):
+        """Test TempRefWord2Vec with in-memory sentence lists."""
         from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
-        from collections import Counter
         
-        # Find words that appear frequently in both corpora
-        song_tokens = [token for sent in song_ming_corpora['song'] for token in sent]
-        ming_tokens = [token for sent in song_ming_corpora['ming'] for token in sent]
-        song_counts = Counter(song_tokens)
-        ming_counts = Counter(ming_tokens)
+        corpora = {
+            "period1": [["word1", "word2", "word3", "context"]] * 100,
+            "period2": [["word1", "word4", "word5", "context"]] * 100,
+        }
         
-        # Find common frequent words
-        common_frequent = [
-            w for w in song_counts 
-            if song_counts[w] >= 10 and ming_counts.get(w, 0) >= 10
-        ][:2]
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["word1"],
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            sg=1,
+            seed=42,
+            epochs=2
+        )
+        model.train()
         
-        if len(common_frequent) < 1:
-            pytest.skip("No frequent common words found")
+        # Check temporal variants are created and have different embeddings
+        assert "word1_period1" in model.vocab
+        assert "word1_period2" in model.vocab
+        assert "word1" in model.vocab  # Base word for context
         
-        with tempref_corpus_files(song_ming_corpora, common_frequent) as file_paths:
-            model = TempRefWord2Vec(
-                sentences=file_paths,
-                targets=common_frequent,
-                vector_size=30,
-                window=3,
-                min_word_count=3,
-                sg=1,
-                seed=42,
-                epochs=3
-            )
-            model.train()
+        vec1 = model.get_vector("word1_period1")
+        vec2 = model.get_vector("word1_period2")
+        assert not np.allclose(vec1, vec2, rtol=1e-5, atol=1e-5)
+    
+    def test_tempref_save_load(self):
+        """Test saving and loading TempRefWord2Vec model."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        
+        corpora = {
+            "period1": [["word1", "word2", "word3"]] * 50,
+            "period2": [["word1", "word4", "word5"]] * 50,
+        }
+        
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["word1"],
+            vector_size=15,
+            window=2,
+            min_word_count=1,
+            sg=1,
+            seed=42,
+            epochs=1
+        )
+        model.train()
+        
+        with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            model.save(temp_path)
+            loaded = TempRefWord2Vec.load(temp_path)
             
-            # Check that temporal variants exist and have different vectors
-            for target in common_frequent:
-                song_variant = f"{target}_song"
-                ming_variant = f"{target}_ming"
-                
-                if song_variant in model.vocab and ming_variant in model.vocab:
-                    vec_song = model.get_vector(song_variant)
-                    vec_ming = model.get_vector(ming_variant)
-                    
-                    # Vectors should NOT be identical (training should differentiate them)
-                    # Note: They could be similar if the word didn't change semantically,
-                    # but they shouldn't be exactly equal after training
-                    assert not np.allclose(vec_song, vec_ming, rtol=1e-5, atol=1e-5), \
-                        f"Temporal variants of '{target}' have identical vectors"
+            assert loaded.labels == model.labels
+            assert loaded.targets == model.targets
+            assert len(loaded.vocab) == len(model.vocab)
+            assert loaded.vector_size == model.vector_size
+            
+            # Check vectors are preserved
+            np.testing.assert_array_equal(
+                loaded.get_vector("word1_period1"),
+                model.get_vector("word1_period1")
+            )
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_tempref_input_validation(self):
+        """Test that invalid inputs raise appropriate errors."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        
+        corpora = {
+            "period1": [["word1", "word2"]] * 10,
+            "period2": [["word1", "word3"]] * 10,
+        }
+        
+        # CBOW not supported
+        with pytest.raises(NotImplementedError):
+            TempRefWord2Vec(sentences=corpora, targets=["word1"], sg=0)
+        
+        # Non-dict sentences
+        with pytest.raises(TypeError):
+            TempRefWord2Vec(sentences=["not", "a", "dict"], targets=["word1"], sg=1)
+        
+        # Invalid value type
+        with pytest.raises(TypeError, match="must be file paths.*or list of sentences"):
+            TempRefWord2Vec(sentences={"period1": 123}, targets=["word1"], sg=1)
+        
+        # Empty targets
+        with pytest.raises(ValueError, match="targets cannot be empty"):
+            TempRefWord2Vec(sentences=corpora, targets=[], sg=1)
+        
+        # shuffle=True not supported
+        with pytest.raises(ValueError, match="shuffle=True is not supported"):
+            TempRefWord2Vec(sentences=corpora, targets=["word1"], sg=1, shuffle=True)
+    
+    def test_tempref_base_word_count_equals_variant_sum(self):
+        """Test that base word counts equal the sum of their temporal variant counts."""
+        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        
+        corpora = {
+            "period1": [["target", "context1"]] * 30,
+            "period2": [["target", "context2"]] * 20,
+        }
+        
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            sg=1,
+            seed=42,
+        )
+        model.train()
+        
+        # Base word count should equal sum of variants
+        base_count = model.word_counts["target"]
+        variant_sum = model.word_counts["target_period1"] + model.word_counts["target_period2"]
+        assert base_count == variant_sum
 
 
 # =============================================================================
@@ -1631,8 +1494,8 @@ class TestWord2VecMultithreading:
 class TestTempRefWord2VecMultithreading:
     """Tests for TempRefWord2Vec multithreading."""
     
-    def test_tempref_workers_one(self):
-        """Test TempRefWord2Vec with workers=1."""
+    def test_tempref_multithreading(self):
+        """Test TempRefWord2Vec with multiple workers produces valid results."""
         from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         
         corpora = {
@@ -1640,57 +1503,27 @@ class TestTempRefWord2VecMultithreading:
             "period2": [["word1", "word4", "word5"]] * 50,
         }
         
-        with tempref_corpus_files(corpora, ["word1"]) as file_paths:
-            model = TempRefWord2Vec(
-                sentences=file_paths,
-                targets=["word1"],
-                vector_size=20,
-                window=2,
-                min_word_count=1,
-                negative=3,
-                sg=1,
-                seed=42,
-                epochs=2,
-                workers=1,
-            )
-            model.train()
-            
-            assert len(model.vocab) > 0
-            assert "word1_period1" in model.vocab
-            assert "word1_period2" in model.vocab
-    
-    def test_tempref_workers_multiple(self):
-        """Test TempRefWord2Vec with workers>1."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["word1"],
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            negative=3,
+            sg=1,
+            seed=42,
+            epochs=2,
+            workers=2,
+        )
+        model.train()
         
-        corpora = {
-            "period1": [["word1", "word2", "word3"]] * 50,
-            "period2": [["word1", "word4", "word5"]] * 50,
-        }
+        assert "word1_period1" in model.vocab
+        assert "word1_period2" in model.vocab
         
-        with tempref_corpus_files(corpora, ["word1"]) as file_paths:
-            model = TempRefWord2Vec(
-                sentences=file_paths,
-                targets=["word1"],
-                vector_size=20,
-                window=2,
-                min_word_count=1,
-                negative=3,
-                sg=1,
-                seed=42,
-                epochs=2,
-                workers=2,
-            )
-            model.train()
-            
-            assert len(model.vocab) > 0
-            assert "word1_period1" in model.vocab
-            assert "word1_period2" in model.vocab
-            
-            # Vectors should be valid
-            vec1 = model.get_vector("word1_period1")
-            vec2 = model.get_vector("word1_period2")
-            assert not np.any(np.isnan(vec1))
-            assert not np.any(np.isnan(vec2))
+        # Vectors should be valid (no NaN)
+        vec1 = model.get_vector("word1_period1")
+        vec2 = model.get_vector("word1_period2")
+        assert not np.any(np.isnan(vec1))
+        assert not np.any(np.isnan(vec2))
 
 

@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("qhchina.corpus")
 
 
-__all__ = ['Corpus', 'Document', 'TempRefCorpus']
+__all__ = ['Corpus', 'Document']
 
 
 @dataclass(slots=True)
@@ -849,7 +849,6 @@ class Corpus:
         Note:
             The 'txt' format is designed for streaming with Word2Vec and TempRefWord2Vec.
             It only saves tokens (one sentence per line), not document IDs or metadata.
-            Format: first line is "sentence_count token_count", followed by sentences.
         """
         import pickle
         
@@ -875,16 +874,12 @@ class Corpus:
             raise ValueError(f"format must be 'json', 'pickle', or 'txt', got '{format}'")
         
         if format == 'txt':
-            # Streaming format: header + one document per line (tokens only, no metadata)
-            doc_count = len(self._documents)
-            token_count = sum(len(doc.tokens) for doc in self._documents)
-            
+            # Streaming format: one document per line (tokens only, no metadata)
             with open(path, 'w', encoding='utf-8') as f:
-                f.write(f"{doc_count} {token_count}\n")
                 for doc in self._documents:
                     f.write(' '.join(doc.tokens) + '\n')
             
-            logger.info(f"Saved corpus with {doc_count} documents, {token_count} tokens to {path} (txt)")
+            logger.info(f"Saved corpus with {len(self._documents)} documents to {path} (txt)")
         elif format == 'json':
             data = {
                 'version': '1.0',
@@ -964,11 +959,9 @@ class Corpus:
             raise ValueError(f"format must be 'json', 'pickle', or 'txt', got '{format}'")
         
         if format == 'txt':
-            # Streaming format: header + one document per line
+            # Streaming format: one document per line
             corpus = cls()
             with open(path, 'r', encoding='utf-8') as f:
-                # Read header (doc_count token_count)
-                f.readline()
                 for line in f:
                     line = line.rstrip('\n\r')
                     if line:
@@ -1047,97 +1040,3 @@ class Corpus:
         self._vocab_cache = None
 
 
-class TempRefCorpus(Corpus):
-    """
-    Corpus with automatic target word tagging for TempRefWord2Vec.
-    
-    This subclass tags target words with a period label when documents are added.
-    For example, if label="1800s" and targets=["bread"], then "bread" becomes "bread_1800s".
-    
-    Use this to prepare pre-tagged corpus files for memory-efficient TempRefWord2Vec training.
-    
-    Args:
-        documents: Optional initial documents (list of token lists).
-        label: Time period label for tagging (e.g., "1800s", "ming", "period1").
-        targets: List of target words to tag.
-        **metadata: Default metadata for all documents.
-    
-    Example:
-        >>> from qhchina import TempRefCorpus
-        >>> 
-        >>> # Create corpus for 1800s period
-        >>> corpus = TempRefCorpus(label="1800s", targets=["bread", "money"])
-        >>> corpus.add(["bread", "is", "good"])  # "bread" -> "bread_1800s"
-        >>> corpus.add(["money", "talks"])       # "money" -> "money_1800s"
-        >>> 
-        >>> # Save for streaming training
-        >>> corpus.save("1800s.txt")
-        >>> 
-        >>> # Use with TempRefWord2Vec
-        >>> model = TempRefWord2Vec(
-        ...     corpora={"1800s": "1800s.txt", "1900s": "1900s.txt"},
-        ...     targets=["bread", "money"],
-        ...     sg=1
-        ... )
-    """
-    
-    def __init__(
-        self,
-        documents: list[list[str]] | None = None,
-        *,
-        label: str,
-        targets: list[str],
-        **metadata: Any
-    ):
-        self.label = label
-        self.targets = set(targets)
-        super().__init__(documents, **metadata)
-    
-    def add(
-        self,
-        tokens: list[str],
-        doc_id: str | None = None,
-        **metadata: Any
-    ) -> str:
-        """
-        Add a document with target words tagged.
-        
-        Target words are automatically tagged with the period label.
-        For example, if label="1800s" and "bread" is a target, it becomes "bread_1800s".
-        
-        Args:
-            tokens: List of string tokens.
-            doc_id: Optional document ID.
-            **metadata: Document metadata.
-        
-        Returns:
-            The document ID.
-        """
-        tagged_tokens = [
-            f"{tok}_{self.label}" if tok in self.targets else tok
-            for tok in tokens
-        ]
-        return super().add(tagged_tokens, doc_id, **metadata)
-    
-    def add_many(
-        self,
-        documents: list[list[str]],
-        metadata_list: list[dict[str, Any]] | None = None,
-        **shared_metadata: Any
-    ) -> list[str]:
-        """
-        Add multiple documents with target words tagged.
-        
-        Args:
-            documents: List of token lists.
-            metadata_list: Optional per-document metadata.
-            **shared_metadata: Metadata applied to all documents.
-        
-        Returns:
-            List of document IDs.
-        """
-        tagged_documents = [
-            [f"{tok}_{self.label}" if tok in self.targets else tok for tok in tokens]
-            for tokens in documents
-        ]
-        return super().add_many(tagged_documents, metadata_list, **shared_metadata)
