@@ -956,6 +956,8 @@ def cooc_matrix(
         CoocMatrix: Co-occurrence matrix object.
     
     Example:
+        >>> from qhchina.analytics import cooc_matrix, LineSentenceFile
+        >>> documents = LineSentenceFile("corpus.txt")
         >>> matrix = cooc_matrix(documents, horizon=5)
         >>> matrix["fox", "dog"]      # Scalar count
         42
@@ -964,9 +966,6 @@ def cooc_matrix(
         >>> matrix[["fox", "dog"]]    # 2D submatrix, shape (2, V)
         array([[0, 0, 10, ...], [0, 3, 0, ...]])
         >>> df = matrix.to_dataframe()
-        
-        >>> # With predefined vocabulary (no filtering applied)
-        >>> matrix = cooc_matrix(documents, vocab=["fox", "dog", "cat"])
     """
     if method not in ('window', 'document'):
         raise ValueError("method must be 'window' or 'document'")

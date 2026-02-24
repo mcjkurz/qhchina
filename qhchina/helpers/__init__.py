@@ -17,6 +17,7 @@ from .fonts import (
     get_cache_dir,
 )
 from .texts import load_text, load_texts, load_stopwords, split_into_chunks, get_stopword_languages, detect_encoding, download_corpus, download_file, list_remote_corpora
+from ..utils import LineSentenceFile
 
 __all__ = [
     # Font management
@@ -39,4 +40,6 @@ __all__ = [
     'download_corpus',
     'download_file',
     'list_remote_corpora',
+    # Corpus streaming
+    'LineSentenceFile',
 ]

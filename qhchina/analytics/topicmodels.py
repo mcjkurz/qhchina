@@ -45,16 +45,13 @@ class LDAGibbsSampler:
             after every iteration, 2 = after every 2 iterations, etc.).
     
     Example:
-        from qhchina.analytics.topicmodels import LDAGibbsSampler
+        from qhchina.analytics import LDAGibbsSampler, LineSentenceFile
         
-        # Prepare corpus as list of tokenized documents
-        documents = [['word1', 'word2', ...], ['word3', 'word4', ...], ...]
+        documents = LineSentenceFile("corpus.txt")
         
-        # Create and fit model
         lda = LDAGibbsSampler(n_topics=10, iterations=100)
         lda.fit(documents)
         
-        # Get topics
         topics = lda.get_topics(n_words=10)
     """
     

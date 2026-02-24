@@ -17,7 +17,6 @@ import numpy as np
 from collections import Counter
 from collections.abc import Iterable
 from .word2vec import Word2Vec
-from ..utils import LineSentenceFile
 from .word2vec_utils import BalancedSentenceIterator, word2vec_c
 from .vectors import cosine_similarity
 
@@ -53,10 +52,9 @@ class TempRefWord2Vec(Word2Vec):
           initialization.
     
     Args:
-        sentences: Dictionary mapping time period labels to corpora. Values can be:
-            - File paths (str): Path to text file (one sentence per line, space-separated tokens)
-            - In-memory sentences (list[list[str]]): List of tokenized sentences
-            Format: ``{"label1": "path1.txt", "label2": [["word", "list"], ...], ...}``
+        sentences: Dictionary mapping time period labels to corpora. Each value must
+            be an iterable of tokenized sentences (list[list[str]] or ``LineSentenceFile``).
+            Format: ``{"label1": [["w1", "w2"], ...], "label2": LineSentenceFile("f.txt"), ...}``
         targets: List of target words to trace semantic change.
         sampling_strategy: How to sample from corpora during training:
             - "balanced" (default): Equal tokens from each corpus, stops at smallest corpus.
@@ -90,15 +88,15 @@ class TempRefWord2Vec(Word2Vec):
             )
             model.train()
         
-        Using text files::
+        Streaming from text files::
         
-            from qhchina.analytics import TempRefWord2Vec
-            
-            # Text files with one sentence per line, space-separated tokens
-            # e.g., "songshi.txt" contains: "太祖 建隆 元年 正月\n民 安 其 业\n..."
+            from qhchina.analytics import TempRefWord2Vec, LineSentenceFile
             
             model = TempRefWord2Vec(
-                sentences={"宋": "songshi.txt", "明": "mingshi.txt"},
+                sentences={
+                    "宋": LineSentenceFile("songshi.txt"),
+                    "明": LineSentenceFile("mingshi.txt"),
+                },
                 targets=["民", "太祖"],
                 vector_size=100,
                 sg=1
@@ -112,7 +110,7 @@ class TempRefWord2Vec(Word2Vec):
 
     def __init__(
         self,
-        sentences: dict[str, str | list[list[str]]],
+        sentences: dict[str, Iterable[list[str]]],
         targets: list[str],
         sampling_strategy: str = "balanced",
         _skip_init: bool = False,
@@ -126,8 +124,9 @@ class TempRefWord2Vec(Word2Vec):
         
         Args:
             sentences: Dictionary mapping time period labels to corpora.
-                Values can be file paths (str) or in-memory sentences (list[list[str]]).
-                Files must be UNTAGGED - tagging is done automatically during training.
+                Each value must be an iterable of tokenized sentences
+                (e.g. list[list[str]] or ``LineSentenceFile``).
+                Corpora must be UNTAGGED - tagging is done automatically during training.
             targets: List of target words to trace semantic change.
             sampling_strategy: How to sample from corpora during training.
                 "balanced" (default) or "proportional".
@@ -187,18 +186,9 @@ class TempRefWord2Vec(Word2Vec):
         self._target_set = set(targets)
         self._sampling_strategy = sampling_strategy
         
-        # Convert inputs to iterables: file paths -> LineSentenceFile, lists stay as-is
         self._corpora = {}
         for label, corpus in sentences.items():
-            if isinstance(corpus, str):
-                self._corpora[label] = LineSentenceFile(corpus)
-            elif isinstance(corpus, list):
-                self._corpora[label] = corpus
-            else:
-                raise TypeError(
-                    f"sentences values must be file paths (str) or list of sentences "
-                    f"(list[list[str]]), got {type(corpus).__name__} for label '{label}'"
-                )
+            self._corpora[label] = corpus
         
         if verbose:
             logger.info("Loading corpora:")

@@ -14,7 +14,6 @@ from queue import Queue
 from tqdm.auto import tqdm
 import time
 from .vectors import cosine_similarity
-from ..utils import LineSentenceFile
 from .word2vec_utils import word2vec_c
 from ..config import get_rng, resolve_seed
 from ..utils import iter_batches
@@ -35,10 +34,9 @@ class Word2Vec:
     to begin training.
     
     Args:
-        sentences: Tokenized sentences for training. Can be:
-            - An iterable of sentences (each sentence is a list of tokens)
-            - A file path (str) to a text file with one sentence per line (space-separated tokens)
-            Note: Iterables must be restartable (can be iterated multiple times).
+        sentences: Iterable of tokenized sentences, where each sentence is a list of
+            string tokens. Must be restartable (can be iterated multiple times).
+            For streaming from a file, use ``LineSentenceFile``.
         vector_size (int): Dimensionality of the word vectors (default: 100).
         window (int): Maximum distance between the current and predicted word (default: 5).
         min_word_count (int): Ignores all words with frequency lower than this (default: 5).
@@ -65,20 +63,17 @@ class Word2Vec:
             Defaults to True if sentences is a list, False otherwise.
     
     Example:
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics import Word2Vec, LineSentenceFile
         
-        # Prepare corpus as list of tokenized sentences
+        # From a list of tokenized sentences
         sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
-        
-        # Initialize the model with sentences
         model = Word2Vec(sentences, vector_size=100, window=5, min_word_count=1, epochs=5)
-        
-        # Explicitly start training
         model.train()
         
-        # Or train from a text file (memory-efficient for large corpora)
+        # From a text file (memory-efficient for large corpora)
         # File format: one sentence per line, tokens separated by spaces
-        model = Word2Vec("corpus.txt", vector_size=100, epochs=5)
+        sentences = LineSentenceFile("corpus.txt")
+        model = Word2Vec(sentences, vector_size=100, epochs=5)
         model.train()
         
         # Get word vector
@@ -90,7 +85,7 @@ class Word2Vec:
     
     def __init__(
         self,
-        sentences: Iterable[list[str]] | str | None = None,
+        sentences: Iterable[list[str]] | None = None,
         vector_size: int = 100,
         window: int = 5,
         min_word_count: int = 5,
@@ -189,11 +184,7 @@ class Word2Vec:
         effective_seed = resolve_seed(seed)
         self._rng = get_rng(effective_seed)
         
-        # Store sentences for training (normalize file path to LineSentenceFile)
-        if isinstance(sentences, str):
-            self._sentences = LineSentenceFile(sentences)
-        else:
-            self._sentences = sentences
+        self._sentences = sentences
         
         # Initialize vocabulary structures
         self.vocab = {}  # word -> index (direct mapping)

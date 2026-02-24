@@ -7,21 +7,17 @@ import tempfile
 import os
 from contextlib import contextmanager
 
+from qhchina.utils import LineSentenceFile
+
 
 @contextmanager
 def tempref_corpus_files(corpora: dict, targets: list):
     """
-    Context manager that creates temporary untagged corpus files for testing.
-    
-    Args:
-        corpora: Dict mapping labels to lists of sentences
-        targets: List of target words (not used for tagging, kept for API compatibility)
-        
-    Yields:
-        Dict mapping labels to file paths
+    Context manager that creates temporary corpus files and yields
+    a dict mapping labels to LineSentenceFile instances.
     """
     temp_files = []
-    file_paths = {}
+    result = {}
     
     try:
         for label, sentences in corpora.items():
@@ -29,14 +25,13 @@ def tempref_corpus_files(corpora: dict, targets: list):
             os.close(fd)
             temp_files.append(path)
             
-            # Write sentences to file (one sentence per line, space-separated tokens)
             with open(path, 'w', encoding='utf-8') as f:
                 for sentence in sentences:
                     f.write(' '.join(sentence) + '\n')
             
-            file_paths[label] = path
+            result[label] = LineSentenceFile(path)
         
-        yield file_paths
+        yield result
     finally:
         for path in temp_files:
             if os.path.exists(path):
@@ -636,8 +631,8 @@ class TestWord2VecTrainingModes:
 class TestTempRefWord2Vec:
     """Tests for TempRefWord2Vec temporal semantic change analysis."""
     
-    def test_tempref_with_file_paths(self, song_ming_corpora):
-        """Test TempRefWord2Vec with file-based corpora."""
+    def test_tempref_with_line_sentence_file(self, song_ming_corpora):
+        """Test TempRefWord2Vec with LineSentenceFile corpora."""
         from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
         from collections import Counter
         
@@ -769,9 +764,9 @@ class TestTempRefWord2Vec:
         with pytest.raises(TypeError):
             TempRefWord2Vec(sentences=["not", "a", "dict"], targets=["word1"], sg=1, epochs=1)
         
-        # Invalid value type
-        with pytest.raises(TypeError, match="must be file paths.*or list of sentences"):
-            TempRefWord2Vec(sentences={"period1": 123}, targets=["word1"], sg=1, epochs=1)
+        # String value (must use LineSentenceFile instead)
+        with pytest.raises(TypeError, match="not strings"):
+            TempRefWord2Vec(sentences={"period1": "corpus.txt"}, targets=["word1"], sg=1, epochs=1)
         
         # Empty targets
         with pytest.raises(ValueError, match="targets cannot be empty"):
