@@ -14,7 +14,8 @@ from queue import Queue
 from tqdm.auto import tqdm
 import time
 from .vectors import cosine_similarity
-from .word2vec_utils import LineSentenceFile, word2vec_c
+from ..utils import LineSentenceFile
+from .word2vec_utils import word2vec_c
 from ..config import get_rng, resolve_seed
 from ..utils import iter_batches
 
@@ -53,7 +54,7 @@ class Word2Vec:
             (default: True).
         max_vocab_size (int, optional): Maximum vocabulary size. None means no limit.
         verbose (bool): If True, log progress information during training (default: False).
-        epochs (int): Number of training iterations over the corpus (default: 1).
+        epochs (int): Number of training iterations over the corpus. Must be specified explicitly.
         batch_size (int): Number of words per training batch (default: 10240).
         workers (int): Number of worker threads for parallel training (default: 1).
         callbacks (list of callable, optional): Callback functions to call after each epoch.
@@ -104,7 +105,7 @@ class Word2Vec:
         shrink_windows: bool = True,
         max_vocab_size: int | None = None,
         verbose: bool = False,
-        epochs: int = 1,
+        epochs: int | None = None,
         batch_size: int = 10240,
         workers: int = 1,
         callbacks: list[Callable] | None = None,
@@ -147,7 +148,6 @@ class Word2Vec:
             self.total_corpus_tokens = 0
             self.W = None
             self.W_prime = None
-            self.noise_distribution = None
             # Use effective_seed consistently with the normal initialization path
             effective_seed = resolve_seed(seed)
             self._rng = get_rng(effective_seed)
@@ -175,6 +175,8 @@ class Word2Vec:
             raise ValueError("window must be a positive integer")
         if not isinstance(negative, int) or negative <= 0:
             raise ValueError("negative must be a positive integer")
+        if epochs is None:
+            raise ValueError("epochs must be specified explicitly (e.g. epochs=1)")
         if not isinstance(epochs, int) or epochs <= 0:
             raise ValueError("epochs must be a positive integer")
         if not isinstance(min_word_count, int) or min_word_count < 0:
@@ -203,7 +205,6 @@ class Word2Vec:
         # These will be initialized in _initialize_vectors
         self.W = None  # Input word embeddings
         self.W_prime = None  # Output word embeddings (for negative sampling)
-        self.noise_distribution = None  # For negative sampling
         
         # Training configuration
         self.epochs = epochs
@@ -383,80 +384,85 @@ class Word2Vec:
         self._work = np.zeros(self.vector_size, dtype=self.dtype)
         self._neu1 = np.zeros(self.vector_size, dtype=self.dtype)
 
-    def _prepare_noise_distribution(self) -> None:
-        """
-        Prepare noise distribution for negative sampling.
+    def _build_alias_table(self) -> None:
+        """Build alias table for O(1) negative sampling using Vose's algorithm.
         
-        More frequent words have higher probability of being selected.
-        Applies ns_exponent smoothing (typically 0.75) to prevent extremely
-        common words from dominating the negative samples.
-        """
-        if len(self.vocab) == 0:
-            self.noise_distribution = np.array([], dtype=self.dtype)
-            return
+        Creates two arrays:
+        - _alias_prob[i]: uint32 threshold for choosing word i vs its alias
+        - _alias_index[i]: uint32 fallback word index when prob test fails
         
-        word_counts = np.array([self.word_counts[word] for word in self.vocab])
-        
-        # Apply the exponent to smooth the distribution
-        noise_dist = word_counts ** self.ns_exponent
-        
-        # Normalize to get a probability distribution
-        total = np.sum(noise_dist)
-        if total == 0:
-            # Fallback to uniform distribution if all counts are zero
-            noise_dist_normalized = np.ones(len(self.vocab), dtype=self.dtype) / len(self.vocab)
-        else:
-            noise_dist_normalized = noise_dist / total
-        
-        # Explicitly cast to the correct dtype (float32 or float64)
-        self.noise_distribution = noise_dist_normalized.astype(self.dtype)
-
-    def _build_cum_table(self) -> np.ndarray:
-        """
-        Build cumulative distribution table for negative sampling.
-        
-        The cumulative table maps uniform random values to word indices,
-        with more frequent words having larger ranges.
-        
-        Returns:
-            np.ndarray[uint32]: Cumulative distribution table
-            
-        The model keeps a reference to this array to prevent garbage collection.
-        
-        Note: This matches Gensim's make_cum_table() exactly to ensure identical
-        negative sampling behavior.
+        Sampling is O(1): pick a random column i, then compare a random value
+        against _alias_prob[i] to return either i or _alias_index[i].
         """
         vocab_size = len(self.vocab)
         if vocab_size == 0:
-            self._cum_table = np.array([], dtype=np.uint32)
-            return self._cum_table
+            self._alias_prob = np.array([], dtype=np.uint32)
+            self._alias_index = np.array([], dtype=np.uint32)
+            return
         
-        # Match Gensim's make_cum_table exactly:
-        # 1. Compute sum of all count^ns_exponent (Z in paper)
-        # 2. Build cumulative values with round() for each entry
-        domain = 2**31 - 1
-        self._cum_table = np.zeros(vocab_size, dtype=np.uint32)
+        weights = np.array([
+            self.word_counts[word] ** self.ns_exponent
+            for word in self.index2word
+        ], dtype=np.float64)
         
-        # Compute Z = sum of all count^exponent
-        train_words_pow = 0.0
-        for word in self.index2word:
-            count = self.word_counts[word]
-            train_words_pow += count ** self.ns_exponent
+        self._build_alias_from_weights(weights)
+    
+    def _build_alias_from_weights(self, weights: np.ndarray) -> None:
+        """Build alias table from a weight array using Vose's algorithm.
         
-        # Build cumulative table entry by entry using round()
-        # Using round() is critical - truncation via astype(uint32) causes different
-        # negative samples to be drawn, leading to divergent training results
-        cumulative = 0.0
-        for word_index, word in enumerate(self.index2word):
-            count = self.word_counts[word]
-            cumulative += count ** self.ns_exponent
-            self._cum_table[word_index] = round(cumulative / train_words_pow * domain)
+        Shared implementation used by both Word2Vec and TempRefWord2Vec.
+        Zero-weight entries are handled correctly (they become pure aliases
+        to other words).
+        """
+        n = len(weights)
+        total = weights.sum()
+        if total == 0:
+            self._alias_prob = np.zeros(n, dtype=np.uint32)
+            self._alias_index = np.zeros(n, dtype=np.uint32)
+            return
         
-        # Verify final value equals domain (Gensim does this assertion)
-        if vocab_size > 0:
-            assert self._cum_table[-1] == domain, f"Final cum_table value {self._cum_table[-1]} != {domain}"
+        # Normalize so that sum of scaled probs = n
+        # prob_scaled[i] = weights[i] / total * n
+        prob_scaled = weights * (n / total)
         
-        return self._cum_table
+        prob = np.zeros(n, dtype=np.uint32)
+        alias = np.zeros(n, dtype=np.uint32)
+        
+        # Vose's algorithm: partition into "small" (< 1.0) and "large" (>= 1.0)
+        small = []
+        large = []
+        for i in range(n):
+            if prob_scaled[i] < 1.0:
+                small.append(i)
+            else:
+                large.append(i)
+        
+        # Fill the alias table
+        while small and large:
+            s = small.pop()
+            l = large.pop()
+            
+            # prob[s] = prob_scaled[s] * UINT32_MAX, so comparison against
+            # a uniform uint32 gives the correct accept probability
+            prob[s] = min(int(prob_scaled[s] * 4294967296.0), 4294967295)
+            alias[s] = l
+            
+            prob_scaled[l] = (prob_scaled[l] + prob_scaled[s]) - 1.0
+            if prob_scaled[l] < 1.0:
+                small.append(l)
+            else:
+                large.append(l)
+        
+        # Remaining entries have probability ~1.0 (always accepted)
+        for l in large:
+            prob[l] = 4294967295  # UINT32_MAX
+            alias[l] = l
+        for s in small:
+            prob[s] = 4294967295
+            alias[s] = s
+        
+        self._alias_prob = prob
+        self._alias_index = alias
     
     def _get_random_state(self) -> int:
         """Get a fresh random seed for training each batch.
@@ -507,7 +513,7 @@ class Word2Vec:
         
         return sample_ints
     
-    def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray]:
+    def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Allocate private work buffers for a worker thread.
         
@@ -515,11 +521,12 @@ class Word2Vec:
         These buffers are used for gradient accumulation during training.
         
         Returns:
-            Tuple of (work, neu1) numpy arrays, each of shape (vector_size,).
+            Tuple of (work, neu1, context_buffer) numpy arrays.
         """
         work = np.zeros(self.vector_size, dtype=self.dtype)
         neu1 = np.zeros(self.vector_size, dtype=self.dtype)
-        return work, neu1
+        context_buffer = np.zeros(2 * self.window, dtype=np.uint32)
+        return work, neu1, context_buffer
     
     def _train_batch_worker(
         self,
@@ -530,6 +537,7 @@ class Word2Vec:
         calculate_loss: bool,
         work: np.ndarray,
         neu1: np.ndarray,
+        context_buffer: np.ndarray,
     ) -> tuple[float, int, int]:
         """
         Train on a single batch using provided work buffers.
@@ -546,6 +554,7 @@ class Word2Vec:
             calculate_loss: Whether to compute loss.
             work: Thread-private work buffer.
             neu1: Thread-private neu1 buffer.
+            context_buffer: Thread-private context index buffer (CBOW only).
         
         Returns:
             Tuple of (batch_loss, batch_examples, batch_words).
@@ -556,9 +565,11 @@ class Word2Vec:
             batch,
             self.vocab,
             sample_ints,
-            self._cum_table,
+            self._alias_prob,
+            self._alias_index,
             work,
             neu1,
+            context_buffer,
             self.sample > 0,
             self.window,
             self.shrink_windows,
@@ -590,7 +601,7 @@ class Word2Vec:
             sample_ints: Subsampling thresholds array (shared, read-only).
             calculate_loss: Whether to compute and report loss values.
         """
-        work, neu1 = self._get_thread_working_mem()
+        work, neu1, context_buffer = self._get_thread_working_mem()
         
         while True:
             job = job_queue.get()
@@ -601,7 +612,7 @@ class Word2Vec:
             batch, alpha, seed = job
             
             batch_loss, batch_examples, batch_words = self._train_batch_worker(
-                batch, sample_ints, alpha, seed, calculate_loss, work, neu1
+                batch, sample_ints, alpha, seed, calculate_loss, work, neu1, context_buffer
             )
             
             progress_queue.put((batch_loss, batch_examples, batch_words))
@@ -795,11 +806,9 @@ class Word2Vec:
         if not hasattr(self, '_work') or self._work is None:
             self._work = np.zeros(self.vector_size, dtype=self.dtype)
             self._neu1 = np.zeros(self.vector_size, dtype=self.dtype)
-        if self.noise_distribution is None:
-            self._prepare_noise_distribution()
         
-        # Build cumulative table for negative sampling (thread-safe)
-        self._build_cum_table()
+        # Build alias table for O(1) negative sampling
+        self._build_alias_table()
         
         # Compute sample_ints for subsampling (needed for both training and example estimation)
         sample_ints = self._compute_sample_ints()
@@ -1136,5 +1145,4 @@ class Word2Vec:
 
 __all__ = [
     'Word2Vec',
-    'LineSentenceFile',
 ]

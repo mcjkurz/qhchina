@@ -12,6 +12,9 @@ Convenience imports:
     from qhchina.analytics import find_collocates, cooc_matrix
 """
 
+# Corpus streaming
+from ..utils import LineSentenceFile
+
 # Word embeddings
 from .word2vec import Word2Vec
 from .tempref_word2vec import TempRefWord2Vec
@@ -26,6 +29,8 @@ from .stylometry import Stylometry, compare_corpora, type_token_ratio, mattr
 from .collocations import find_collocates, cooc_matrix, plot_collocates
 
 __all__ = [
+    # Corpus streaming
+    'LineSentenceFile',
     # Word embeddings
     'Word2Vec',
     'TempRefWord2Vec',

@@ -54,7 +54,7 @@ class TestWord2VecBasic:
             vector_size=50,
             window=3,
             min_word_count=1,
-
+            epochs=1,
         )
         
         assert model.vector_size == 50
@@ -430,7 +430,7 @@ class TestWord2VecEdgeCases:
         """Test that empty sentences raises ValueError."""
         from qhchina.analytics.word2vec import Word2Vec
         
-        model = Word2Vec([], min_word_count=1)
+        model = Word2Vec([], min_word_count=1, epochs=1)
         
         with pytest.raises(ValueError, match="cannot be empty"):
             model.train()
@@ -439,7 +439,7 @@ class TestWord2VecEdgeCases:
         """Test handling of all empty sentences."""
         from qhchina.analytics.word2vec import Word2Vec
         
-        model = Word2Vec([[], [], []], min_word_count=1)
+        model = Word2Vec([[], [], []], min_word_count=1, epochs=1)
         
         with pytest.raises(ValueError, match="contains no words"):
             model.train()
@@ -448,7 +448,7 @@ class TestWord2VecEdgeCases:
         """Test that calling train() without sentences raises ValueError."""
         from qhchina.analytics.word2vec import Word2Vec
         
-        model = Word2Vec(min_word_count=1)
+        model = Word2Vec(min_word_count=1, epochs=1)
         
         with pytest.raises(ValueError, match="No sentences provided"):
             model.train()
@@ -763,23 +763,23 @@ class TestTempRefWord2Vec:
         
         # CBOW not supported
         with pytest.raises(NotImplementedError):
-            TempRefWord2Vec(sentences=corpora, targets=["word1"], sg=0)
+            TempRefWord2Vec(sentences=corpora, targets=["word1"], sg=0, epochs=1)
         
         # Non-dict sentences
         with pytest.raises(TypeError):
-            TempRefWord2Vec(sentences=["not", "a", "dict"], targets=["word1"], sg=1)
+            TempRefWord2Vec(sentences=["not", "a", "dict"], targets=["word1"], sg=1, epochs=1)
         
         # Invalid value type
         with pytest.raises(TypeError, match="must be file paths.*or list of sentences"):
-            TempRefWord2Vec(sentences={"period1": 123}, targets=["word1"], sg=1)
+            TempRefWord2Vec(sentences={"period1": 123}, targets=["word1"], sg=1, epochs=1)
         
         # Empty targets
         with pytest.raises(ValueError, match="targets cannot be empty"):
-            TempRefWord2Vec(sentences=corpora, targets=[], sg=1)
+            TempRefWord2Vec(sentences=corpora, targets=[], sg=1, epochs=1)
         
         # shuffle=True not supported
         with pytest.raises(ValueError, match="shuffle=True is not supported"):
-            TempRefWord2Vec(sentences=corpora, targets=["word1"], sg=1, shuffle=True)
+            TempRefWord2Vec(sentences=corpora, targets=["word1"], sg=1, shuffle=True, epochs=1)
     
     def test_tempref_base_word_count_equals_variant_sum(self):
         """Test that base word counts equal the sum of their temporal variant counts."""
@@ -798,6 +798,7 @@ class TestTempRefWord2Vec:
             min_word_count=1,
             sg=1,
             seed=42,
+            epochs=1,
         )
         model.train()
         
@@ -1074,7 +1075,6 @@ class TestWord2VecLearning:
         # Build vocab and initialize vectors manually to capture initial state
         model.build_vocab(model._sentences)
         model._initialize_vectors()
-        model._prepare_noise_distribution()
         
         # Store initial vectors
         initial_vectors = model.W.copy()
@@ -1352,7 +1352,8 @@ class TestWord2VecAlphaHandling:
             negative=2,
             sg=1,
             seed=42,
-            alpha=None
+            alpha=None,
+            epochs=1,
         )
         model.train()
         
@@ -1372,8 +1373,8 @@ class TestWord2VecAlphaHandling:
             negative=2,
             sg=1,
             seed=42,
-
-            alpha=0.0
+            alpha=0.0,
+            epochs=1,
         )
         model.train()
         
@@ -1466,6 +1467,7 @@ class TestWord2VecMultithreading:
             Word2Vec(
                 vector_size=20,
                 workers=0,
+                epochs=1,
             )
     
     def test_workers_learning_rate_decay(self, larger_documents):
@@ -1568,11 +1570,12 @@ class TestWord2VecRobustnessFixes:
     @pytest.mark.parametrize(
         ("kwargs", "msg"),
         [
-            ({"vector_size": 0}, "vector_size must be a positive integer"),
-            ({"window": 0}, "window must be a positive integer"),
-            ({"negative": 0}, "negative must be a positive integer"),
+            ({"vector_size": 0, "epochs": 1}, "vector_size must be a positive integer"),
+            ({"window": 0, "epochs": 1}, "window must be a positive integer"),
+            ({"negative": 0, "epochs": 1}, "negative must be a positive integer"),
             ({"epochs": 0}, "epochs must be a positive integer"),
-            ({"min_word_count": -1}, "min_word_count must be a non-negative integer"),
+            ({"epochs": None}, "epochs must be specified explicitly"),
+            ({"min_word_count": -1, "epochs": 1}, "min_word_count must be a non-negative integer"),
         ],
     )
     def test_invalid_hyperparameters_raise(self, kwargs, msg):

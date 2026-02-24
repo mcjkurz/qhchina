@@ -17,7 +17,8 @@ import numpy as np
 from collections import Counter
 from collections.abc import Iterable
 from .word2vec import Word2Vec
-from .word2vec_utils import LineSentenceFile, BalancedSentenceIterator, word2vec_c
+from ..utils import LineSentenceFile
+from .word2vec_utils import BalancedSentenceIterator, word2vec_c
 from .vectors import cosine_similarity
 
 logger = logging.getLogger("qhchina.analytics.tempref_word2vec")
@@ -65,7 +66,7 @@ class TempRefWord2Vec(Word2Vec):
             - window (int): Context window size (default: 5)
             - min_word_count (int): Minimum word frequency (default: 5)
             - negative (int): Negative samples (default: 5)
-            - epochs (int): Training epochs (default: 1)
+            - epochs (int): Training epochs (required)
             - batch_size (int): Tokens per batch (default: 10240)
             - alpha (float): Initial learning rate (default: 0.025)
             - verbose (bool): Log progress (default: False)
@@ -398,64 +399,40 @@ class TempRefWord2Vec(Word2Vec):
         
         logger.debug(f"Built temporal index map with {len(self.reverse_temporal_map)} variant mappings")
     
-    def _build_cum_table(self) -> np.ndarray:
-        """
-        Build cumulative table for negative sampling, excluding temporal variants.
+    def _build_alias_table(self) -> None:
+        """Build alias table excluding temporal variants from negative sampling.
         
         Temporal variants (e.g., "民_宋") are CENTER words (in syn0), not CONTEXT words.
         Negative samples should come from the same distribution as positive targets
-        (base forms in syn1neg). Including temporal variants in negative sampling would
-        sample words whose syn1neg embeddings are never trained as positive targets.
-        
-        This override gives temporal variants zero probability by assigning them
-        the same cumulative value as the previous word (zero-width range).
-        
-        Returns:
-            np.ndarray[uint32]: Cumulative distribution table
+        (base forms in syn1neg). Temporal variants get zero weight so they are
+        never drawn as negative samples.
         """
         vocab_size = len(self.vocab)
         if vocab_size == 0:
-            self._cum_table = np.array([], dtype=np.uint32)
-            return self._cum_table
+            self._alias_prob = np.array([], dtype=np.uint32)
+            self._alias_index = np.array([], dtype=np.uint32)
+            return
         
-        domain = 2**31 - 1
-        self._cum_table = np.zeros(vocab_size, dtype=np.uint32)
+        weights = np.array([
+            0.0 if word in self.reverse_temporal_map
+            else self.word_counts[word] ** self.ns_exponent
+            for word in self.index2word
+        ], dtype=np.float64)
         
-        # Compute Z = sum of count^exponent for eligible words only
-        train_words_pow = 0.0
-        for word in self.index2word:
-            if word in self.reverse_temporal_map:
-                continue  # Skip temporal variants
-            count = self.word_counts[word]
-            train_words_pow += count ** self.ns_exponent
+        self._build_alias_from_weights(weights)
         
-        # Build cumulative table
-        # Temporal variants get the same value as the previous entry (zero-width range)
-        cumulative = 0.0
-        for word_index, word in enumerate(self.index2word):
-            if word not in self.reverse_temporal_map:
-                count = self.word_counts[word]
-                cumulative += count ** self.ns_exponent
-            self._cum_table[word_index] = round(cumulative / train_words_pow * domain)
-        
-        # Verify final value equals domain
-        if vocab_size > 0:
-            assert self._cum_table[-1] == domain, f"Final cum_table value {self._cum_table[-1]} != {domain}"
-        
-        n_excluded = len([w for w in self.index2word if w in self.reverse_temporal_map])
-        logger.debug(f"Built cum_table excluding {n_excluded} temporal variants from negative sampling")
-        
-        return self._cum_table
+        n_excluded = sum(1 for w in self.index2word if w in self.reverse_temporal_map)
+        logger.debug(f"Built alias table excluding {n_excluded} temporal variants from negative sampling")
     
-    def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray]:
+    def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Allocate private work buffer for a worker thread.
         
-        TempRefWord2Vec only needs the work buffer (Skip-gram only, no neu1 needed).
-        Returns (work, None) to match parent signature.
+        TempRefWord2Vec only needs the work buffer (Skip-gram only, no neu1
+        or context_buffer needed). Returns (work, None, None) to match parent.
         """
         work = np.zeros(self.vector_size, dtype=self.dtype)
-        return work, None
+        return work, None, None
     
     def _train_batch_worker(
         self,
@@ -466,6 +443,7 @@ class TempRefWord2Vec(Word2Vec):
         calculate_loss: bool,
         work: np.ndarray,
         neu1: np.ndarray,
+        context_buffer: np.ndarray,
     ) -> tuple[float, int, int]:
         """
         Train on a single batch using temporal-aware training with provided work buffers.
@@ -480,6 +458,7 @@ class TempRefWord2Vec(Word2Vec):
             calculate_loss: Whether to compute loss.
             work: Thread-private work buffer.
             neu1: Unused (temporal training is Skip-gram only).
+            context_buffer: Unused (temporal training is Skip-gram only).
         
         Returns:
             Tuple of (batch_loss, batch_examples, batch_words).
@@ -494,7 +473,8 @@ class TempRefWord2Vec(Word2Vec):
             self.vocab,
             self.temporal_index_map,
             sample_ints,
-            self._cum_table,
+            self._alias_prob,
+            self._alias_index,
             work,
             self.sample > 0,
             self.window,

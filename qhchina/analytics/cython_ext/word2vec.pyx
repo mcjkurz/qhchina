@@ -23,6 +23,10 @@ from libc.math cimport exp, log
 
 # Import PyCapsule at module level for extracting raw BLAS pointers
 from cpython.pycapsule cimport PyCapsule_GetPointer
+from cpython.dict cimport PyDict_GetItemWithError
+from cpython.object cimport PyObject
+from cpython.exc cimport PyErr_Occurred
+from cpython.long cimport PyLong_AsLong
 
 # Import scipy BLAS module for extracting raw function pointers
 import scipy.linalg.blas as fblas
@@ -202,31 +206,37 @@ cdef inline unsigned long long random_int32(unsigned long long *next_random) noe
 
 
 # =============================================================================
-# Binary Search for Negative Sampling
+# Alias Method for O(1) Negative Sampling
 # =============================================================================
 
-cdef inline unsigned long long bisect_left(
-    UITYPE_t *a, 
-    unsigned long long x, 
-    unsigned long long lo, 
-    unsigned long long hi
+cdef inline UITYPE_t alias_draw(
+    UITYPE_t *alias_prob,
+    UITYPE_t *alias_index,
+    unsigned long long vocab_size,
+    unsigned long long *next_random,
 ) noexcept nogil:
-    """Binary search on cumulative table to find word index for negative sampling."""
-    cdef unsigned long long mid
-    while hi > lo:
-        mid = (lo + hi) >> 1
-        if a[mid] >= x:
-            hi = mid
-        else:
-            lo = mid + 1
-    return lo
+    """O(1) negative sample draw using the alias method.
+    
+    Uses two random numbers from the LCG:
+    - First selects a column uniformly in [0, vocab_size)
+    - Second compares against the alias probability threshold
+    """
+    cdef unsigned long long r1, r2
+    cdef UITYPE_t col
+    r1 = random_int32(next_random)
+    col = <UITYPE_t>(r1 % vocab_size)
+    r2 = random_int32(next_random)
+    if <UITYPE_t>r2 < alias_prob[col]:
+        return col
+    else:
+        return alias_index[col]
 
 
 # =============================================================================
 # Core Skip-gram Training (nogil)
 # =============================================================================
 
-cdef inline unsigned long long train_sg_pair(
+cdef inline void train_sg_pair(
     REAL_t *syn0,
     REAL_t *syn1neg,
     const int size,
@@ -234,9 +244,10 @@ cdef inline unsigned long long train_sg_pair(
     const UITYPE_t context_index,
     const REAL_t alpha,
     REAL_t *work,
-    unsigned long long next_random,
-    UITYPE_t *cum_table,
-    unsigned long long cum_table_len,
+    unsigned long long *next_random,
+    UITYPE_t *alias_prob,
+    UITYPE_t *alias_index,
+    unsigned long long vocab_size,
     int negative,
     const int _compute_loss,
     REAL_t *running_loss
@@ -248,14 +259,10 @@ cdef inline unsigned long long train_sg_pair(
       - syn1neg[context_index]: Output embedding of context word (positive target, d=0)
       - syn1neg[negative]: Output embeddings of negative samples (d>0)
     
-    Updates:
-      - syn0[center_index]: Updated via accumulated gradients from all targets
-      - syn1neg[context_index]: Updated directly (positive target)
-      - syn1neg[negatives]: Updated directly (negative targets)
+    Uses O(1) alias method for drawing negative samples.
     """
     cdef long long row1 = <long long>center_index * <long long>size
     cdef long long row2
-    cdef unsigned long long modulo = 281474976710655ULL
     cdef REAL_t f, g, label, f_dot, f_dot_for_loss, log_e_f_dot
     cdef UITYPE_t target_index
     cdef int d
@@ -264,11 +271,10 @@ cdef inline unsigned long long train_sg_pair(
     
     for d in range(negative + 1):
         if d == 0:
-            target_index = context_index  # Positive sample = context word
+            target_index = context_index
             label = ONEF
         else:
-            target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
-            next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
+            target_index = alias_draw(alias_prob, alias_index, vocab_size, next_random)
             if target_index == context_index:
                 continue
             label = <REAL_t>0.0
@@ -294,15 +300,13 @@ cdef inline unsigned long long train_sg_pair(
         our_saxpy(&size, &g, &syn0[row1], &ONE, &syn1neg[row2], &ONE)
     
     our_saxpy(&size, &ONEF, work, &ONE, &syn0[row1], &ONE)
-    
-    return next_random
 
 
 # =============================================================================
 # Core CBOW Training (nogil)
 # =============================================================================
 
-cdef inline unsigned long long train_cbow_pair(
+cdef inline void train_cbow_pair(
     REAL_t *syn0,
     REAL_t *syn1neg,
     const int size,
@@ -312,24 +316,24 @@ cdef inline unsigned long long train_cbow_pair(
     const REAL_t alpha,
     REAL_t *neu1,
     REAL_t *work,
-    unsigned long long next_random,
+    unsigned long long *next_random,
     bint cbow_mean,
-    # Negative sampling parameters (passed, not global)
-    UITYPE_t *cum_table,
-    unsigned long long cum_table_len,
+    UITYPE_t *alias_prob,
+    UITYPE_t *alias_index,
+    unsigned long long vocab_size,
     int negative,
-    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss
 ) noexcept nogil:
-    """Train on a single CBOW example: predict center_index from context_indices."""
+    """Train on a single CBOW example: predict center_index from context_indices.
+    
+    Uses O(1) alias method for drawing negative samples.
+    """
     cdef long long row2
-    cdef unsigned long long modulo = 281474976710655ULL
     cdef REAL_t f, g, label, f_dot, f_dot_for_loss, count, inv_count, log_e_f_dot
     cdef UITYPE_t target_index
     cdef int d, m
     
-    # Build combined context vector
     memset(neu1, 0, size * cython.sizeof(REAL_t))
     count = <REAL_t>0.0
     for m in range(context_len):
@@ -337,7 +341,7 @@ cdef inline unsigned long long train_cbow_pair(
         count += ONEF
     
     if count < <REAL_t>0.5:
-        return next_random
+        return
     
     inv_count = ONEF / count
     if cbow_mean:
@@ -350,8 +354,7 @@ cdef inline unsigned long long train_cbow_pair(
             target_index = center_index
             label = ONEF
         else:
-            target_index = bisect_left(cum_table, (next_random >> 16) % cum_table[cum_table_len - 1], 0, cum_table_len)
-            next_random = (next_random * <unsigned long long>25214903917ULL + 11) & modulo
+            target_index = alias_draw(alias_prob, alias_index, vocab_size, next_random)
             if target_index == center_index:
                 continue
             label = <REAL_t>0.0
@@ -365,11 +368,10 @@ cdef inline unsigned long long train_cbow_pair(
         f = EXP_TABLE[<int>((f_dot + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
         g = (label - f) * alpha
         
-        # Accumulate loss only if requested
         if _compute_loss == 1:
             f_dot_for_loss = (f_dot if d == 0 else -f_dot)
             if f_dot_for_loss <= -MAX_EXP or f_dot_for_loss >= MAX_EXP:
-                pass  # Skip this loss term
+                pass
             else:
                 log_e_f_dot = LOG_TABLE[<int>((f_dot_for_loss + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
                 running_loss[0] = running_loss[0] - log_e_f_dot
@@ -382,8 +384,6 @@ cdef inline unsigned long long train_cbow_pair(
     
     for m in range(context_len):
         our_saxpy(&size, &ONEF, work, &ONE, &syn0[<long long>context_indices[m] * <long long>size], &ONE)
-    
-    return next_random
 
 
 # =============================================================================
@@ -402,8 +402,9 @@ cdef void train_batch_sg(
     REAL_t alpha,
     REAL_t *work,
     unsigned long long *next_random,
-    UITYPE_t *cum_table,
-    unsigned long long cum_table_len,
+    UITYPE_t *alias_prob,
+    UITYPE_t *alias_index,
+    unsigned long long vocab_size,
     int negative,
     const int _compute_loss,
     REAL_t *running_loss,
@@ -433,13 +434,11 @@ cdef void train_batch_sg(
                 if j == i:
                     continue
                 
-                # indexes[i] = center, indexes[j] = context
-                # Center word in syn0 (row1), predicts context word in syn1neg
-                next_random[0] = train_sg_pair(
+                train_sg_pair(
                     syn0, syn1neg, size,
-                    indexes[i], indexes[j],  # center, context
-                    alpha, work, next_random[0],
-                    cum_table, cum_table_len, negative,
+                    indexes[i], indexes[j],
+                    alpha, work, next_random,
+                    alias_prob, alias_index, vocab_size, negative,
                     _compute_loss, running_loss
                 )
                 examples_trained[0] += 1
@@ -460,11 +459,10 @@ cdef void train_batch_cbow(
     UITYPE_t *context_buffer,
     unsigned long long *next_random,
     bint cbow_mean,
-    # Negative sampling parameters
-    UITYPE_t *cum_table,
-    unsigned long long cum_table_len,
+    UITYPE_t *alias_prob,
+    UITYPE_t *alias_index,
+    unsigned long long vocab_size,
     int negative,
-    # Loss computation
     const int _compute_loss,
     REAL_t *running_loss,
     long long *examples_trained
@@ -485,7 +483,6 @@ cdef void train_batch_cbow(
             if k > idx_end:
                 k = idx_end
             
-            # Collect context indices
             ctx_count = 0
             for m in range(j, k):
                 if m == i:
@@ -496,12 +493,12 @@ cdef void train_batch_cbow(
             if ctx_count == 0:
                 continue
             
-            next_random[0] = train_cbow_pair(
+            train_cbow_pair(
                 syn0, syn1neg, size,
                 context_buffer, ctx_count, indexes[i],
-                alpha, neu1, work, next_random[0],
+                alpha, neu1, work, next_random,
                 cbow_mean,
-                cum_table, cum_table_len, negative,
+                alias_prob, alias_index, vocab_size, negative,
                 _compute_loss, running_loss
             )
             examples_trained[0] += 1
@@ -517,9 +514,11 @@ def train_batch(
     list sentences,
     dict word2idx,
     np.uint32_t[:] sample_ints,
-    np.uint32_t[:] cum_table,
+    np.uint32_t[:] alias_prob,
+    np.uint32_t[:] alias_index,
     np.float32_t[:] work,
     np.float32_t[:] neu1,
+    np.uint32_t[:] context_buffer_arr,
     bint use_subsampling,
     int window,
     bint shrink_windows,
@@ -538,9 +537,11 @@ def train_batch(
         sentences: List of tokenized sentences.
         word2idx: Word to index mapping.
         sample_ints: Subsampling thresholds.
-        cum_table: Cumulative table for negative sampling.
+        alias_prob: Alias method probability thresholds (uint32).
+        alias_index: Alias method fallback indices (uint32).
         work: Pre-allocated work buffer (vector_size,). Reused across batches.
         neu1: Pre-allocated CBOW context buffer (vector_size,). Reused across batches.
+        context_buffer_arr: Pre-allocated context index buffer (2*window,). CBOW only.
         use_subsampling: Apply subsampling of frequent words.
         window: Context window size.
         shrink_windows: Randomly reduce window size per word.
@@ -558,26 +559,22 @@ def train_batch(
     cdef int num_sentences = len(sentences)
     cdef int _compute_loss = 1 if compute_loss else 0
     cdef int _sg = 1 if sg else 0
-    cdef unsigned long long cum_table_len = len(cum_table)
+    cdef unsigned long long vocab_size = len(alias_prob)
     
     # Get raw pointers
     cdef REAL_t *syn0_ptr = &syn0[0, 0]
     cdef REAL_t *syn1neg_ptr = &syn1neg[0, 0]
     cdef UITYPE_t *sample_ints_ptr = &sample_ints[0]
-    cdef UITYPE_t *cum_table_ptr = &cum_table[0]
+    cdef UITYPE_t *alias_prob_ptr = &alias_prob[0]
+    cdef UITYPE_t *alias_index_ptr = &alias_index[0]
     cdef REAL_t *work_ptr = &work[0]
     cdef REAL_t *neu1_ptr = &neu1[0]
+    cdef UITYPE_t *context_buffer = &context_buffer_arr[0]
     
     # Stack-allocated buffers for batch data
     cdef UITYPE_t indexes[MAX_WORDS_IN_BATCH]
     cdef UITYPE_t sentence_idx[MAX_WORDS_IN_BATCH + 1]
     cdef ITYPE_t reduced_windows[MAX_WORDS_IN_BATCH]
-    
-    # Dynamically allocate context buffer based on window size (only used for CBOW)
-    # Maximum context size is 2 * window (left + right context words)
-    cdef int context_buffer_size = 2 * window
-    cdef np.ndarray[UITYPE_t, ndim=1] context_buffer_arr = np.zeros(context_buffer_size, dtype=np.uint32)
-    cdef UITYPE_t *context_buffer = &context_buffer_arr[0]
     
     # State variables
     cdef unsigned long long next_random = random_seed
@@ -591,8 +588,8 @@ def train_batch(
     cdef int word_idx
     cdef int sent_global_idx
     cdef int i
+    cdef PyObject *result
     
-    # Process all sentences in this batch
     sentence_idx[0] = 0
     
     for sent_global_idx in range(num_sentences):
@@ -601,15 +598,16 @@ def train_batch(
         if sent is None or len(sent) == 0:
             continue
         
-        # Index this sentence (vocab lookup WITH GIL, but no allocations)
         for token in sent:
-            if token not in word2idx:
+            result = PyDict_GetItemWithError(word2idx, token)
+            if result == NULL:
+                if PyErr_Occurred():
+                    raise
                 continue
             
-            word_idx = word2idx[token]
+            word_idx = <int>PyLong_AsLong(<object>result)
             total_words += 1
             
-            # Subsampling (matches Gensim exactly)
             if use_subsampling:
                 if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
@@ -617,18 +615,15 @@ def train_batch(
             indexes[effective_words] = <UITYPE_t>word_idx
             effective_words += 1
             
-            # Safety check: don't exceed buffer size
             if effective_words >= MAX_WORDS_IN_BATCH:
                 break
         
         effective_sentences += 1
         sentence_idx[effective_sentences] = effective_words
         
-        # Safety check: don't exceed buffer size
         if effective_words >= MAX_WORDS_IN_BATCH:
             break
     
-    # Train on all words in this batch
     if effective_words > 0 and effective_sentences > 0:
         if shrink_windows:
             for i in range(effective_words):
@@ -643,7 +638,7 @@ def train_batch(
                     indexes, sentence_idx, reduced_windows,
                     effective_sentences, window, alpha,
                     work_ptr, &next_random,
-                    cum_table_ptr, cum_table_len, negative,
+                    alias_prob_ptr, alias_index_ptr, vocab_size, negative,
                     _compute_loss, &running_loss, &total_examples
                 )
             else:
@@ -653,7 +648,7 @@ def train_batch(
                     effective_sentences, window, alpha,
                     neu1_ptr, work_ptr, context_buffer,
                     &next_random, cbow_mean,
-                    cum_table_ptr, cum_table_len, negative,
+                    alias_prob_ptr, alias_index_ptr, vocab_size, negative,
                     _compute_loss, &running_loss, &total_examples
                 )
     
@@ -671,7 +666,8 @@ def train_batch_temporal(
     dict word2idx,
     np.int32_t[:] temporal_index_map,
     np.uint32_t[:] sample_ints,
-    np.uint32_t[:] cum_table,
+    np.uint32_t[:] alias_prob,
+    np.uint32_t[:] alias_index,
     np.float32_t[:] work,
     bint use_subsampling,
     int window,
@@ -686,7 +682,7 @@ def train_batch_temporal(
     Temporal referencing training where:
     - CENTER words = temporal variants (tagged words like "民_宋") -> syn0
     - CONTEXT words = base forms (untagged words like "民") -> syn1neg (positive targets)
-    - Negative samples are drawn from the cum_table distribution -> syn1neg
+    - Negative samples are drawn from the alias table distribution -> syn1neg
     
     Args:
         syn0: Input word vectors (vocab_size x vector_size).
@@ -695,7 +691,8 @@ def train_batch_temporal(
         word2idx: Word to index mapping.
         temporal_index_map: Maps vocab index -> base form index.
         sample_ints: Subsampling thresholds.
-        cum_table: Cumulative table for negative sampling.
+        alias_prob: Alias method probability thresholds (uint32).
+        alias_index: Alias method fallback indices (uint32).
         work: Pre-allocated work buffer (vector_size,). Reused across batches.
         use_subsampling: Apply subsampling of frequent words.
         window: Context window size.
@@ -711,14 +708,15 @@ def train_batch_temporal(
     cdef int vector_size = syn0.shape[1]
     cdef int num_sentences = len(sentences)
     cdef int _compute_loss = 1 if compute_loss else 0
-    cdef unsigned long long cum_table_len = len(cum_table)
+    cdef unsigned long long vocab_size = len(alias_prob)
     
     # Get raw pointers
     cdef REAL_t *syn0_ptr = &syn0[0, 0]
     cdef REAL_t *syn1neg_ptr = &syn1neg[0, 0]
     cdef UITYPE_t *sample_ints_ptr = &sample_ints[0]
     cdef ITYPE_t *temporal_map_ptr = &temporal_index_map[0]
-    cdef UITYPE_t *cum_table_ptr = &cum_table[0]
+    cdef UITYPE_t *alias_prob_ptr = &alias_prob[0]
+    cdef UITYPE_t *alias_index_ptr = &alias_index[0]
     cdef REAL_t *work_ptr = &work[0]
     
     # Stack-allocated buffers for batch data
@@ -739,8 +737,8 @@ def train_batch_temporal(
     cdef int word_idx
     cdef int sent_global_idx
     cdef int i
+    cdef PyObject *result
     
-    # Process all sentences in this batch
     sentence_idx[0] = 0
     
     for sent_global_idx in range(num_sentences):
@@ -749,40 +747,34 @@ def train_batch_temporal(
         if sent is None or len(sent) == 0:
             continue
         
-        # Index this sentence with temporal mapping
         for token in sent:
-            if token not in word2idx:
+            result = PyDict_GetItemWithError(word2idx, token)
+            if result == NULL:
+                if PyErr_Occurred():
+                    raise
                 continue
             
-            word_idx = word2idx[token]
+            word_idx = <int>PyLong_AsLong(<object>result)
             total_words += 1
             
-            # Subsampling (use original index for subsampling decision)
             if use_subsampling:
                 if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
             
-            # Center = original token (temporal variant like "民_宋" if tagged)
             center_indexes[effective_words] = <UITYPE_t>word_idx
-            
-            # Context = base form (via temporal_index_map: "民_宋" -> "民")
-            # For regular words, identity mapping (index maps to itself)
             context_indexes[effective_words] = <UITYPE_t>temporal_map_ptr[word_idx]
             
             effective_words += 1
             
-            # Safety check: don't exceed buffer size
             if effective_words >= MAX_WORDS_IN_BATCH:
                 break
         
         effective_sentences += 1
         sentence_idx[effective_sentences] = effective_words
         
-        # Safety check: don't exceed buffer size
         if effective_words >= MAX_WORDS_IN_BATCH:
             break
     
-    # Train on all words in this batch
     if effective_words > 0 and effective_sentences > 0:
         if shrink_windows:
             for i in range(effective_words):
@@ -796,7 +788,7 @@ def train_batch_temporal(
                 center_indexes, context_indexes, sentence_idx, reduced_windows,
                 effective_sentences, window, alpha,
                 work_ptr, &next_random,
-                cum_table_ptr, cum_table_len, negative,
+                alias_prob_ptr, alias_index_ptr, vocab_size, negative,
                 _compute_loss, &running_loss, &total_examples
             )
     
@@ -816,8 +808,9 @@ cdef void train_batch_sg_temporal(
     REAL_t alpha,
     REAL_t *work,
     unsigned long long *next_random,
-    UITYPE_t *cum_table,
-    unsigned long long cum_table_len,
+    UITYPE_t *alias_prob,
+    UITYPE_t *alias_index,
+    unsigned long long vocab_size,
     int negative,
     const int _compute_loss,
     REAL_t *running_loss,
@@ -847,14 +840,12 @@ cdef void train_batch_sg_temporal(
                 if j == i:
                     continue
                 
-                # center_indexes[i] = tagged word -> syn0
-                # context_indexes[j] = base form -> syn1neg (positive target)
-                next_random[0] = train_sg_pair(
+                train_sg_pair(
                     syn0, syn1neg, size,
-                    center_indexes[i],   # center (tagged)
-                    context_indexes[j],  # context (base form)
-                    alpha, work, next_random[0],
-                    cum_table, cum_table_len, negative,
+                    center_indexes[i],
+                    context_indexes[j],
+                    alpha, work, next_random,
+                    alias_prob, alias_index, vocab_size, negative,
                     _compute_loss, running_loss
                 )
                 examples_trained[0] += 1

@@ -53,6 +53,9 @@ def set_log_level(level: str) -> None:
 # Import global configuration functions
 from .config import set_random_seed, get_random_seed, get_rng
 
+# Import corpus streaming utility
+from .utils import LineSentenceFile
+
 # Import core analytics classes for convenient top-level access
 from .analytics import (
     Word2Vec, 

@@ -1,7 +1,7 @@
 """
 Utility classes for Word2Vec training.
 
-Provides file-based corpus streaming and balanced batch sampling for temporal training.
+Provides balanced batch sampling for temporal training and Cython extension access.
 """
 
 import logging
@@ -12,7 +12,6 @@ from ..config import get_rng, resolve_seed
 logger = logging.getLogger("qhchina.analytics.word2vec")
 
 __all__ = [
-    'LineSentenceFile',
     'BalancedSentenceIterator',
     'CYTHON_AVAILABLE',
     'word2vec_c',
@@ -32,63 +31,6 @@ except ImportError:
 def _count_tokens(corpus: Iterable[list[str]]) -> int:
     """Count total tokens in a corpus by iterating through it once."""
     return sum(len(sentence) for sentence in corpus)
-
-
-class LineSentenceFile:
-    """
-    Restartable iterable that streams sentences from a text file.
-    
-    Enables memory-efficient training on large corpora by reading sentences 
-    directly from disk. File format is one sentence per line, with tokens 
-    separated by spaces.
-    
-    Args:
-        filepath: Path to the corpus file.
-    
-    Attributes:
-        filepath: Path to the corpus file.
-        sentence_count: Number of sentences in the file.
-        token_count: Total number of tokens in the file.
-    
-    Example:
-        reader = LineSentenceFile("corpus.txt")
-        for sentence in reader:
-            print(sentence)
-    """
-    
-    def __init__(self, filepath: str):
-        self.filepath = filepath
-        self.sentence_count, self.token_count = self._count_file()
-    
-    def _count_file(self) -> tuple[int, int]:
-        """Count sentences and tokens by iterating through the file once."""
-        sentence_count = 0
-        token_count = 0
-        with open(self.filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.rstrip('\n\r')
-                if line:
-                    sentence_count += 1
-                    token_count += len(line.split(' '))
-        return sentence_count, token_count
-    
-    def __iter__(self):
-        """Yield sentences one at a time."""
-        with open(self.filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.rstrip('\n\r')
-                if line:
-                    yield line.split(' ')
-    
-    def __len__(self) -> int:
-        """Return the number of sentences in the file."""
-        return self.sentence_count
-    
-    def __repr__(self) -> str:
-        return (
-            f"LineSentenceFile({self.filepath!r}, "
-            f"sentences={self.sentence_count:,}, tokens={self.token_count:,})"
-        )
 
 
 class BalancedSentenceIterator:

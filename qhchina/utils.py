@@ -14,12 +14,83 @@ logger = logging.getLogger("qhchina.utils")
 
 
 __all__ = [
+    'LineSentenceFile',
     'validate_filters',
     'apply_p_value_correction',
     'iter_batches',
     'build_vocab_from_iter',
     'VALID_CORRECTIONS',
 ]
+
+
+class LineSentenceFile:
+    """
+    Restartable iterable that streams sentences from a text file.
+    
+    Enables memory-efficient training on large corpora by reading sentences 
+    directly from disk. File format is one sentence per line, with tokens 
+    separated by spaces.
+    
+    Args:
+        filepath: Path to the corpus file.
+        limit: Maximum number of sentences to read. None reads the entire file.
+    
+    Attributes:
+        filepath: Path to the corpus file.
+        limit: Maximum number of sentences, or None for unlimited.
+        sentence_count: Number of sentences (respects *limit*).
+        token_count: Total number of tokens (respects *limit*).
+    
+    Example:
+        reader = LineSentenceFile("corpus.txt")
+        for sentence in reader:
+            print(sentence)
+        
+        # Read only the first 1000 sentences
+        reader = LineSentenceFile("corpus.txt", limit=1000)
+    """
+    
+    def __init__(self, filepath: str, limit: int | None = None):
+        self.filepath = filepath
+        self.limit = limit
+        self.sentence_count, self.token_count = self._count_file()
+    
+    def _count_file(self) -> tuple[int, int]:
+        """Count sentences and tokens by iterating through the file once."""
+        sentence_count = 0
+        token_count = 0
+        with open(self.filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.rstrip('\n\r')
+                if line:
+                    sentence_count += 1
+                    token_count += len(line.split(' '))
+                    if self.limit is not None and sentence_count >= self.limit:
+                        break
+        return sentence_count, token_count
+    
+    def __iter__(self):
+        """Yield sentences one at a time."""
+        count = 0
+        with open(self.filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.rstrip('\n\r')
+                if line:
+                    yield line.split(' ')
+                    count += 1
+                    if self.limit is not None and count >= self.limit:
+                        return
+    
+    def __len__(self) -> int:
+        """Return the number of sentences in the file."""
+        return self.sentence_count
+    
+    def __repr__(self) -> str:
+        limit_str = f", limit={self.limit}" if self.limit is not None else ""
+        return (
+            f"LineSentenceFile({self.filepath!r}, "
+            f"sentences={self.sentence_count:,}, tokens={self.token_count:,}{limit_str})"
+        )
 
 
 VALID_CORRECTIONS = ('bonferroni', 'fdr_bh')
