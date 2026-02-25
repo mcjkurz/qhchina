@@ -60,6 +60,13 @@ extensions = [
         include_dirs=[numpy.get_include()],
         language="c++",
         extra_compile_args=extra_compile_args,
+    ),
+    Extension(
+        "qhchina.analytics.cython_ext.fisher",
+        sources=["qhchina/analytics/cython_ext/fisher.pyx"],
+        include_dirs=[numpy.get_include()],
+        language="c",
+        extra_compile_args=extra_compile_args,
     )
 ]
 

@@ -6,9 +6,9 @@ from typing import TypedDict
 import numpy as np
 import pandas as pd
 from scipy import sparse
-from scipy.stats import fisher_exact as scipy_fisher_exact
 
 from ..utils import apply_p_value_correction, VALID_CORRECTIONS, iter_batches, build_vocab_from_iter
+from .cython_ext.fisher import batch_fisher_exact
 
 logger = logging.getLogger("qhchina.analytics.collocations")
 
@@ -256,53 +256,56 @@ class FilterOptions(TypedDict, total=False):
     max_obs_global: int
 
 
-def _compute_collocation_result(target, candidate, a, b, c, d, alternative='greater'):
+def _assemble_results_batch(targets, candidates, a, b, c, d, alternative='greater'):
     """
-    Compute collocation statistics for a single target-collocate pair.
-    
-    Shared by both window/sentence methods and Python/Cython backends.
-    Builds a 2x2 contingency table and runs Fisher's exact test.
-    
+    Build collocation result dicts with batch Fisher p-values.
+
+    All inputs except *alternative* are parallel sequences of the same length.
+
     Args:
-        target: Target word.
-        candidate: Collocate word.
-        a: Co-occurrence count (target with collocate).
-        b: Target without collocate.
-        c: Collocate without target.
-        d: Neither target nor collocate.
-        alternative: Alternative hypothesis for Fisher's exact test.
-    
+        targets: list[str] — target word per pair.
+        candidates: list[str] — collocate word per pair.
+        a, b, c, d: array-like int — contingency-table cells.
+        alternative: str — Fisher alternative hypothesis.
+
     Returns:
-        dict with keys: target, collocate, exp_local, obs_local,
-        ratio_local, obs_global, p_value.
+        list[dict]: One dict per pair with keys target, collocate,
+        exp_local, obs_local, ratio_local, obs_global, p_value.
     """
-    # N = sample size from contingency table (a + b + c + d)
-    # For window method: N excludes positions where target is at center (per Evert)
-    # For sentence method: N = total sentences
-    N = a + b + c + d
-    expected = (a + b) * (a + c) / N if N > 0 else 0
-    ratio = a / expected if expected > 0 else 0
-    
-    table = [[a, b], [c, d]]
-    _, p_value = scipy_fisher_exact(table, alternative=alternative)
-    
-    return {
-        "target": target,
-        "collocate": candidate,
-        "exp_local": expected,
-        "obs_local": int(a),
-        "ratio_local": ratio,
-        "obs_global": int(a + c), 
-        "p_value": p_value,
-    }
+    a_arr = np.ascontiguousarray(a, dtype=np.int64)
+    b_arr = np.ascontiguousarray(b, dtype=np.int64)
+    c_arr = np.ascontiguousarray(c, dtype=np.int64)
+    d_arr = np.ascontiguousarray(d, dtype=np.int64)
+
+    pvals = batch_fisher_exact(a_arr, b_arr, c_arr, d_arr, alternative)
+
+    N_arr = (a_arr + b_arr + c_arr + d_arr).astype(np.float64)
+    R1 = (a_arr + b_arr).astype(np.float64)
+    C1 = (a_arr + c_arr).astype(np.float64)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        expected = np.where(N_arr > 0, R1 * C1 / N_arr, 0.0)
+        ratio = np.where(expected > 0, a_arr / expected, 0.0)
+
+    return [
+        {
+            "target": targets[i],
+            "collocate": candidates[i],
+            "exp_local": expected[i],
+            "obs_local": int(a_arr[i]),
+            "ratio_local": ratio[i],
+            "obs_global": int(C1[i]),
+            "p_value": pvals[i],
+        }
+        for i in range(len(targets))
+    ]
 
 
 def _build_results_from_counts(target_words, target_counts, candidate_counts, global_counts, total, alternative='greater', method='window'):
     """
     Build collocation result dicts from Python-accumulated counts.
-    
+
     Shared by both Python window and sentence backends.
-    
+
     Args:
         target_words: Target words to process.
         target_counts: {target: context count containing target}.
@@ -311,36 +314,35 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
         total: Total tokens (window) or sentences (sentence method).
         alternative: Alternative hypothesis for Fisher's exact test.
         method: 'window' or 'sentence' (affects *d* cell calculation).
-    
+
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
     """
-    results = []
-    
+    targets_list, candidates_list = [], []
+    a_list, b_list, c_list, d_list = [], [], [], []
+
     for target in target_words:
         for candidate, a in candidate_counts[target].items():
             if candidate == target:
                 continue
-            # a = the number of positions occupied by the candidate where target is near
-            # b = the number of positions occupied by the non-candidates where target is near
-            # c = the number of positions occupied by the candidate where target is not near
-            # d = the number of positions occupied by the non-candidates where target is not near)
             b = target_counts[target] - a
             c = global_counts[candidate] - a
-            
             if method == 'window':
-                # here, as per (Evert, 2008), we exclude positions where target is at center; 
-                # we are only interested in positions AROUND the target and how non-target candidates
-                # are distributed there
+                # Per Evert (2008): exclude positions where target is at center
                 d = (total - global_counts[target]) - (a + b + c)
             else:  # sentence
                 d = total - a - b - c
-            
-            results.append(_compute_collocation_result(
-                target, candidate, a, b, c, d, alternative
-            ))
-    
-    return results
+            targets_list.append(target)
+            candidates_list.append(candidate)
+            a_list.append(a)
+            b_list.append(b)
+            c_list.append(c)
+            d_list.append(d)
+
+    if not targets_list:
+        return []
+    return _assemble_results_batch(targets_list, candidates_list,
+                                   a_list, b_list, c_list, d_list, alternative)
 
 
 def _calculate_collocations_window_cython(
@@ -401,7 +403,8 @@ def _calculate_collocations_window_cython(
         total_tokens += batch_total
     
     # Build results from accumulated counts
-    results = []
+    targets_list, candidates_list = [], []
+    a_list, b_list, c_list, d_list = [], [], [], []
     for t_idx, target in enumerate(target_words_filtered):
         target_word_idx = target_indices[t_idx]
         nonzero = np.nonzero(candidate_counts_total[t_idx])[0]
@@ -409,15 +412,20 @@ def _calculate_collocations_window_cython(
             if candidate_idx == target_word_idx:
                 continue
             a = candidate_counts_total[t_idx, candidate_idx]
-            candidate = idx2word[int(candidate_idx)]
             b = T_count_total[t_idx] - a
             c = token_counter_total[candidate_idx] - a
             d = (total_tokens - token_counter_total[target_word_idx]) - (a + b + c)
-            results.append(_compute_collocation_result(
-                target, candidate, a, b, c, d, alternative
-            ))
-    
-    return results
+            targets_list.append(target)
+            candidates_list.append(idx2word[int(candidate_idx)])
+            a_list.append(a)
+            b_list.append(b)
+            c_list.append(c)
+            d_list.append(d)
+
+    if not targets_list:
+        return []
+    return _assemble_results_batch(targets_list, candidates_list,
+                                   a_list, b_list, c_list, d_list, alternative)
 
 
 def _calculate_collocations_window_python(
@@ -523,7 +531,8 @@ def _calculate_collocations_sentence_cython(
         total_sentences += batch_n
     
     # Build results from accumulated counts
-    results = []
+    targets_list, candidates_list = [], []
+    a_list, b_list, c_list, d_list = [], [], [], []
     for t_idx, target in enumerate(target_words_filtered):
         target_word_idx = target_indices[t_idx]
         nonzero = np.nonzero(candidate_sentences_total[t_idx])[0]
@@ -531,15 +540,20 @@ def _calculate_collocations_sentence_cython(
             if candidate_idx == target_word_idx:
                 continue
             a = candidate_sentences_total[t_idx, candidate_idx]
-            candidate = idx2word[int(candidate_idx)]
             b = sentences_with_token_total[target_word_idx] - a
             c = sentences_with_token_total[candidate_idx] - a
             d = total_sentences - a - b - c
-            results.append(_compute_collocation_result(
-                target, candidate, a, b, c, d, alternative
-            ))
-    
-    return results
+            targets_list.append(target)
+            candidates_list.append(idx2word[int(candidate_idx)])
+            a_list.append(a)
+            b_list.append(b)
+            c_list.append(c)
+            d_list.append(d)
+
+    if not targets_list:
+        return []
+    return _assemble_results_batch(targets_list, candidates_list,
+                                   a_list, b_list, c_list, d_list, alternative)
 
 
 def _calculate_collocations_sentence_python(

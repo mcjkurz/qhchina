@@ -23,8 +23,9 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import fisher_exact, chi2_contingency
+from scipy.stats import chi2_contingency
 from tqdm.auto import tqdm
+from .cython_ext.fisher import batch_fisher_exact
 from .vectors import cosine_similarity as _cosine_similarity, cosine_distance
 from ..config import resolve_seed
 from ..utils import validate_filters, apply_p_value_correction, VALID_CORRECTIONS
@@ -2228,11 +2229,7 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     pvals = np.empty(n_words, dtype=np.float64)
     
     if method == 'fisher':
-        for i in tqdm(range(n_words)):
-            pvals[i] = fisher_exact(
-                ((int(a_arr[i]), int(b_arr[i])), (int(c_arr[i]), int(d_arr[i]))),
-                alternative='two-sided',
-            )[1]
+        pvals = batch_fisher_exact(a_arr, b_arr, c_arr, d_arr, 'two-sided')
     elif method in ('chi2', 'chi2_corrected'):
         corr = (method == 'chi2_corrected')
         for i in tqdm(range(n_words)):
