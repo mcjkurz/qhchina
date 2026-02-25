@@ -937,21 +937,33 @@ class TestCompareCorporaCorrection:
             merged['adjusted_p_value_bonf'] >= merged['adjusted_p_value_fdr'] - 1e-15
         )
     
-    def test_max_p_filter_still_uses_raw_p_value(self, song_ming_flat):
-        """Test that max_p filter always uses raw p_value, even with correction."""
+    def test_max_p_filter_without_correction(self, song_ming_flat):
+        """Test that max_p filter works when correction is None."""
         from qhchina.analytics.stylometry import compare_corpora
         
         result = compare_corpora(
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
-            correction='bonferroni',
+            correction=None,
             filters={'max_p': 0.05},
             as_dataframe=True
         )
         
         if len(result) > 0:
-            # max_p should filter on raw p_value
             assert all(result['p_value'] <= 0.05)
+            assert 'adjusted_p_value' not in result.columns
+    
+    def test_max_p_with_correction_raises_error(self, song_ming_flat):
+        """Test that max_p with correction raises ValueError."""
+        from qhchina.analytics.stylometry import compare_corpora
+        
+        with pytest.raises(ValueError, match="max_p cannot be used with a correction"):
+            compare_corpora(
+                corpusA=song_ming_flat['song'],
+                corpusB=song_ming_flat['ming'],
+                correction='bonferroni',
+                filters={'max_p': 0.05},
+            )
     
     def test_max_adjusted_p_filters_on_adjusted(self, song_ming_flat):
         """Test that max_adjusted_p filter uses adjusted_p_value."""
@@ -979,21 +991,17 @@ class TestCompareCorporaCorrection:
                 filters={'max_adjusted_p': 0.05}
             )
     
-    def test_both_max_p_and_max_adjusted_p(self, song_ming_flat):
-        """Test using both max_p and max_adjusted_p together."""
+    def test_both_max_p_and_max_adjusted_p_raises_error(self, song_ming_flat):
+        """Test that using both max_p and max_adjusted_p with correction raises ValueError."""
         from qhchina.analytics.stylometry import compare_corpora
         
-        result = compare_corpora(
-            corpusA=song_ming_flat['song'],
-            corpusB=song_ming_flat['ming'],
-            correction='fdr_bh',
-            filters={'max_p': 0.01, 'max_adjusted_p': 0.05},
-            as_dataframe=True
-        )
-        
-        if len(result) > 0:
-            assert all(result['p_value'] <= 0.01)
-            assert all(result['adjusted_p_value'] <= 0.05)
+        with pytest.raises(ValueError, match="max_p cannot be used with a correction"):
+            compare_corpora(
+                corpusA=song_ming_flat['song'],
+                corpusB=song_ming_flat['ming'],
+                correction='fdr_bh',
+                filters={'max_p': 0.01, 'max_adjusted_p': 0.05},
+            )
     
     def test_correction_with_list_output(self, song_ming_flat):
         """Test correction works when as_dataframe=False."""

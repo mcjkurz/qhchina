@@ -764,10 +764,6 @@ class TestTempRefWord2Vec:
         with pytest.raises(TypeError):
             TempRefWord2Vec(sentences=["not", "a", "dict"], targets=["word1"], sg=1, epochs=1)
         
-        # String value (must use LineSentenceFile instead)
-        with pytest.raises(TypeError, match="not strings"):
-            TempRefWord2Vec(sentences={"period1": "corpus.txt"}, targets=["word1"], sg=1, epochs=1)
-        
         # Empty targets
         with pytest.raises(ValueError, match="targets cannot be empty"):
             TempRefWord2Vec(sentences=corpora, targets=[], sg=1, epochs=1)

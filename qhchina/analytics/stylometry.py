@@ -1987,7 +1987,7 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
                     correction: str | None = None,
                     as_dataframe: bool = True,
                     sort_by: str = 'rel_ratio',
-                    ascending: bool = False) -> list[dict]:
+                    ascending: bool = False) -> pd.DataFrame | list[dict]:
     """
     Compare two corpora to identify statistically significant differences in word usage.
     
@@ -1999,24 +1999,33 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
             for the chi-square test. All tests use two-sided alternatives.
         filters (dict, optional): Dictionary of filters to apply to results.
-            All filters (except ``max_adjusted_p``) are applied AFTER the computation of the p-value, but 
-            BEFORE multiple testing correction, defining the "family" of hypotheses being tested. 
-            This maximizes statistical power by not correcting for words that were never of interest.
             
-            Available filters:
+            Eligibility filters (applied before testing; define the hypothesis family):
             
             - 'min_count': int or tuple - Minimum count threshold(s) for a word to be 
               included (can be a single int for both corpora or tuple (min_countA, 
               min_countB)). Default is 0.
             - 'stopwords': list - Words to exclude from results.
             - 'min_word_length': int - Minimum character length for words.
-            - 'max_p': float - Maximum raw p-value threshold.
-            - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction,
-              applied after correction is computed).
+            
+            These filters are based on word properties (not p-values) and are
+            applied before any statistical tests are computed. They safely reduce the
+            hypothesis family and improve both performance and statistical power.
+            
+            P-value filters (two mutually exclusive workflows):
+            
+            - 'max_p': float - Maximum raw p-value threshold. Only valid when 
+              ``correction`` is None. Use for simple unadjusted hypothesis testing.
+            - 'max_adjusted_p': float - Maximum adjusted p-value. Only valid when 
+              ``correction`` is set. Applied after correction is computed.
+            
+            Using ``max_p`` together with ``correction`` raises a ValueError, because
+            pre-filtering on raw p-values violates the distributional assumptions
+            required by multiple testing procedures (BH, Bonferroni).
               
         correction (str, optional): Multiple testing correction method. When set,
             an ``adjusted_p_value`` column is added to the results. The correction
-            is applied AFTER all other filters, so only words that pass those
+            is applied after eligibility filters, so only words that pass those
             filters count toward the number of tests.
             
             - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
@@ -2074,10 +2083,10 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         results = compare_corpora(
             moyan, zal,
             filters={"min_count": 5, 
-                        "max_p": 0.05, 
-                        "min_word_length": 2, 
-                        "stopwords": stopwords
-                        }
+                    "max_p": 0.05, 
+                    "min_word_length": 2, 
+                    "stopwords": stopwords
+                    }
         )
         results.to_csv("results.csv", index=False)
     """
@@ -2122,6 +2131,12 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         if 'max_p' in filters:
             if not isinstance(filters['max_p'], (int, float)) or filters['max_p'] < 0 or filters['max_p'] > 1:
                 raise ValueError("max_p must be a number between 0 and 1")
+            if correction is not None:
+                raise ValueError(
+                    "max_p cannot be used with a correction method. "
+                    "Pre-filtering on raw p-values violates the assumptions of "
+                    "multiple testing correction. Use max_adjusted_p instead."
+                )
         
         if 'max_adjusted_p' in filters:
             if not isinstance(filters['max_adjusted_p'], (int, float)) or filters['max_adjusted_p'] < 0 or filters['max_adjusted_p'] > 1:
@@ -2162,16 +2177,30 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     if totalB == 0:
         raise ValueError("corpusB is empty or contains only empty sentences")
     
-    # Get min_count from filters if available, default to 0
+    # Extract eligibility filters
     min_count = filters.get('min_count', 0) if filters else 0
     if isinstance(min_count, int):
         min_count = (min_count, min_count)
+    stopwords_set: set | None = None
+    if filters and 'stopwords' in filters:
+        stopwords_set = set(filters["stopwords"])
+    min_word_len: int | None = filters.get('min_word_length') if filters else None
     
+    # =========================================================================
+    # Pre-filter: apply all eligibility filters (min_count, stopwords,
+    # min_word_length) before computing any p-values. These are based on word
+    # properties, not test statistics, so they safely define the hypothesis
+    # family and avoid wasted computation.
+    # =========================================================================
     all_words = set(abs_freqA).union(abs_freqB)
     kept_words = []
     a_list = []
     b_list = []
     for w in all_words:
+        if stopwords_set is not None and w in stopwords_set:
+            continue
+        if min_word_len is not None and len(w) < min_word_len:
+            continue
         a = abs_freqA.get(w, 0)
         b = abs_freqB.get(w, 0)
         if a >= min_count[0] and b >= min_count[1]:
@@ -2181,12 +2210,13 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     
     if not kept_words:
         if as_dataframe:
-            return pd.DataFrame(
-                columns=[
-                    "word", "abs_freqA", "abs_freqB",
-                    "rel_freqA", "rel_freqB", "rel_ratio", "p_value",
-                ]
-            )
+            cols = [
+                "word", "abs_freqA", "abs_freqB",
+                "rel_freqA", "rel_freqB", "rel_ratio", "p_value",
+            ]
+            if correction is not None:
+                cols.append("adjusted_p_value")
+            return pd.DataFrame(columns=cols)
         return []
     
     a_arr = np.asarray(a_list, dtype=np.int64)
@@ -2220,30 +2250,10 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         ratio = np.where(relB > 0, relA / relB, np.inf)
     
     # =========================================================================
-    # Apply filters BEFORE multiple testing correction.
-    # All user-specified filters define the "family" of hypotheses being tested.
-    # This maximizes statistical power by not correcting for words that were
-    # never of interest in the first place.
-    # (Note: min_count is already applied above during pre-filtering)
+    # Apply max_p filter (only valid when correction is None; validated above)
     # =========================================================================
-    if filters:
-        mask = np.ones(n_words, dtype=bool)
-        
-        if 'stopwords' in filters:
-            stopwords_set = set(filters['stopwords']) if isinstance(filters['stopwords'], list) else filters['stopwords']
-            for i, w in enumerate(kept_words):
-                if w in stopwords_set:
-                    mask[i] = False
-        
-        if 'min_word_length' in filters:
-            min_len = filters['min_word_length']
-            for i, w in enumerate(kept_words):
-                if len(w) < min_len:
-                    mask[i] = False
-        
-        if 'max_p' in filters:
-            mask &= pvals <= filters['max_p']
-        
+    if filters and 'max_p' in filters:
+        mask = pvals <= filters['max_p']
         if not mask.all():
             indices = np.nonzero(mask)[0]
             kept_words = [kept_words[i] for i in indices]
@@ -2255,8 +2265,8 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             pvals = pvals[indices]
     
     # =========================================================================
-    # Multiple testing correction (based on filtered hypothesis count)
-    # Applied only to words that passed all filters above.
+    # Multiple testing correction (based on the hypothesis family defined by
+    # the eligibility filters above)
     # =========================================================================
     p_adj = None
     if correction is not None and len(kept_words) > 0:
@@ -2278,9 +2288,6 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             pvals = pvals[indices]
             p_adj = p_adj[indices]
     
-    # =========================================================================
-    # Build output
-    # =========================================================================
     if as_dataframe:
         data = {
             "word": kept_words,
