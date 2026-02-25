@@ -12,34 +12,37 @@ computation to handle arbitrarily large table margins.
 """
 import numpy as np
 cimport numpy as np
-from libc.math cimport lgamma, exp, log, INFINITY
-
-ctypedef np.int64_t INT64_t
-ctypedef np.float64_t DOUBLE_t
+from libc.math cimport lgamma, exp
+from libc.stdint cimport int64_t
 
 
-cdef inline double _log_factorial(long n) noexcept nogil:
+cdef inline double _log_factorial(int64_t n) noexcept nogil:
     return lgamma(<double>(n + 1))
 
 
-cdef inline double _log_hyper_pmf(long k, long R1, long R2,
-                                  long C1, long N) noexcept nogil:
-    """Log of hypergeometric PMF P(X=k) with row sums R1,R2 and col sums C1,N-C1."""
+cdef inline double _margin_constant(int64_t R1, int64_t R2,
+                                    int64_t C1, int64_t N) noexcept nogil:
+    """Log-PMF terms that depend only on margins (constant across all k)."""
     return (_log_factorial(R1) + _log_factorial(R2) +
             _log_factorial(C1) + _log_factorial(N - C1) -
-            _log_factorial(N) - _log_factorial(k) -
-            _log_factorial(R1 - k) - _log_factorial(C1 - k) -
-            _log_factorial(R2 - C1 + k))
+            _log_factorial(N))
 
 
-cdef double _fisher_twosided(long a, long b, long c, long d) noexcept nogil:
+cdef inline double _log_k_terms(int64_t k, int64_t R1,
+                                int64_t C1, int64_t R2) noexcept nogil:
+    """Log-PMF terms that vary with k."""
+    return (-_log_factorial(k) - _log_factorial(R1 - k) -
+            _log_factorial(C1 - k) - _log_factorial(R2 - C1 + k))
+
+
+cdef double _fisher_twosided(int64_t a, int64_t b, int64_t c, int64_t d) noexcept nogil:
     """Two-sided Fisher's exact test p-value (sum-of-small-probabilities method)."""
-    cdef long R1 = a + b
-    cdef long R2 = c + d
-    cdef long C1 = a + c
-    cdef long N = R1 + R2
-    cdef long k_min, k_max, k
-    cdef double log_p_obs, log_pk, pval
+    cdef int64_t R1 = a + b
+    cdef int64_t R2 = c + d
+    cdef int64_t C1 = a + c
+    cdef int64_t N = R1 + R2
+    cdef int64_t k_min, k_max, k
+    cdef double mc, log_p_obs, log_pk, pval
 
     if N == 0:
         return 1.0
@@ -50,12 +53,16 @@ cdef double _fisher_twosided(long a, long b, long c, long d) noexcept nogil:
     if k_min == k_max:
         return 1.0
 
-    log_p_obs = _log_hyper_pmf(a, R1, R2, C1, N)
+    mc = _margin_constant(R1, R2, C1, N)
+    log_p_obs = mc + _log_k_terms(a, R1, C1, R2)
 
+    # Tolerance accounts for catastrophic cancellation in lgamma differences.
+    # log-PMF sums lgamma values of order N*log(N); for N~10^7 the absolute
+    # error is ~1.6e8 * eps_machine ≈ 1.6e-7, so 1e-6 is a safe bound.
     pval = 0.0
     for k in range(k_min, k_max + 1):
-        log_pk = _log_hyper_pmf(k, R1, R2, C1, N)
-        if log_pk <= log_p_obs + 1e-10:
+        log_pk = mc + _log_k_terms(k, R1, C1, R2)
+        if log_pk <= log_p_obs + 1e-6:
             pval = pval + exp(log_pk)
 
     if pval > 1.0:
@@ -63,23 +70,24 @@ cdef double _fisher_twosided(long a, long b, long c, long d) noexcept nogil:
     return pval
 
 
-cdef double _fisher_less(long a, long b, long c, long d) noexcept nogil:
+cdef double _fisher_less(int64_t a, int64_t b, int64_t c, int64_t d) noexcept nogil:
     """One-sided Fisher p-value: P(X <= a)."""
-    cdef long R1 = a + b
-    cdef long R2 = c + d
-    cdef long C1 = a + c
-    cdef long N = R1 + R2
-    cdef long k_min, k
-    cdef double pval, log_pk
+    cdef int64_t R1 = a + b
+    cdef int64_t R2 = c + d
+    cdef int64_t C1 = a + c
+    cdef int64_t N = R1 + R2
+    cdef int64_t k_min, k
+    cdef double mc, pval, log_pk
 
     if N == 0:
         return 1.0
 
     k_min = max(0, C1 - R2)
+    mc = _margin_constant(R1, R2, C1, N)
 
     pval = 0.0
     for k in range(k_min, a + 1):
-        log_pk = _log_hyper_pmf(k, R1, R2, C1, N)
+        log_pk = mc + _log_k_terms(k, R1, C1, R2)
         pval = pval + exp(log_pk)
 
     if pval > 1.0:
@@ -87,23 +95,24 @@ cdef double _fisher_less(long a, long b, long c, long d) noexcept nogil:
     return pval
 
 
-cdef double _fisher_greater(long a, long b, long c, long d) noexcept nogil:
+cdef double _fisher_greater(int64_t a, int64_t b, int64_t c, int64_t d) noexcept nogil:
     """One-sided Fisher p-value: P(X >= a)."""
-    cdef long R1 = a + b
-    cdef long R2 = c + d
-    cdef long C1 = a + c
-    cdef long N = R1 + R2
-    cdef long k_max, k
-    cdef double pval, log_pk
+    cdef int64_t R1 = a + b
+    cdef int64_t R2 = c + d
+    cdef int64_t C1 = a + c
+    cdef int64_t N = R1 + R2
+    cdef int64_t k_max, k
+    cdef double mc, pval, log_pk
 
     if N == 0:
         return 1.0
 
     k_max = min(R1, C1)
+    mc = _margin_constant(R1, R2, C1, N)
 
     pval = 0.0
     for k in range(a, k_max + 1):
-        log_pk = _log_hyper_pmf(k, R1, R2, C1, N)
+        log_pk = mc + _log_k_terms(k, R1, C1, R2)
         pval = pval + exp(log_pk)
 
     if pval > 1.0:
@@ -111,8 +120,8 @@ cdef double _fisher_greater(long a, long b, long c, long d) noexcept nogil:
     return pval
 
 
-def batch_fisher_exact(long[::1] a_arr, long[::1] b_arr,
-                       long[::1] c_arr, long[::1] d_arr,
+def batch_fisher_exact(np.int64_t[::1] a_arr, np.int64_t[::1] b_arr,
+                       np.int64_t[::1] c_arr, np.int64_t[::1] d_arr,
                        str alternative="two-sided"):
     """
     Vectorised Fisher's exact test for N independent 2x2 tables.
