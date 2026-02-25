@@ -30,7 +30,7 @@ class Word2Vec:
       infrequent words and smaller datasets.
     - CBOW (sg=0): Predicts center word from context words. Faster to train.
     
-    Training does NOT start automatically. Call ``train()`` explicitly after initialization
+    Training does not start automatically. Call ``train()`` explicitly after initialization
     to begin training.
     
     Args:

@@ -2041,44 +2041,45 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         overrepresented in either corpus.
     
     Example:
-        Compare word usage between two authors::
+        # Compare word usage between two authors:
         
-            import os
-            from qhchina import download_corpus, load_stopwords
-            from qhchina.preprocessing import create_segmenter
-            from qhchina.analytics import compare_corpora
-            
-            # Download corpora
-            download_corpus("莫言", parent_dir="corpora")
-            download_corpus("张爱玲", parent_dir="corpora")
-            
-            # Set up segmenter
-            stopwords = load_stopwords("zh")
-            segmenter = create_segmenter(
-                backend="jieba", 
-                strategy="sentence",
-                filters={"stopwords": stopwords}
-            )
-            
-            # Load and segment
-            moyan = []
-            for f in os.listdir("corpora/莫言"):
-                if f.endswith(".txt"):
-                    with open(f"corpora/莫言/{f}", encoding="utf-8") as fp:
-                        moyan.extend(segmenter.segment(fp.read()))
-            
-            zal = []
-            for f in os.listdir("corpora/张爱玲"):
-                if f.endswith(".txt"):
-                    with open(f"corpora/张爱玲/{f}", encoding="utf-8") as fp:
-                        zal.extend(segmenter.segment(fp.read()))
-            
-            # Compare corpora
-            results = compare_corpora(
-                moyan, zal,
-                filters={"min_count": 5, "max_p": 0.05, "min_word_length": 2}
-            )
-            results.sort_values("rel_freqA", ascending=False).head(20)
+        import os
+        from qhchina import download_corpus, load_stopwords
+        from qhchina.preprocessing import create_segmenter
+        from qhchina.analytics import compare_corpora
+        
+        # Download corpora
+        download_corpus("莫言", parent_dir="corpora")
+        download_corpus("张爱玲", parent_dir="corpora")
+        
+        # Set up segmenter
+        segmenter = create_segmenter(
+            backend="jieba", 
+            strategy="sentence",
+        )
+        
+        # Load and segment
+        moyan = []
+        for f in os.listdir("corpora/莫言"):
+            with open(f"corpora/莫言/{f}", encoding="utf-8") as fp:
+                moyan.extend(segmenter.segment(fp.read()))
+        
+        zal = []
+        for f in os.listdir("corpora/张爱玲"):
+            with open(f"corpora/张爱玲/{f}", encoding="utf-8") as fp:
+                zal.extend(segmenter.segment(fp.read()))
+        
+        # Compare corpora
+        stopwords = load_stopwords("zh")
+        results = compare_corpora(
+            moyan, zal,
+            filters={"min_count": 5, 
+                        "max_p": 0.05, 
+                        "min_word_length": 2, 
+                        "stopwords": stopwords
+                        }
+        )
+        results.to_csv("results.csv", index=False)
     """
     # Validate correction parameter
     if correction is not None and correction not in VALID_CORRECTIONS:
@@ -2152,9 +2153,8 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     
     # Consume each corpus once; supports one-time generators.
     abs_freqA = Counter(_iter_corpus_tokens(corpusA))
-    totalA = sum(abs_freqA.values())
-    
     abs_freqB = Counter(_iter_corpus_tokens(corpusB))
+    totalA = sum(abs_freqA.values())
     totalB = sum(abs_freqB.values())
     
     if totalA == 0:
@@ -2162,95 +2162,155 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     if totalB == 0:
         raise ValueError("corpusB is empty or contains only empty sentences")
     
-    # Create a union of all words
-    all_words = set(abs_freqA.keys()).union(abs_freqB.keys())
-    results = []
-    
     # Get min_count from filters if available, default to 0
     min_count = filters.get('min_count', 0) if filters else 0
     if isinstance(min_count, int):
         min_count = (min_count, min_count)
     
-    table = np.zeros((2, 2), dtype=np.int64)
-    for word in tqdm(all_words):
-        a = abs_freqA.get(word, 0)  # Count in Corpus A
-        b = abs_freqB.get(word, 0)  # Count in Corpus B
-        
-        # Check minimum counts
-        if a < min_count[0] or b < min_count[1]:
-            continue
-            
-        c = totalA - a          # Other words in Corpus A
-        d = totalB - b          # Other words in Corpus B
-        
-        table[:] = [[a, b], [c, d]]
-
-        # Compute the p-value using the selected statistical test.
-        if method == 'fisher':
-            p_value = fisher_exact(table, alternative='two-sided')[1]
-        elif method == 'chi2':
-            _, p_value, _, _ = chi2_contingency(table, correction=False)
-        elif method == 'chi2_corrected':
-            _, p_value, _, _ = chi2_contingency(table, correction=True)
-        else:
-            raise ValueError("Invalid method specified. Use 'fisher' or 'chi2'")
-        
-        # Calculate the relative frequency ratio (avoiding division by zero)
-        rel_freqA = a / totalA if totalA > 0 else 0
-        rel_freqB = b / totalB if totalB > 0 else 0
-        ratio = (rel_freqA / rel_freqB) if rel_freqB > 0 else np.inf
-        
-        results.append({
-            "word": word,
-            "abs_freqA": a,
-            "abs_freqB": b,
-            "rel_freqA": rel_freqA,
-            "rel_freqB": rel_freqB,
-            "rel_ratio": ratio,
-            "p_value": p_value,
-        })
+    all_words = set(abs_freqA).union(abs_freqB)
+    kept_words = []
+    a_list = []
+    b_list = []
+    for w in all_words:
+        a = abs_freqA.get(w, 0)
+        b = abs_freqB.get(w, 0)
+        if a >= min_count[0] and b >= min_count[1]:
+            kept_words.append(w)
+            a_list.append(a)
+            b_list.append(b)
+    
+    if not kept_words:
+        if as_dataframe:
+            return pd.DataFrame(
+                columns=[
+                    "word", "abs_freqA", "abs_freqB",
+                    "rel_freqA", "rel_freqB", "rel_ratio", "p_value",
+                ]
+            )
+        return []
+    
+    a_arr = np.asarray(a_list, dtype=np.int64)
+    b_arr = np.asarray(b_list, dtype=np.int64)
+    c_arr = totalA - a_arr
+    d_arr = totalB - b_arr
+    
+    n_words = len(kept_words)
+    pvals = np.empty(n_words, dtype=np.float64)
+    
+    if method == 'fisher':
+        for i in tqdm(range(n_words)):
+            pvals[i] = fisher_exact(
+                ((int(a_arr[i]), int(b_arr[i])), (int(c_arr[i]), int(d_arr[i]))),
+                alternative='two-sided',
+            )[1]
+    elif method in ('chi2', 'chi2_corrected'):
+        corr = (method == 'chi2_corrected')
+        for i in tqdm(range(n_words)):
+            pvals[i] = chi2_contingency(
+                ((int(a_arr[i]), int(b_arr[i])), (int(c_arr[i]), int(d_arr[i]))),
+                correction=corr,
+            )[1]
+    else:
+        raise ValueError("method must be 'fisher', 'chi2', or 'chi2_corrected'")
+    
+    # Vectorized relative frequencies and ratios
+    relA = a_arr / totalA
+    relB = b_arr / totalB
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.where(relB > 0, relA / relB, np.inf)
     
     # =========================================================================
-    # Apply all filters BEFORE multiple testing correction
+    # Apply filters BEFORE multiple testing correction.
     # All user-specified filters define the "family" of hypotheses being tested.
     # This maximizes statistical power by not correcting for words that were
     # never of interest in the first place.
-    # (Note: min_count is already applied during the loop above)
+    # (Note: min_count is already applied above during pre-filtering)
     # =========================================================================
     if filters:
-        # Filter out stopwords
+        mask = np.ones(n_words, dtype=bool)
+        
         if 'stopwords' in filters:
             stopwords_set = set(filters['stopwords']) if isinstance(filters['stopwords'], list) else filters['stopwords']
-            results = [result for result in results if result["word"] not in stopwords_set]
+            for i, w in enumerate(kept_words):
+                if w in stopwords_set:
+                    mask[i] = False
         
-        # Filter by minimum length
         if 'min_word_length' in filters:
-            results = [result for result in results if len(result["word"]) >= filters['min_word_length']]
+            min_len = filters['min_word_length']
+            for i, w in enumerate(kept_words):
+                if len(w) < min_len:
+                    mask[i] = False
         
-        # Filter by raw p-value threshold
         if 'max_p' in filters:
-            results = [result for result in results if result["p_value"] <= filters['max_p']]
-
+            mask &= pvals <= filters['max_p']
+        
+        if not mask.all():
+            indices = np.nonzero(mask)[0]
+            kept_words = [kept_words[i] for i in indices]
+            a_arr = a_arr[indices]
+            b_arr = b_arr[indices]
+            relA = relA[indices]
+            relB = relB[indices]
+            ratio = ratio[indices]
+            pvals = pvals[indices]
+    
     # =========================================================================
     # Multiple testing correction (based on filtered hypothesis count)
     # Applied only to words that passed all filters above.
     # =========================================================================
-    if correction is not None and results:
-        raw_p_values = [r["p_value"] for r in results]
-        adjusted = apply_p_value_correction(raw_p_values, method=correction)
-        for r, adj_p in zip(results, adjusted):
-            r["adjusted_p_value"] = adj_p
+    p_adj = None
+    if correction is not None and len(kept_words) > 0:
+        p_adj = apply_p_value_correction(pvals.tolist(), method=correction)
     
     # =========================================================================
     # Filter by adjusted p-value (must come after correction)
     # =========================================================================
-    if filters and 'max_adjusted_p' in filters:
-        results = [result for result in results if result["adjusted_p_value"] <= filters['max_adjusted_p']]
-            
+    if filters and 'max_adjusted_p' in filters and p_adj is not None:
+        adj_mask = p_adj <= filters['max_adjusted_p']
+        if not adj_mask.all():
+            indices = np.nonzero(adj_mask)[0]
+            kept_words = [kept_words[i] for i in indices]
+            a_arr = a_arr[indices]
+            b_arr = b_arr[indices]
+            relA = relA[indices]
+            relB = relB[indices]
+            ratio = ratio[indices]
+            pvals = pvals[indices]
+            p_adj = p_adj[indices]
+    
+    # =========================================================================
+    # Build output
+    # =========================================================================
     if as_dataframe:
-        results = pd.DataFrame(results)
+        data = {
+            "word": kept_words,
+            "abs_freqA": a_arr,
+            "abs_freqB": b_arr,
+            "rel_freqA": relA,
+            "rel_freqB": relB,
+            "rel_ratio": ratio,
+            "p_value": pvals,
+        }
+        if p_adj is not None:
+            data["adjusted_p_value"] = p_adj
+        results = pd.DataFrame(data)
         if sort_by in results.columns:
-            results = results.sort_values(sort_by, ascending=ascending, kind="mergesort")
-    else:
-        results = sorted(results, key=lambda r: r[sort_by], reverse=not ascending)
-    return results
+            results = results.sort_values(sort_by, ascending=ascending, kind="mergesort").reset_index(drop=True)
+        return results
+    
+    out = []
+    for i, w in enumerate(kept_words):
+        entry = {
+            "word": w,
+            "abs_freqA": int(a_arr[i]),
+            "abs_freqB": int(b_arr[i]),
+            "rel_freqA": float(relA[i]),
+            "rel_freqB": float(relB[i]),
+            "rel_ratio": float(ratio[i]) if np.isfinite(ratio[i]) else np.inf,
+            "p_value": float(pvals[i]),
+        }
+        if p_adj is not None:
+            entry["adjusted_p_value"] = float(p_adj[i])
+        out.append(entry)
+    out.sort(key=lambda r: r[sort_by], reverse=not ascending)
+    return out

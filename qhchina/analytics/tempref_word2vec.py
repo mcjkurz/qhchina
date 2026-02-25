@@ -41,20 +41,29 @@ class TempRefWord2Vec(Word2Vec):
     This design places temporal variant embeddings in W, making them directly
     comparable with each other and with regular words for semantic change analysis.
     
-    Training uses balanced batch sampling - each batch contains equal numbers of
-    documents from each time period, ensuring fair representation regardless of
-    corpus sizes.
+    There are two ways to train the model:
+    1. Balanced batch sampling (default) - each batch contains equal numbers of
+       tokens from each time period, ensuring fair representation regardless of
+       corpus sizes.
+    2. Proportional batch sampling - each batch contains a proportion of
+       tokens from each time period; uses all data.
     
     Note:
         - Only supports Skip-gram (sg=1). CBOW is not supported.
         - Corpora must be UNTAGGED. Tagging is done automatically during training.
-        - Training does NOT start automatically. Call ``train()`` explicitly after
+        - Training does not start automatically. Call ``train()`` explicitly after
           initialization.
+    
+    Interpreting Results:
+        ``most_similar()`` on temporal variants (e.g., "民_宋") might return
+        suboptimal results given that temporal variants are only trained on period-specificsubsets of data.
+        Use ``calculate_semantic_change()`` instead, which compares similarity shifts
+        across periods to reveal genuine semantic drift.
     
     Args:
         sentences: Dictionary mapping time period labels to corpora. Each value must
-            be an iterable of tokenized sentences (list[list[str]] or ``LineSentenceFile``).
-            Format: ``{"label1": [["w1", "w2"], ...], "label2": LineSentenceFile("f.txt"), ...}``
+            be an iterable of tokenized sentences.
+            Format: ``{"label1": [["w1", "w2"], ...], "label2": LineSentenceFile("song.txt"), ...}``
         targets: List of target words to trace semantic change.
         sampling_strategy: How to sample from corpora during training:
             - "balanced" (default): Equal tokens from each corpus, stops at smallest corpus.
@@ -72,40 +81,42 @@ class TempRefWord2Vec(Word2Vec):
             Note: sg must be 1 (Skip-gram).
     
     Example:
-        Using in-memory sentences::
+        # Using in-memory sentences:
+        from qhchina.analytics import TempRefWord2Vec
         
-            from qhchina.analytics import TempRefWord2Vec
-            
-            # Tokenized sentences from 宋史 and 明史 (untagged)
-            song_sentences = [["太祖", "建隆", "元年", "正月"], ["民", "安", "其", "业"]]
-            ming_sentences = [["太祖", "洪武", "元年", "春"], ["民", "困", "于", "役"]]
-            
-            model = TempRefWord2Vec(
-                sentences={"宋": song_sentences, "明": ming_sentences},
-                targets=["民", "太祖"],
-                vector_size=100,
-                sg=1
-            )
-            model.train()
+        # Tokenized sentences from 宋史 and 明史 (untagged)
+        song_sentences = [["太祖", "建隆", "元年", "正月"], ["民", "安", "其", "业"]]
+        ming_sentences = [["太祖", "洪武", "元年", "春"], ["民", "困", "于", "役"]]
         
-        Streaming from text files::
+        model = TempRefWord2Vec(
+            sentences={"宋": song_sentences, "明": ming_sentences},
+            targets=["民", "太祖"],
+            vector_size=100,
+            sg=1
+        )
+        model.train()
         
-            from qhchina.analytics import TempRefWord2Vec, LineSentenceFile
-            
-            model = TempRefWord2Vec(
-                sentences={
-                    "宋": LineSentenceFile("songshi.txt"),
-                    "明": LineSentenceFile("mingshi.txt"),
-                },
-                targets=["民", "太祖"],
-                vector_size=100,
-                sg=1
-            )
-            model.train()
-            
-            # Analyze semantic change
-            model.most_similar("民_宋")  # Words similar to "民" in 宋史
-            model.most_similar("民_明")  # Words similar to "民" in 明史
+        # Streaming from text files:
+        from qhchina.analytics import TempRefWord2Vec, LineSentenceFile
+        
+        model = TempRefWord2Vec(
+            sentences={
+                "宋": LineSentenceFile("songshi.txt"),
+                "明": LineSentenceFile("mingshi.txt"),
+            },
+            targets=["民", "太祖"],
+            vector_size=100,
+            sg=1
+        )
+        model.train()
+        
+        # Analyze semantic change
+        changes = model.calculate_semantic_change("民")
+        
+        # most_similar on temporal variants is available, however each variant
+        # has been only trained on a period-specific subset of data
+        model.most_similar("民_宋")
+        model.most_similar("民_明")
     """
 
     def __init__(
@@ -119,14 +130,14 @@ class TempRefWord2Vec(Word2Vec):
         """
         Initialize TempRefWord2Vec.
         
-        Training does NOT start automatically. Call ``train()`` explicitly after
+        Training does not start automatically. Call ``train()`` explicitly after
         initialization to begin training.
         
         Args:
             sentences: Dictionary mapping time period labels to corpora.
                 Each value must be an iterable of tokenized sentences
                 (e.g. list[list[str]] or ``LineSentenceFile``).
-                Corpora must be UNTAGGED - tagging is done automatically during training.
+                Corpora must be untagged - tagging is done automatically during training.
             targets: List of target words to trace semantic change.
             sampling_strategy: How to sample from corpora during training.
                 "balanced" (default) or "proportional".
@@ -517,6 +528,9 @@ class TempRefWord2Vec(Word2Vec):
     def calculate_semantic_change(self, target_word: str, labels: list[str] | None = None) -> dict[str, list[tuple[str, float]]]:
         """
         Calculate semantic change by comparing cosine similarities across time periods.
+        
+        This is the recommended way to analyze temporal embeddings. It compares
+        cosine similarity shifts across periods.
         
         Args:
             target_word: Target word to analyze (must be one of the targets specified 
