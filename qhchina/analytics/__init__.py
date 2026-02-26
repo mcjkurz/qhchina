@@ -1,7 +1,7 @@
 """Analytics module for text and vector operations.
 
 This module provides tools for:
-- Word embeddings (Word2Vec, TempRefWord2Vec)
+- Word embeddings (Word2Vec, TempRefWord2Vec, DynamicWord2Vec)
 - Topic modeling (LDAGibbsSampler)
 - Stylometry and authorship attribution (Stylometry, compare_corpora)
 - Collocation analytics (find_collocates, cooc_matrix, plot_collocates)
@@ -16,8 +16,7 @@ Convenience imports:
 from ..utils import LineSentenceFile
 
 # Word embeddings
-from .word2vec import Word2Vec
-from .tempref_word2vec import TempRefWord2Vec
+from .word2vec import Word2Vec, TempRefWord2Vec, DynamicWord2Vec
 
 # Topic modeling
 from .topicmodels import LDAGibbsSampler
@@ -34,6 +33,7 @@ __all__ = [
     # Word embeddings
     'Word2Vec',
     'TempRefWord2Vec',
+    'DynamicWord2Vec',
     # Topic modeling
     'LDAGibbsSampler',
     # Stylometry

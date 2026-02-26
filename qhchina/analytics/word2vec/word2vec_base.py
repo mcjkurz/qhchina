@@ -2,10 +2,10 @@
 Word2Vec implementation for learning word embeddings.
 
 Provides CBOW and Skip-gram architectures for training word vectors from text corpora.
-Includes support for temporal semantic change analysis via TempRefWord2Vec.
 """
 
 import logging
+import pickle
 import numpy as np
 import threading
 from collections import Counter
@@ -13,10 +13,10 @@ from collections.abc import Callable, Iterable
 from queue import Queue
 from tqdm.auto import tqdm
 import time
-from .vectors import cosine_similarity
+from ..vectors import cosine_similarity
 from .word2vec_utils import word2vec_c
-from ..config import get_rng, resolve_seed
-from ..utils import iter_batches
+from ...config import get_rng, resolve_seed
+from ...utils import iter_batches
 
 logger = logging.getLogger("qhchina.analytics.word2vec")
 
@@ -1085,7 +1085,8 @@ class Word2Vec:
             'W': self.W,
             'W_prime': self.W_prime
         }
-        np.save(path, model_data, allow_pickle=True)
+        with open(path, 'wb') as f:
+            pickle.dump(model_data, f, protocol=pickle.HIGHEST_PROTOCOL)
     
     @classmethod
     def load(cls, path: str) -> 'Word2Vec':
@@ -1098,7 +1099,8 @@ class Word2Vec:
         Returns:
             Loaded Word2Vec model.
         """
-        model_data = np.load(path, allow_pickle=True).item()
+        with open(path, 'rb') as f:
+            model_data = pickle.load(f)
         
         # Get values with defaults if not found
         shrink_windows = model_data.get('shrink_windows', False)

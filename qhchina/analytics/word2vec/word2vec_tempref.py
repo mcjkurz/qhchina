@@ -13,18 +13,115 @@ This implementation is based on the Temporal Referencing approach described in:
 """
 
 import logging
+import pickle
 import numpy as np
 from collections import Counter
 from collections.abc import Iterable
-from .word2vec import Word2Vec
+from .word2vec_base import Word2Vec
 from .word2vec_utils import BalancedSentenceIterator, word2vec_c
-from .vectors import cosine_similarity
+from ..vectors import cosine_similarity
 
 logger = logging.getLogger("qhchina.analytics.tempref_word2vec")
 
 __all__ = [
     'TempRefWord2Vec',
 ]
+
+
+def _filter_words(
+    words: list[str],
+    filters: dict | None,
+    labels: list[str],
+    period_vocab_counts: dict,
+) -> list[str]:
+    """
+    Filter a list of candidate words according to the given filter criteria.
+
+    Args:
+        words: Candidate words to filter.
+        filters: Dict with zero or more of the following keys:
+            - ``min_word_count`` (int or tuple): Minimum corpus count per period.
+            - ``min_word_length`` (int): Minimum character length.
+            - ``stopwords`` (set): Words to exclude outright.
+        labels: Ordered list of period labels (must match period_vocab_counts keys).
+        period_vocab_counts: Dict mapping period label -> Counter of raw word counts.
+
+    Returns:
+        Filtered list of words (same order as input).
+
+    Raises:
+        ValueError: If unknown filter keys are supplied or tuple length mismatches.
+        TypeError: If ``min_word_count`` is not an int or tuple.
+    """
+    if not filters:
+        return words
+
+    valid_keys = {'min_word_count', 'min_word_length', 'stopwords', 'reference_words', 'vocab_top_n'}
+    bad_keys = set(filters) - valid_keys
+    if bad_keys:
+        raise ValueError(f"Unknown filter key(s): {bad_keys}. Valid keys: {valid_keys}")
+
+    # vocab_top_n: restrict to the union of top-N most frequent words per period
+    vocab_top_n = filters.get('vocab_top_n')
+    if vocab_top_n is not None:
+        if isinstance(vocab_top_n, int):
+            top_ns = [vocab_top_n] * len(labels)
+        elif isinstance(vocab_top_n, (tuple, list)):
+            if len(vocab_top_n) != len(labels):
+                raise ValueError(
+                    f"vocab_top_n tuple length ({len(vocab_top_n)}) must equal "
+                    f"the number of time slices ({len(labels)})"
+                )
+            top_ns = list(vocab_top_n)
+        else:
+            raise TypeError("vocab_top_n must be a positive int or a tuple/list of positive ints")
+        if any(n <= 0 for n in top_ns):
+            raise ValueError("All vocab_top_n values must be positive integers")
+        top_n_set = set()
+        for label, n in zip(labels, top_ns):
+            counter = period_vocab_counts.get(label, {})
+            top_n_set.update(w for w, _ in Counter(counter).most_common(n))
+        words = [w for w in words if w in top_n_set]
+
+    # reference_words: explicit whitelist (applied after vocab_top_n if both given)
+    ref_words = filters.get('reference_words')
+    if ref_words is not None:
+        ref_set = set(ref_words)
+        words = [w for w in words if w in ref_set]
+
+    # Resolve min_word_count into a per-period list
+    min_wc = filters.get('min_word_count')
+    if min_wc is None:
+        min_counts = None
+    elif isinstance(min_wc, int):
+        min_counts = [min_wc] * len(labels)
+    elif isinstance(min_wc, (tuple, list)):
+        if len(min_wc) != len(labels):
+            raise ValueError(
+                f"min_word_count tuple length ({len(min_wc)}) must equal "
+                f"the number of time slices ({len(labels)})"
+            )
+        min_counts = list(min_wc)
+    else:
+        raise TypeError("min_word_count must be an int or a tuple/list of ints")
+
+    min_len   = filters.get('min_word_length')
+    stopwords = filters.get('stopwords') or set()
+
+    result = []
+    for word in words:
+        if word in stopwords:
+            continue
+        if min_len is not None and len(word) < min_len:
+            continue
+        if min_counts is not None:
+            if any(
+                period_vocab_counts.get(label, {}).get(word, 0) < mc
+                for label, mc in zip(labels, min_counts)
+            ):
+                continue
+        result.append(word)
+    return result
 
 
 class TempRefWord2Vec(Word2Vec):
@@ -525,79 +622,108 @@ class TempRefWord2Vec(Word2Vec):
         """Check if a word is a temporal variant (e.g., '民_宋')."""
         return word in self.reverse_temporal_map
 
-    def calculate_semantic_change(self, target_word: str, labels: list[str] | None = None) -> dict[str, list[tuple[str, float]]]:
+    def calculate_semantic_change(
+        self,
+        word: str,
+        filters: dict | None = None,
+    ) -> dict[str, list[tuple[str, float]]]:
         """
         Calculate semantic change by comparing cosine similarities across time periods.
-        
+
         This is the recommended way to analyze temporal embeddings. It compares
-        cosine similarity shifts across periods.
-        
+        cosine similarity shifts for ``word`` across every adjacent pair of
+        periods stored in the model (in the order they were provided at initialisation).
+
         Args:
-            target_word: Target word to analyze (must be one of the targets specified 
+            word: Target word to analyze (must be one of the targets specified
                 during initialization).
-            labels: Time period labels (optional, defaults to labels from model initialization).
-        
+            filters: Optional dict to restrict which reference words are considered.
+                Supported keys:
+
+                - ``min_word_count`` (int or tuple): Minimum number of occurrences a
+                  word must have in **each** period to be included. Pass an int to use
+                  the same threshold for every period, or a tuple whose length equals
+                  the number of time slices to set per-period thresholds.
+                - ``min_word_length`` (int): Minimum character length of a word.
+                - ``stopwords`` (set): Words to exclude from the reference set.
+                - ``reference_words`` (list/set): Explicit whitelist of reference words.
+                - ``vocab_top_n`` (int): Only consider the union of the top-N most
+                  frequent words from each period's corpus.
+
         Returns:
-            Dict mapping transition names to lists of (word, change) tuples, sorted by 
-            change score (descending).
-        
+            Dict mapping transition names (e.g. ``"宋_to_明"``) to lists of
+            ``(word, change)`` tuples sorted by descending change score.
+
         Example:
-            changes = model.calculate_semantic_change("人民")
+            changes = model.calculate_semantic_change(
+                "人民",
+                filters={"vocab_top_n": 5000, "min_word_length": 2},
+            )
             for transition, word_changes in changes.items():
                 print(f"{transition}:")
-                print("Words moved towards:", word_changes[:5])  # Top 5 increases
-                print("Words moved away:", word_changes[-5:])   # Top 5 decreases
+                print("Words moved towards:", word_changes[:5])
+                print("Words moved away:", word_changes[-5:])
         """
-        # Use stored labels if not provided
-        if labels is None:
-            labels = self.labels
-        
-        # Validate that target_word is one of the tracked targets
-        if target_word not in self.targets:
-            raise ValueError(f"Target word '{target_word}' was not specified during model initialization. "
-                           f"Available targets: {self.targets}")
-        
-        results = {}
-        
-        # Get all words in vocabulary (excluding temporal variants)
-        all_words = [word for word in self.vocab.keys() 
-                    if word not in self.reverse_temporal_map]
-        
-        # Get embeddings for all words
-        all_word_vectors = np.array([self.get_vector(word) for word in all_words])
+        if word not in self.targets:
+            raise ValueError(
+                f"'{word}' was not specified as a target during model initialization. "
+                f"Available targets: {self.targets}"
+            )
 
-        # For each adjacent pair of time periods
+        labels = self.labels  # always use the stored order
+
+        # Candidate reference words: base forms only (no temporal variants)
+        candidate_words = [w for w in self.vocab if w not in self.reverse_temporal_map]
+
+        # Apply filters
+        candidate_words = _filter_words(candidate_words, filters, labels, self.period_vocab_counts)
+
+        if not candidate_words:
+            raise ValueError("No reference words remain after applying filters.")
+
+        results = {}
         for i in range(len(labels) - 1):
             from_period = labels[i]
-            to_period = labels[i+1]
-            transition = f"{from_period}_to_{to_period}"
-            
-            # Get temporal variants for the target word
-            from_variant = f"{target_word}_{from_period}"
-            to_variant = f"{target_word}_{to_period}"
-            
-            # Check if temporal variants exist in vocabulary
+            to_period   = labels[i + 1]
+            transition  = f"{from_period}_to_{to_period}"
+
+            from_variant = f"{word}_{from_period}"
+            to_variant   = f"{word}_{to_period}"
+
             if from_variant not in self.vocab or to_variant not in self.vocab:
-                logger.warning(f"{from_variant} or {to_variant} not found in vocabulary. Skipping transition {transition}.")
+                logger.warning(
+                    f"{from_variant} or {to_variant} not found in vocabulary. "
+                    f"Skipping transition {transition}."
+                )
                 continue
-            
-            # Get vectors for the target word in each period
+
+            # Only include words that actually appear in both adjacent periods.
+            # This ensures reference words are contextually grounded in the periods
+            # being compared, preventing spurious similarity scores.
+            from_counts = self.period_vocab_counts.get(from_period, {})
+            to_counts   = self.period_vocab_counts.get(to_period, {})
+            transition_words = [
+                w for w in candidate_words
+                if from_counts.get(w, 0) > 0 and to_counts.get(w, 0) > 0
+            ]
+
+            if not transition_words:
+                results[transition] = []
+                continue
+
+            transition_vectors = np.array([self.get_vector(w) for w in transition_words])
+
             from_vector = self.get_vector(from_variant).reshape(1, -1)
-            to_vector = self.get_vector(to_variant).reshape(1, -1)
-            
-            # Calculate cosine similarity for all words with the target word in each period
-            from_sims = cosine_similarity(from_vector, all_word_vectors)[0]
-            to_sims = cosine_similarity(to_vector, all_word_vectors)[0]
-            
-            # Calculate differences in similarity
+            to_vector   = self.get_vector(to_variant).reshape(1, -1)
+
+            from_sims = cosine_similarity(from_vector, transition_vectors)[0]
+            to_sims   = cosine_similarity(to_vector,   transition_vectors)[0]
             sim_diffs = to_sims - from_sims
-            
-            # Create word-change pairs and sort by change
-            word_changes = [(all_words[j], float(sim_diffs[j])) for j in range(len(all_words))]
+
+            word_changes = [(transition_words[j], float(sim_diffs[j])) for j in range(len(transition_words))]
             word_changes.sort(key=lambda x: x[1], reverse=True)
-            
             results[transition] = word_changes
-        
+
         return results
 
     def get_available_targets(self) -> list[str]:
@@ -693,8 +819,8 @@ class TempRefWord2Vec(Word2Vec):
         # Combine all data
         model_data.update(tempref_data)
         
-        # Save to file
-        np.save(path, model_data, allow_pickle=True)
+        with open(path, 'wb') as f:
+            pickle.dump(model_data, f, protocol=pickle.HIGHEST_PROTOCOL)
         if self.verbose:
             logger.info(f"TempRefWord2Vec model saved to {path}")
             logger.info(f"Saved data includes:")
@@ -723,7 +849,8 @@ class TempRefWord2Vec(Word2Vec):
         Raises:
             ValueError: If the file doesn't contain TempRefWord2Vec data.
         """
-        model_data = np.load(path, allow_pickle=True).item()
+        with open(path, 'rb') as f:
+            model_data = pickle.load(f)
         
         # Check if this is a TempRefWord2Vec model
         if model_data.get('model_type') != 'TempRefWord2Vec':

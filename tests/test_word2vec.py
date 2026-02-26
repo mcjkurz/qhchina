@@ -2,6 +2,7 @@
 Tests for qhchina.analytics.word2vec module.
 """
 import pytest
+import pickle
 import numpy as np
 import tempfile
 import os
@@ -633,7 +634,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_with_line_sentence_file(self, song_ming_corpora):
         """Test TempRefWord2Vec with LineSentenceFile corpora."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
         from collections import Counter
         
         # Find frequent common words
@@ -677,7 +678,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_with_in_memory_lists(self):
         """Test TempRefWord2Vec with in-memory sentence lists."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3", "context"]] * 100,
@@ -707,7 +708,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_save_load(self):
         """Test saving and loading TempRefWord2Vec model."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3"]] * 50,
@@ -749,7 +750,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_input_validation(self):
         """Test that invalid inputs raise appropriate errors."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2"]] * 10,
@@ -774,7 +775,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_base_word_count_equals_variant_sum(self):
         """Test that base word counts equal the sum of their temporal variant counts."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
         
         corpora = {
             "period1": [["target", "context1"]] * 30,
@@ -1489,7 +1490,7 @@ class TestTempRefWord2VecMultithreading:
     
     def test_tempref_multithreading(self):
         """Test TempRefWord2Vec with multiple workers produces valid results."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3"]] * 50,
@@ -1578,7 +1579,7 @@ class TestWord2VecRobustnessFixes:
 
     def test_tempref_sampling_strategy_persists_save_load(self):
         """TempRefWord2Vec must preserve sampling strategy on load."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
 
         corpora = {
             "period1": [["target", "x"]] * 20,
@@ -1612,7 +1613,7 @@ class TestWord2VecRobustnessFixes:
 
     def test_tempref_load_requires_sampling_strategy_field(self):
         """Loading should fail for model files missing _sampling_strategy."""
-        from qhchina.analytics.tempref_word2vec import TempRefWord2Vec
+        from qhchina.analytics.word2vec import TempRefWord2Vec
 
         corpora = {
             "period1": [["target", "x"]] * 10,
@@ -1632,14 +1633,16 @@ class TestWord2VecRobustnessFixes:
         )
         model.train()
 
-        with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
             temp_path = f.name
 
         try:
             model.save(temp_path)
-            payload = np.load(temp_path, allow_pickle=True).item()
+            with open(temp_path, 'rb') as f:
+                payload = pickle.load(f)
             payload.pop("_sampling_strategy", None)
-            np.save(temp_path, payload, allow_pickle=True)
+            with open(temp_path, 'wb') as f:
+                pickle.dump(payload, f)
 
             with pytest.raises(ValueError, match="missing '_sampling_strategy'"):
                 TempRefWord2Vec.load(temp_path)

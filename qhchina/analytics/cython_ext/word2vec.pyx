@@ -20,6 +20,7 @@ import numpy as np
 cimport numpy as np
 from libc.string cimport memset
 from libc.math cimport exp, log
+from libc.stdlib cimport malloc, free
 
 # Import PyCapsule at module level for extracting raw BLAS pointers
 from cpython.pycapsule cimport PyCapsule_GetPointer
@@ -849,3 +850,373 @@ cdef void train_batch_sg_temporal(
                     _compute_loss, running_loss
                 )
                 examples_trained[0] += 1
+
+
+# =============================================================================
+# DynamicWord2Vec Training with Temporal Regularization
+# =============================================================================
+
+cdef inline void apply_temporal_regularization(
+    REAL_t *U_all,
+    int T,
+    int t,
+    int vocab_size,
+    int vector_size,
+    UITYPE_t word_idx,
+    REAL_t temporal_lambda,
+    REAL_t alpha,
+) noexcept nogil:
+    """
+    Apply temporal L2 regularization to U[t, word_idx].
+
+    Gradient computation:
+    - Interior slices (0 < t < T-1): grad = λ * [2·U[t] - U[t-1] - U[t+1]]
+    - Left boundary (t=0): grad = λ * [U[t] - U[t+1]]
+    - Right boundary (t=T-1): grad = λ * [U[t] - U[t-1]]
+
+    The gradient is multiplied by the learning rate alpha and subtracted from U[t].
+
+    Args:
+        U_all: Flat array of all U embeddings [T * vocab_size * vector_size]
+        T: Number of time slices
+        t: Current time slice index
+        vocab_size: Vocabulary size
+        vector_size: Embedding dimensionality
+        word_idx: Word index being regularized
+        temporal_lambda: Regularization strength
+        alpha: Learning rate
+    """
+    cdef int d
+    cdef long long offset_t = (<long long>t * vocab_size + word_idx) * vector_size
+    cdef long long offset_prev, offset_next
+    cdef REAL_t grad_val
+    cdef REAL_t update_scale = temporal_lambda * alpha
+
+    if T == 1:
+        # Single time slice - no regularization
+        return
+
+    if t == 0:
+        # Left boundary: grad = λ * [U[t] - U[t+1]]
+        offset_next = (<long long>(t + 1) * vocab_size + word_idx) * vector_size
+        for d in range(vector_size):
+            grad_val = U_all[offset_t + d] - U_all[offset_next + d]
+            U_all[offset_t + d] -= update_scale * grad_val
+    elif t == T - 1:
+        # Right boundary: grad = λ * [U[t] - U[t-1]]
+        offset_prev = (<long long>(t - 1) * vocab_size + word_idx) * vector_size
+        for d in range(vector_size):
+            grad_val = U_all[offset_t + d] - U_all[offset_prev + d]
+            U_all[offset_t + d] -= update_scale * grad_val
+    else:
+        # Interior: grad = λ * [2·U[t] - U[t-1] - U[t+1]]
+        offset_prev = (<long long>(t - 1) * vocab_size + word_idx) * vector_size
+        offset_next = (<long long>(t + 1) * vocab_size + word_idx) * vector_size
+        for d in range(vector_size):
+            grad_val = 2.0 * U_all[offset_t + d] - U_all[offset_prev + d] - U_all[offset_next + d]
+            U_all[offset_t + d] -= update_scale * grad_val
+
+
+cdef void train_batch_sg_dynamic(
+    REAL_t *U_all,
+    REAL_t *V_all,
+    const int T,
+    const int vocab_size,
+    const int size,
+    UITYPE_t *indexes,
+    UITYPE_t *sentence_idx,
+    ITYPE_t *time_indices,
+    ITYPE_t *reduced_windows,
+    int num_sentences,
+    int window,
+    REAL_t alpha,
+    REAL_t *work,
+    unsigned long long *next_random,
+    UITYPE_t *alias_prob,
+    UITYPE_t *alias_index,
+    unsigned long long alias_vocab_size,
+    int negative,
+    REAL_t temporal_lambda,
+    bint temporal_reg_V,
+    const int _compute_loss,
+    REAL_t *running_loss,
+    long long *examples_trained,
+    unsigned char *seen_U,
+    UITYPE_t *touched_U_words,
+    ITYPE_t *touched_U_times,
+    int *n_touched_U,
+    unsigned char *seen_V,
+    UITYPE_t *touched_V_words,
+    ITYPE_t *touched_V_times,
+    int *n_touched_V,
+) noexcept nogil:
+    """
+    Train skip-gram with temporal regularization on a batch (nogil).
+
+    All skip-gram updates are performed first, then temporal regularization
+    is applied once per unique (word, time_slice) pair. This prevents
+    frequent words from receiving disproportionately more regularization.
+
+    The seen/touched buffers are pre-allocated by the caller:
+    - seen_U/seen_V: byte arrays of size T * vocab_size (dedup bitsets)
+    - touched_U/V_words + touched_U/V_times: parallel arrays for unique pairs
+    - n_touched_U/V: counters for how many unique pairs collected
+    """
+    cdef int sent_idx, i, j, k, t
+    cdef int idx_start, idx_end, ctx_start, ctx_end
+    cdef UITYPE_t center_idx, context_idx
+    cdef REAL_t *U_ptr
+    cdef REAL_t *V_ptr
+    cdef long long seen_offset
+
+    # --- Phase 1: Skip-gram updates + collect unique (word, t) pairs ---
+    for sent_idx in range(num_sentences):
+        idx_start = sentence_idx[sent_idx]
+        idx_end = sentence_idx[sent_idx + 1]
+        t = time_indices[sent_idx]
+
+        U_ptr = U_all + (<long long>t * vocab_size * size)
+        V_ptr = V_all + (<long long>t * vocab_size * size)
+        seen_offset = <long long>t * vocab_size
+
+        for i in range(idx_start, idx_end):
+            center_idx = indexes[i]
+
+            ctx_start = i - window + reduced_windows[i]
+            if ctx_start < idx_start:
+                ctx_start = idx_start
+            ctx_end = i + window + 1 - reduced_windows[i]
+            if ctx_end > idx_end:
+                ctx_end = idx_end
+
+            for j in range(ctx_start, ctx_end):
+                if j == i:
+                    continue
+
+                context_idx = indexes[j]
+
+                train_sg_pair(
+                    U_ptr, V_ptr, size,
+                    center_idx, context_idx,
+                    alpha, work, next_random,
+                    alias_prob, alias_index, alias_vocab_size, negative,
+                    _compute_loss, running_loss
+                )
+                examples_trained[0] += 1
+
+                # Track unique context words for V regularization
+                if temporal_lambda > 0.0 and temporal_reg_V:
+                    if seen_V[seen_offset + context_idx] == 0:
+                        seen_V[seen_offset + context_idx] = 1
+                        touched_V_words[n_touched_V[0]] = context_idx
+                        touched_V_times[n_touched_V[0]] = <ITYPE_t>t
+                        n_touched_V[0] += 1
+
+            # Track unique center words for U regularization
+            if temporal_lambda > 0.0:
+                if seen_U[seen_offset + center_idx] == 0:
+                    seen_U[seen_offset + center_idx] = 1
+                    touched_U_words[n_touched_U[0]] = center_idx
+                    touched_U_times[n_touched_U[0]] = <ITYPE_t>t
+                    n_touched_U[0] += 1
+
+    # --- Phase 2: Apply regularization once per unique (word, t) ---
+    if temporal_lambda > 0.0:
+        for k in range(n_touched_U[0]):
+            apply_temporal_regularization(
+                U_all, T, touched_U_times[k], vocab_size, size,
+                touched_U_words[k], temporal_lambda, alpha
+            )
+
+        if temporal_reg_V:
+            for k in range(n_touched_V[0]):
+                apply_temporal_regularization(
+                    V_all, T, touched_V_times[k], vocab_size, size,
+                    touched_V_words[k], temporal_lambda, alpha
+                )
+
+
+def train_batch_dynamic(
+    np.float32_t[:] U_flat,
+    np.float32_t[:] V_flat,
+    int T,
+    int vocab_size,
+    list sentences_with_time,
+    dict word2idx,
+    np.uint32_t[:] sample_ints,
+    np.uint32_t[:] alias_prob,
+    np.uint32_t[:] alias_index,
+    np.float32_t[:] work,
+    bint use_subsampling,
+    int window,
+    bint shrink_windows,
+    float alpha,
+    int negative,
+    float temporal_lambda,
+    bint temporal_reg_V,
+    unsigned long long random_seed,
+    bint compute_loss=True,
+):
+    """
+    Train DynamicWord2Vec on a batch of sentences with temporal information.
+
+    Temporal regularization is applied once per unique (word, time_slice) pair
+    per batch, not per token occurrence, to avoid frequency-dependent
+    regularization strength.
+
+    Args:
+        U_flat: Flattened U array [T * vocab_size * vector_size]
+        V_flat: Flattened V array [T * vocab_size * vector_size]
+        T: Number of time slices
+        vocab_size: Vocabulary size
+        sentences_with_time: List of (sentence, time_idx) tuples
+        word2idx: Word to index mapping
+        sample_ints: Subsampling thresholds
+        alias_prob: Alias method probability thresholds
+        alias_index: Alias method fallback indices
+        work: Pre-allocated work buffer
+        use_subsampling: Apply subsampling of frequent words
+        window: Context window size
+        shrink_windows: Randomly reduce window size per word
+        alpha: Learning rate
+        negative: Number of negative samples
+        temporal_lambda: Regularization strength
+        temporal_reg_V: Apply regularization to V embeddings
+        random_seed: LCG seed
+        compute_loss: Track loss during training
+
+    Returns:
+        (batch_loss, examples_trained, words_processed, final_random_state)
+    """
+    cdef int vector_size = len(U_flat) // (T * vocab_size)
+    cdef int num_sentences = len(sentences_with_time)
+    cdef int _compute_loss = 1 if compute_loss else 0
+    cdef unsigned long long alias_vocab_size = len(alias_prob)
+
+    # Get raw pointers
+    cdef REAL_t *U_ptr = &U_flat[0]
+    cdef REAL_t *V_ptr = &V_flat[0]
+    cdef UITYPE_t *sample_ints_ptr = &sample_ints[0]
+    cdef UITYPE_t *alias_prob_ptr = &alias_prob[0]
+    cdef UITYPE_t *alias_index_ptr = &alias_index[0]
+    cdef REAL_t *work_ptr = &work[0]
+
+    # Stack-allocated buffers for batch data
+    cdef UITYPE_t indexes[MAX_WORDS_IN_BATCH]
+    cdef UITYPE_t sentence_idx[MAX_WORDS_IN_BATCH + 1]
+    cdef ITYPE_t time_indices[MAX_WORDS_IN_BATCH]
+    cdef ITYPE_t reduced_windows[MAX_WORDS_IN_BATCH]
+
+    # State variables
+    cdef unsigned long long next_random = random_seed
+    cdef REAL_t running_loss = 0.0
+    cdef long long total_examples = 0
+    cdef long long total_words = 0
+
+    # Batch processing state
+    cdef int effective_words = 0
+    cdef int effective_sentences = 0
+    cdef int word_idx, time_idx
+    cdef int sent_global_idx
+    cdef int i
+    cdef PyObject *result
+
+    # Regularization dedup buffers (heap-allocated, vocab_size is runtime)
+    cdef long long seen_size = <long long>T * vocab_size
+    cdef unsigned char *seen_U = NULL
+    cdef UITYPE_t *touched_U_words = NULL
+    cdef ITYPE_t *touched_U_times = NULL
+    cdef int n_touched_U = 0
+    cdef unsigned char *seen_V = NULL
+    cdef UITYPE_t *touched_V_words = NULL
+    cdef ITYPE_t *touched_V_times = NULL
+    cdef int n_touched_V = 0
+
+    sentence_idx[0] = 0
+
+    for sent_global_idx in range(num_sentences):
+        sent_tuple = sentences_with_time[sent_global_idx]
+        sent = sent_tuple[0]
+        time_idx = sent_tuple[1]
+
+        if sent is None or len(sent) == 0:
+            continue
+
+        # Store time index for this sentence
+        time_indices[effective_sentences] = <ITYPE_t>time_idx
+
+        for token in sent:
+            result = PyDict_GetItemWithError(word2idx, token)
+            if result == NULL:
+                if PyErr_Occurred():
+                    raise
+                continue
+
+            word_idx = <int>PyLong_AsLong(<object>result)
+            total_words += 1
+
+            if use_subsampling:
+                if sample_ints_ptr[word_idx] < random_int32(&next_random):
+                    continue
+
+            indexes[effective_words] = <UITYPE_t>word_idx
+            effective_words += 1
+
+            if effective_words >= MAX_WORDS_IN_BATCH:
+                break
+
+        effective_sentences += 1
+        sentence_idx[effective_sentences] = effective_words
+
+        if effective_words >= MAX_WORDS_IN_BATCH:
+            break
+
+    if effective_words > 0 and effective_sentences > 0:
+        if shrink_windows:
+            for i in range(effective_words):
+                reduced_windows[i] = <ITYPE_t>(random_int32(&next_random) % window)
+        else:
+            memset(reduced_windows, 0, effective_words * cython.sizeof(ITYPE_t))
+
+        # Allocate dedup buffers for regularization
+        if temporal_lambda > 0.0:
+            seen_U = <unsigned char *>malloc(seen_size)
+            touched_U_words = <UITYPE_t *>malloc(MAX_WORDS_IN_BATCH * sizeof(UITYPE_t))
+            touched_U_times = <ITYPE_t *>malloc(MAX_WORDS_IN_BATCH * sizeof(ITYPE_t))
+            if seen_U == NULL or touched_U_words == NULL or touched_U_times == NULL:
+                free(seen_U); free(touched_U_words); free(touched_U_times)
+                raise MemoryError("Failed to allocate regularization buffers for U")
+            memset(seen_U, 0, seen_size)
+
+            if temporal_reg_V:
+                seen_V = <unsigned char *>malloc(seen_size)
+                touched_V_words = <UITYPE_t *>malloc(MAX_WORDS_IN_BATCH * sizeof(UITYPE_t))
+                touched_V_times = <ITYPE_t *>malloc(MAX_WORDS_IN_BATCH * sizeof(ITYPE_t))
+                if seen_V == NULL or touched_V_words == NULL or touched_V_times == NULL:
+                    free(seen_U); free(touched_U_words); free(touched_U_times)
+                    free(seen_V); free(touched_V_words); free(touched_V_times)
+                    raise MemoryError("Failed to allocate regularization buffers for V")
+                memset(seen_V, 0, seen_size)
+
+        try:
+            with nogil:
+                train_batch_sg_dynamic(
+                    U_ptr, V_ptr, T, vocab_size, vector_size,
+                    indexes, sentence_idx, time_indices, reduced_windows,
+                    effective_sentences, window, alpha,
+                    work_ptr, &next_random,
+                    alias_prob_ptr, alias_index_ptr, alias_vocab_size, negative,
+                    temporal_lambda, temporal_reg_V,
+                    _compute_loss, &running_loss, &total_examples,
+                    seen_U, touched_U_words, touched_U_times, &n_touched_U,
+                    seen_V, touched_V_words, touched_V_times, &n_touched_V,
+                )
+        finally:
+            free(seen_U)
+            free(touched_U_words)
+            free(touched_U_times)
+            free(seen_V)
+            free(touched_V_words)
+            free(touched_V_times)
+
+    return running_loss, total_examples, total_words, next_random

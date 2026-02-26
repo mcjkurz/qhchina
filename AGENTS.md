@@ -8,6 +8,7 @@
 |-----------|---------|
 | `qhchina/` | Main package |
 | `qhchina/analytics/` | Core analytics (LDA, Word2Vec, stylometry, collocations) |
+| `qhchina/analytics/word2vec/` | Word2Vec models (base, temporal referencing, dynamic) |
 | `qhchina/analytics/cython_ext/` | Cython extensions (`.pyx`) for performance |
 | `qhchina/preprocessing/` | Text segmentation (spaCy, Jieba, BERT, LLM backends) |
 | `qhchina/helpers/` | Utilities (fonts, text loading, stopwords) |
@@ -15,8 +16,9 @@
 
 ## Key Classes
 
-- **`Word2Vec`** (`analytics/word2vec.py`): Word embeddings with CBOW/Skip-gram.
-- **`TempRefWord2Vec`** (`analytics/word2vec.py`): Temporal semantic change analysis.
+- **`Word2Vec`** (`analytics/word2vec/word2vec_base.py`): Word embeddings with CBOW/Skip-gram.
+- **`TempRefWord2Vec`** (`analytics/word2vec/word2vec_tempref.py`): Temporal semantic change analysis.
+- **`DynamicWord2Vec`** (`analytics/word2vec/word2vec_dynamic.py`): Time-sliced diachronic embeddings.
 - **`LDAGibbsSampler`** (`analytics/topicmodels.py`): Topic modeling with Gibbs sampling.
 - **`Stylometry`** (`analytics/stylometry.py`): Authorship attribution, corpus comparison.
 - **`SegmentationWrapper`** (`preprocessing/segmentation.py`): Chinese text segmentation.
