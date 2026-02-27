@@ -7,6 +7,8 @@ from setuptools import setup, Extension, find_packages
 import os
 import sys
 import platform
+import tempfile
+import shutil
 import numpy
 
 try:
@@ -30,13 +32,65 @@ except ImportError:
             extension.sources = sources
         return extensions
 
+
+def _check_openmp():
+    """Try to compile a small program with OpenMP; return (compile_flags, link_flags) or None."""
+    from distutils.ccompiler import new_compiler
+    from distutils.errors import CompileError, LinkError
+
+    if platform.system() == "Windows":
+        candidates = [(["/openmp"], [])]
+    elif platform.system() == "Darwin":
+        candidates = [
+            (["-Xpreprocessor", "-fopenmp"], ["-lomp"]),
+            (["-fopenmp"], ["-fopenmp"]),
+        ]
+    else:
+        candidates = [(["-fopenmp"], ["-fopenmp"])]
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        src = os.path.join(tmpdir, "omp_test.c")
+        with open(src, "w") as f:
+            f.write('#include <omp.h>\nint main(void) { return omp_get_num_threads(); }\n')
+
+        compiler = new_compiler()
+        compiler.add_include_dir(numpy.get_include())
+
+        for comp_flags, link_flags in candidates:
+            try:
+                objs = compiler.compile([src], output_dir=tmpdir, extra_postargs=comp_flags)
+                compiler.link_executable(objs, os.path.join(tmpdir, "omp_test"),
+                                         extra_postargs=link_flags)
+                return comp_flags, link_flags
+            except (CompileError, LinkError):
+                continue
+    except Exception:
+        pass
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return None
+
+
 # Determine platform-specific compiler arguments
 extra_compile_args = []
 if platform.system() == "Windows":
-    extra_compile_args = ["/O2"]  # Optimization for Windows
+    extra_compile_args = ["/O2"]
 else:
-    # Unix-like systems (Linux, macOS)
     extra_compile_args = ["-O3"]
+
+# Detect OpenMP (used only for fisher extension)
+_omp = _check_openmp()
+if _omp is not None:
+    _omp_compile, _omp_link = _omp
+    fisher_compile_args = extra_compile_args + _omp_compile
+    fisher_link_args = _omp_link
+    print("setup.py: OpenMP detected — fisher extension will use parallel loops")
+else:
+    fisher_compile_args = extra_compile_args
+    fisher_link_args = []
+    print("setup.py: OpenMP not available — fisher extension will use single-threaded loops")
 
 # Use relative paths for all sources
 extensions = [
@@ -66,7 +120,8 @@ extensions = [
         sources=["qhchina/analytics/cython_ext/fisher.pyx"],
         include_dirs=[numpy.get_include()],
         language="c",
-        extra_compile_args=extra_compile_args,
+        extra_compile_args=fisher_compile_args,
+        extra_link_args=fisher_link_args,
     )
 ]
 

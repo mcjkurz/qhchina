@@ -17,6 +17,7 @@ rather than the full combinatorial support.
 """
 import numpy as np
 cimport numpy as np
+from cython.parallel import prange
 from libc.math cimport lgamma, exp, log, INFINITY
 from libc.math cimport llround
 from libc.stdint cimport int64_t
@@ -357,16 +358,15 @@ def batch_fisher_exact(np.int64_t[::1] a_arr, np.int64_t[::1] b_arr,
     pvals_np = np.empty(n, dtype=np.float64)
     cdef double[::1] pvals = pvals_np
 
-    with nogil:
-        for i in range(n):
-            if mode == 0:
-                pvals[i] = _fisher_twosided(a_arr[i], b_arr[i],
-                                            c_arr[i], d_arr[i])
-            elif mode == 1:
-                pvals[i] = _fisher_less(a_arr[i], b_arr[i],
+    for i in prange(n, nogil=True):
+        if mode == 0:
+            pvals[i] = _fisher_twosided(a_arr[i], b_arr[i],
                                         c_arr[i], d_arr[i])
-            else:
-                pvals[i] = _fisher_greater(a_arr[i], b_arr[i],
-                                           c_arr[i], d_arr[i])
+        elif mode == 1:
+            pvals[i] = _fisher_less(a_arr[i], b_arr[i],
+                                    c_arr[i], d_arr[i])
+        else:
+            pvals[i] = _fisher_greater(a_arr[i], b_arr[i],
+                                       c_arr[i], d_arr[i])
 
     return pvals_np

@@ -8,7 +8,7 @@ import logging
 import pickle
 import numpy as np
 import threading
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Iterable
 from queue import Queue
 from tqdm.auto import tqdm
@@ -492,15 +492,20 @@ class Word2Vec:
         if total_words == 0:
             return sample_ints
         
+        # Build counts array ordered by vocab index
+        V = len(self.vocab)
+        counts = np.empty(V, dtype=np.float64)
         for word, idx in self.vocab.items():
-            word_freq = self.word_counts[word] / total_words
-            # Google/Gensim formula: keep_prob = sqrt(t/f) + t/f
-            keep_prob = np.sqrt(self.sample / word_freq) + (self.sample / word_freq)
-            keep_prob = min(keep_prob, 1.0)
-            
-            # Convert to uint32 threshold: word is kept if threshold >= random
-            # So threshold = keep_prob * (2^32 - 1)
-            sample_ints[idx] = min(np.uint32(keep_prob * 4294967295.0), np.uint32(4294967295))
+            counts[idx] = self.word_counts[word]
+        
+        # Google/Gensim formula: keep_prob = sqrt(t/f) + t/f
+        word_freq = counts / total_words
+        t_over_f = self.sample / word_freq
+        keep_prob = np.sqrt(t_over_f) + t_over_f
+        np.clip(keep_prob, 0.0, 1.0, out=keep_prob)
+        
+        # Convert to uint32 thresholds: word is kept if threshold >= random
+        sample_ints = (keep_prob * 4294967295.0).clip(0, 4294967295).astype(np.uint32)
         
         return sample_ints
     
@@ -721,7 +726,6 @@ class Word2Vec:
         epoch_examples = 0
         epoch_words = 0
         unfinished_workers = self.workers
-        LOSS_HISTORY_SIZE = 100
         
         while unfinished_workers > 0:
             result = progress_queue.get()
@@ -737,8 +741,6 @@ class Word2Vec:
             if batch_examples > 0 and batch_loss > 0:
                 batch_avg_loss = batch_loss / batch_examples
                 recent_losses.append(batch_avg_loss)
-                if len(recent_losses) > LOSS_HISTORY_SIZE:
-                    recent_losses.pop(0)
             
             if progress_bar is not None:
                 recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
@@ -815,7 +817,7 @@ class Word2Vec:
         total_loss = 0.0
         examples_processed_total = 0
         total_example_count = 0
-        recent_losses = []
+        recent_losses = deque(maxlen=100)
         
         # Estimate total examples if needed for learning rate decay
         examples_per_epoch = None
@@ -1013,12 +1015,10 @@ class Word2Vec:
         else:
             sim = cosine_similarity(word_vec, self.W).flatten()
         
-        most_similar_words = []
-        for idx in (-sim).argsort():
-            if idx != word_idx and len(most_similar_words) < topn:
-                most_similar_words.append((self.index2word[idx], float(sim[idx])))
-        
-        return most_similar_words
+        k = min(topn + 1, len(sim))
+        top_candidates = np.argpartition(-sim, k)[:k]
+        top_sorted = top_candidates[np.argsort(-sim[top_candidates])]
+        return [(self.index2word[i], float(sim[i])) for i in top_sorted if i != word_idx][:topn]
 
     def similarity(
         self, 

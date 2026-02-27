@@ -401,12 +401,15 @@ def most_similar(
     if callable(metric):
         similarity_func = metric
     elif metric == 'cosine':
-        similarity_func = cosine_similarity
+        similarity_func = None
     else:
         raise ValueError("metric must be 'cosine' or a callable function")
     
-    # Calculate similarities
-    similarities = [similarity_func(target_vector, vec) for vec in vectors]
+    if similarity_func is None:
+        target_2d = np.asarray(target_vector).reshape(1, -1)
+        similarities = sklearn_cosine_similarity(target_2d, vectors).ravel().tolist()
+    else:
+        similarities = [similarity_func(target_vector, vec) for vec in vectors]
     
     # Create pairs of (index/label, similarity)
     if labels:

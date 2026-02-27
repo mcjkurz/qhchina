@@ -84,22 +84,36 @@ class DynamicWord2Vec(Word2Vec):
     """
     Word2Vec with time-sliced embeddings for diachronic semantic analysis.
 
-    Maintains separate embedding matrices U[t] and V[t] for each time slice t
-    with a shared vocabulary.  Two training modes are available:
+    Maintains separate embedding matrices $U^{(t)}$ and $V^{(t)}$
+    for each time slice *t* with a shared vocabulary.  Two training modes are
+    available:
 
     - **joint** (default): All periods train simultaneously with interleaved
-      batches.  Temporal ℓ2 regularization pulls adjacent slices together.
-      Optional Procrustes alignment after training removes residual rotational
-      drift between slices.
+      batches.  Temporal ℓ₂ regularization pulls adjacent slices together
+      (see below).  Optional Procrustes alignment after training removes
+      residual rotational drift between slices.
     - **sequential**: Each period is trained in order, initialising from the
       previous period's trained embeddings (Kim et al. 2014).  Alignment is
       implicit via the initialisation chain; no regularisation or Procrustes
       is needed.
 
-    Architecture:
-        - U: Center/input embeddings [T, vocab_size, vector_size]
-        - V: Context/output embeddings [T, vocab_size, vector_size]
-        - Shared vocabulary across all time slices
+    **Temporal regularization (joint mode):**
+    The standard skip-gram loss is augmented with an ℓ₂ penalty that
+    encourages embeddings in adjacent time slices to stay close:
+
+    $$\\mathcal{L} = \\mathcal{L}_{\\text{SG}} + \\lambda \\sum_{t=1}^{T-1} \\| U^{(t)} - U^{(t-1)} \\|_F^2$$
+
+    where $\\mathcal{L}_{\\text{SG}}$ is the skip-gram negative sampling
+    objective, $\\lambda$ is ``temporal_lambda``, and $\\| \\cdot \\|_F$
+    is the Frobenius norm.  When ``temporal_reg_V=True``, the same penalty
+    is applied to the context matrix $V$.  Regularization is applied once
+    per unique (word, time) pair per batch to avoid frequency-dependent
+    regularization strength.
+
+    **Architecture:**
+    - U: Center/input embeddings [T, vocab_size, vector_size]
+    - V: Context/output embeddings [T, vocab_size, vector_size]
+    - Shared vocabulary across all time slices
 
     Args:
         sentences: Dictionary mapping time period labels to corpora. Each value must
@@ -693,12 +707,10 @@ class DynamicWord2Vec(Word2Vec):
         else:
             sim = cosine_similarity(word_vec, self.U[t]).flatten()
 
-        most_similar_words = []
-        for idx in (-sim).argsort():
-            if idx != word_idx and len(most_similar_words) < topn:
-                most_similar_words.append((self.index2word[idx], float(sim[idx])))
-
-        return most_similar_words
+        k = min(topn + 1, len(sim))
+        top_candidates = np.argpartition(-sim, k)[:k]
+        top_sorted = top_candidates[np.argsort(-sim[top_candidates])]
+        return [(self.index2word[i], float(sim[i])) for i in top_sorted if i != word_idx][:topn]
 
     def calculate_temporal_drift(self, word: str) -> np.ndarray:
         """
