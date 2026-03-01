@@ -409,23 +409,23 @@ class TestFindSharedSequences:
 
     def test_basic_cross_corpus(self):
         from qhchina.analytics.textreuse import find_shared_sequences
-        texts_a = ["天地玄黄宇宙洪荒日月盈昃"]
-        texts_b = ["天地玄黄宇宙洪荒"]
-        result = find_shared_sequences(texts_a, texts_b, n=3, min_length=5, min_similarity=0.8)
+        corpus_a = [list("天地玄黄宇宙洪荒日月盈昃")]
+        corpus_b = [list("天地玄黄宇宙洪荒")]
+        result = find_shared_sequences(corpus_a, corpus_b, n=3, min_length=5, min_similarity=0.8)
         assert isinstance(result, pd.DataFrame)
         assert len(result) > 0
         assert result.iloc[0]['similarity'] >= 0.8
 
     def test_within_corpus(self):
         from qhchina.analytics.textreuse import find_shared_sequences
-        texts = ["天地玄黄宇宙洪荒", "天地玄黄日月盈昃"]
-        result = find_shared_sequences(texts, n=2, min_length=3, min_similarity=0.8)
+        corpus = [list("天地玄黄宇宙洪荒"), list("天地玄黄日月盈昃")]
+        result = find_shared_sequences(corpus, n=2, min_length=3, min_similarity=0.8)
         assert isinstance(result, pd.DataFrame)
 
     def test_no_corpus_b_all_pairs(self):
         from qhchina.analytics.textreuse import find_shared_sequences
-        texts = ["ABCDEFGH", "ABCDEFIJ", "XXXXXXXXY"]
-        result = find_shared_sequences(texts, n=3, min_length=3, min_similarity=0.7)
+        corpus = [list("ABCDEFGH"), list("ABCDEFIJ"), list("XXXXXXXXY")]
+        result = find_shared_sequences(corpus, n=3, min_length=3, min_similarity=0.7)
         assert isinstance(result, pd.DataFrame)
         if len(result) > 0:
             assert all(result['doc_a'] < result['doc_b']) or True
@@ -445,9 +445,9 @@ class TestFindSharedSequences:
 
     def test_as_list(self):
         from qhchina.analytics.textreuse import find_shared_sequences
-        texts_a = ["天地玄黄宇宙洪荒"]
-        texts_b = ["天地玄黄宇宙洪荒"]
-        result = find_shared_sequences(texts_a, texts_b, n=3, min_length=3,
+        corpus_a = [list("天地玄黄宇宙洪荒")]
+        corpus_b = [list("天地玄黄宇宙洪荒")]
+        result = find_shared_sequences(corpus_a, corpus_b, n=3, min_length=3,
                                        min_similarity=0.8, as_dataframe=False)
         assert isinstance(result, list)
         if result:
@@ -456,31 +456,41 @@ class TestFindSharedSequences:
 
     def test_output_columns(self):
         from qhchina.analytics.textreuse import find_shared_sequences
-        texts_a = ["天地玄黄宇宙洪荒"]
-        texts_b = ["天地玄黄宇宙洪荒"]
-        result = find_shared_sequences(texts_a, texts_b, n=3, min_length=3)
+        corpus_a = [list("天地玄黄宇宙洪荒")]
+        corpus_b = [list("天地玄黄宇宙洪荒")]
+        result = find_shared_sequences(corpus_a, corpus_b, n=3, min_length=3)
         expected_cols = {'doc_a', 'doc_b', 'pos_a', 'pos_b', 'length',
                         'similarity', 'passage_a', 'passage_b'}
         assert expected_cols == set(result.columns)
 
     def test_exact_match_similarity_1(self):
         from qhchina.analytics.textreuse import find_shared_sequences
-        text = "天地玄黄宇宙洪荒日月盈昃"
-        result = find_shared_sequences([text], [text], n=3, min_length=5, min_similarity=0.9)
+        doc = list("天地玄黄宇宙洪荒日月盈昃")
+        result = find_shared_sequences([doc], [doc], n=3, min_length=5, min_similarity=0.9)
         assert len(result) > 0
         assert result.iloc[0]['similarity'] == 1.0
 
     def test_invalid_n_raises(self):
         from qhchina.analytics.textreuse import find_shared_sequences
         with pytest.raises(ValueError, match="n must be"):
-            find_shared_sequences(["abc"], ["abc"], n=0)
+            find_shared_sequences([list("abc")], [list("abc")], n=0)
 
     def test_invalid_min_similarity_raises(self):
         from qhchina.analytics.textreuse import find_shared_sequences
         with pytest.raises(ValueError, match="min_similarity"):
-            find_shared_sequences(["abc"], ["abc"], min_similarity=0.0)
+            find_shared_sequences([list("abc")], [list("abc")], min_similarity=0.0)
         with pytest.raises(ValueError, match="min_similarity"):
-            find_shared_sequences(["abc"], ["abc"], min_similarity=1.5)
+            find_shared_sequences([list("abc")], [list("abc")], min_similarity=1.5)
+
+    def test_rejects_raw_string(self):
+        from qhchina.analytics.textreuse import find_shared_sequences
+        with pytest.raises(TypeError, match="corpus must be"):
+            find_shared_sequences("天地玄黄", "天地玄黄")
+
+    def test_rejects_list_of_strings(self):
+        from qhchina.analytics.textreuse import find_shared_sequences
+        with pytest.raises(TypeError, match="Each document must be"):
+            find_shared_sequences(["天地玄黄", "宇宙洪荒"])
 
 
 # =============================================================================

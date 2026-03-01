@@ -7,9 +7,9 @@ Uses a seed-and-extend algorithm (similar to BLAST in bioinformatics):
 3. Build an inverted index to find candidate matching positions
 4. Merge nearby seeds and verify with banded edit distance
 
-Corpus input is flexible: a single raw string, a list of raw strings,
-or a list of pre-tokenized documents (list[list[str]]). For raw strings,
-each character is treated as a token.
+Each corpus is a ``list[list[str]]`` — a list of tokenized documents.
+For character-level analysis of raw strings, convert with
+``[list(text) for text in raw_texts]``.
 
 Requires Cython extensions to be compiled (see setup.py).
 """
@@ -31,34 +31,19 @@ __all__ = [
 _RESULT_COLUMNS = ['doc_a', 'doc_b', 'pos_a', 'pos_b', 'length', 'similarity', 'passage_a', 'passage_b']
 
 
-def _normalize_corpus(corpus):
-    """
-    Normalize corpus input to ``list[list[str]]``.
-
-    Accepted formats:
-
-    - ``str`` -- single raw document (each character becomes a token).
-    - ``list[str]`` -- multiple raw documents (each character becomes a token).
-    - ``list[list[str]]`` -- multiple pre-tokenized documents (used as-is).
-
-    A single pre-tokenized document must be wrapped explicitly:
-    ``[["tok1", "tok2", ...]]``.
-    """
-    if isinstance(corpus, str):
-        return [list(corpus)]
-
-    docs = []
-    for item in corpus:
-        if isinstance(item, str):
-            docs.append(list(item))
-        elif isinstance(item, list):
-            docs.append(item)
-        else:
+def _validate_corpus(corpus):
+    """Validate that *corpus* is a ``list[list[str]]`` and return it."""
+    if not isinstance(corpus, list):
+        raise TypeError(
+            f"corpus must be a list[list[str]], got {type(corpus).__name__}"
+        )
+    for i, doc in enumerate(corpus):
+        if not isinstance(doc, list):
             raise TypeError(
-                f"Each corpus element must be a str or list[str], "
-                f"got {type(item).__name__}"
+                f"Each document must be a list[str], "
+                f"but document {i} is {type(doc).__name__}"
             )
-    return docs
+    return corpus
 
 
 def _build_token_vocab(docs):
@@ -83,8 +68,8 @@ def _encode_docs(docs, token_vocab):
 
 
 def find_shared_sequences(
-    corpus_a: str | list[str] | list[list[str]],
-    corpus_b: str | list[str] | list[list[str]] | None = None,
+    corpus_a: list[list[str]],
+    corpus_b: list[list[str]] | None = None,
     n: int = 5,
     min_length: int = 10,
     max_gap: int | None = None,
@@ -100,30 +85,23 @@ def find_shared_sequences(
     banded edit distance. This allows fuzzy matching (insertions, deletions,
     substitutions) while remaining fast at scale.
 
-    Each corpus argument accepts three formats:
-
-    - ``str`` -- a single raw document (each character becomes a token).
-    - ``list[str]`` -- multiple raw documents (each character becomes a token).
-    - ``list[list[str]]`` -- multiple pre-tokenized documents.
-
-    To pass a single pre-tokenized document, wrap it in an outer list:
-    ``[["tok1", "tok2", ...]]``.
+    Each corpus is a ``list[list[str]]`` — a list of tokenized documents.
+    For character-level analysis of raw strings, convert with
+    ``[list(text) for text in raw_texts]``.
 
     Args:
-        corpus_a: First corpus. A raw string, a list of raw strings
-            (``list[str]``), or a list of tokenized documents
+        corpus_a: First corpus as a list of tokenized documents
             (``list[list[str]]``).
-        corpus_b: Second corpus (same formats as *corpus_a*). If None,
+        corpus_b: Second corpus (same format as *corpus_a*). If None,
             finds shared sequences within corpus_a (all-pairs comparison).
         n (int): N-gram size for seeding. Smaller values find more matches
             but are slower. Default 5.
-        min_length (int): Minimum passage length (in tokens/characters) to
-            report. Default 10.
+        min_length (int): Minimum passage length (in tokens) to report.
+            Default 10.
         max_gap (int | None): Maximum gap between consecutive seeds to merge
             into one passage candidate. If None, defaults to ``n + 1``, which
-            tolerates a single-character substitution (one substitution
-            destroys ``n`` consecutive seeds, creating a gap of ``n``).
-            Default None.
+            tolerates a single-token substitution (one substitution destroys
+            ``n`` consecutive seeds, creating a gap of ``n``). Default None.
         min_similarity (float): Minimum similarity score (0-1) for a passage
             to be reported. Computed as ``1 - distance / max_length``.
             Default 0.8.
@@ -146,16 +124,18 @@ def find_shared_sequences(
             - **passage_b** (str): Matched text from document B.
 
     Examples:
-        Compare two corpora of raw strings:
+        Character-level comparison of raw strings:
 
         >>> from qhchina.analytics import find_shared_sequences
-        >>> texts_a = ["天地玄黄宇宙洪荒", "日月盈昃辰宿列张"]
-        >>> texts_b = ["天地玄黄宇宙洪荒日月", "寒来暑往秋收冬藏"]
-        >>> find_shared_sequences(texts_a, texts_b, n=3, min_length=5)
+        >>> corpus_a = [list("天地玄黄宇宙洪荒"), list("日月盈昃辰宿列张")]
+        >>> corpus_b = [list("天地玄黄宇宙洪荒日月"), list("寒来暑往秋收冬藏")]
+        >>> find_shared_sequences(corpus_a, corpus_b, n=3, min_length=5)
 
-        Compare two single strings directly:
+        Pre-tokenized documents:
 
-        >>> find_shared_sequences("天地玄黄宇宙洪荒", "天地玄黄宇宙日月", n=3, min_length=5)
+        >>> doc_a = [["天地", "玄黄", "宇宙", "洪荒", "日月", "盈昃"]]
+        >>> doc_b = [["天地", "玄黄", "宇宙", "洪荒", "寒来", "暑往"]]
+        >>> find_shared_sequences(doc_a, doc_b, n=2, min_length=3)
     """
     if n < 1:
         raise ValueError(f"n must be >= 1, got {n}")
@@ -170,10 +150,10 @@ def find_shared_sequences(
     if max_distance is None:
         max_distance = max(1, int((1.0 - min_similarity) * min_length))
 
-    docs_a = _normalize_corpus(corpus_a)
+    docs_a = _validate_corpus(corpus_a)
     cross_corpus = corpus_b is not None
     if cross_corpus:
-        docs_b = _normalize_corpus(corpus_b)
+        docs_b = _validate_corpus(corpus_b)
     else:
         docs_b = []
 
