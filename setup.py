@@ -61,8 +61,15 @@ extensions = [
         extra_compile_args=extra_compile_args,
     ),
     Extension(
-        "qhchina.analytics.cython_ext.fisher",
-        sources=["qhchina/analytics/cython_ext/fisher.pyx"],
+        "qhchina.analytics.cython_ext.statistics",
+        sources=["qhchina/analytics/cython_ext/statistics.pyx"],
+        include_dirs=[numpy.get_include()],
+        language="c",
+        extra_compile_args=extra_compile_args,
+    ),
+    Extension(
+        "qhchina.analytics.cython_ext.textreuse",
+        sources=["qhchina/analytics/cython_ext/textreuse.pyx"],
         include_dirs=[numpy.get_include()],
         language="c",
         extra_compile_args=extra_compile_args,

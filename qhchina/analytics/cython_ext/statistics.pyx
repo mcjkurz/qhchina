@@ -5,21 +5,30 @@
 # cython: initializedcheck=False
 # cython: infer_types=True
 """
-Batch Fisher's exact test for 2x2 contingency tables.
+Batch statistical tests for 2x2 contingency tables.
 
-Computes two-sided, less, or greater p-values for N tables,
-entirely in C with the GIL released. Uses lgamma for log-factorial
-computation to handle arbitrarily large table margins.
+Provides vectorised Fisher's exact test, Pearson's chi-squared test,
+and log-likelihood ratio (G2) test, all operating on N independent
+2x2 tables entirely in C with the GIL released.
 
-Uses early-termination and mode-gap skipping so that per-table cost
-scales with the *effective* support (where probability mass lives)
-rather than the full combinatorial support.
+Fisher's exact test uses lgamma for log-factorial computation to handle
+arbitrarily large table margins, with early-termination and mode-gap
+skipping so that per-table cost scales with the *effective* support.
+
+Chi-squared and G2 use scipy's chdtrc (chi-squared survival function)
+via the Cython-callable C interface for nogil p-value computation.
 """
 import numpy as np
 cimport numpy as np
-from libc.math cimport lgamma, exp, log, INFINITY
+from libc.math cimport lgamma, exp, log, fabs, INFINITY
 from libc.math cimport llround
 from libc.stdint cimport int64_t
+from scipy.special.cython_special cimport chdtrc
+
+
+# ===========================================================================
+# Fisher's exact test internals
+# ===========================================================================
 
 cdef inline long long _maxn():
     """Find the largest N for which lgamma-based log-factorial is accurate."""
@@ -122,9 +131,6 @@ cdef double _fisher_twosided(int64_t a, int64_t b, int64_t c, int64_t d) noexcep
     sr = 0.0
 
     if <double>R1 * <double>C1 < <double>a * <double>N:
-        # a is right of the expected value (a > E[a] = R1*C1/N).
-        # Opposite side (left): walk from min(a-1, mode) down to k_min.
-        # Skip k where P(k) > P(a), i.e. where pi << pa.
         for k in range(min(a - 1, mode_k), k_min - 1, -1):
             pi = _log_k_terms(k, R1, C1, R2)
             if pi < pa_tol:
@@ -134,8 +140,6 @@ cdef double _fisher_twosided(int64_t a, int64_t b, int64_t c, int64_t d) noexcep
                 break
             sl = st_new
 
-        # Same side (right): walk from a+1 up to k_max.
-        # P decreases monotonically away from observed, early-terminate.
         for k in range(a + 1, k_max + 1):
             pi = _log_k_terms(k, R1, C1, R2)
             st_new = sr + exp(pa - pi)
@@ -144,8 +148,6 @@ cdef double _fisher_twosided(int64_t a, int64_t b, int64_t c, int64_t d) noexcep
             sr = st_new
 
     else:
-        # a is left of or at the expected value.
-        # Same side (left): walk from a-1 down to k_min.
         for k in range(a - 1, k_min - 1, -1):
             pi = _log_k_terms(k, R1, C1, R2)
             st_new = sl + exp(pa - pi)
@@ -153,8 +155,6 @@ cdef double _fisher_twosided(int64_t a, int64_t b, int64_t c, int64_t d) noexcep
                 break
             sl = st_new
 
-        # Opposite side (right): walk from max(a+1, mode) up to k_max.
-        # Skip k where P(k) > P(a).
         for k in range(max(a + 1, mode_k), k_max + 1):
             pi = _log_k_terms(k, R1, C1, R2)
             if pi < pa_tol:
@@ -207,7 +207,6 @@ cdef double _fisher_less(int64_t a, int64_t b, int64_t c, int64_t d) noexcept no
     mc = _margin_constant(R1, R2, C1, N)
 
     if a - k_min <= k_max - a:
-        # Sum left tail directly: P(a) + P(a-1) + ... + P(k_min)
         s = 1.0
         for k in range(a - 1, k_min - 1, -1):
             pi = _log_k_terms(k, R1, C1, R2)
@@ -217,7 +216,6 @@ cdef double _fisher_less(int64_t a, int64_t b, int64_t c, int64_t d) noexcept no
             s = s_new
         pval = s * exp(mc - pa)
     else:
-        # Sum right tail and complement: 1 - [P(a+1) + ... + P(k_max)]
         s = 0.0
         for k in range(a + 1, k_max + 1):
             pi = _log_k_terms(k, R1, C1, R2)
@@ -267,7 +265,6 @@ cdef double _fisher_greater(int64_t a, int64_t b, int64_t c, int64_t d) noexcept
     mc = _margin_constant(R1, R2, C1, N)
 
     if k_max - a <= a - k_min:
-        # Sum right tail directly: P(a) + P(a+1) + ... + P(k_max)
         s = 1.0
         for k in range(a + 1, k_max + 1):
             pi = _log_k_terms(k, R1, C1, R2)
@@ -277,7 +274,6 @@ cdef double _fisher_greater(int64_t a, int64_t b, int64_t c, int64_t d) noexcept
             s = s_new
         pval = s * exp(mc - pa)
     else:
-        # Sum left tail and complement: 1 - [P(k_min) + ... + P(a-1)]
         s = 0.0
         for k in range(a - 1, k_min - 1, -1):
             pi = _log_k_terms(k, R1, C1, R2)
@@ -293,6 +289,100 @@ cdef double _fisher_greater(int64_t a, int64_t b, int64_t c, int64_t d) noexcept
         pval = 1.0
     return pval
 
+
+# ===========================================================================
+# Chi-squared test internals
+# ===========================================================================
+
+cdef inline double _chi2_stat(int64_t a, int64_t b, int64_t c, int64_t d,
+                              int correction) noexcept nogil:
+    """
+    Pearson's chi-squared statistic for a single 2x2 table.
+
+    With Yates' continuity correction when correction=1.
+    Returns NaN if any expected value is zero.
+    """
+    cdef double N = <double>(a + b + c + d)
+    cdef double R1 = <double>(a + b)
+    cdef double R2 = <double>(c + d)
+    cdef double C1 = <double>(a + c)
+    cdef double C2 = <double>(b + d)
+    cdef double E_a, E_b, E_c, E_d
+    cdef double diff, yates, chi2
+
+    if N == 0.0:
+        return NAN_VAL
+
+    E_a = R1 * C1 / N
+    E_b = R1 * C2 / N
+    E_c = R2 * C1 / N
+    E_d = R2 * C2 / N
+
+    if E_a == 0.0 or E_b == 0.0 or E_c == 0.0 or E_d == 0.0:
+        return NAN_VAL
+
+    yates = 0.5 if correction else 0.0
+
+    chi2 = 0.0
+    diff = fabs(<double>a - E_a) - yates
+    if diff > 0.0:
+        chi2 += diff * diff / E_a
+    diff = fabs(<double>b - E_b) - yates
+    if diff > 0.0:
+        chi2 += diff * diff / E_b
+    diff = fabs(<double>c - E_c) - yates
+    if diff > 0.0:
+        chi2 += diff * diff / E_c
+    diff = fabs(<double>d - E_d) - yates
+    if diff > 0.0:
+        chi2 += diff * diff / E_d
+
+    return chi2
+
+
+# ===========================================================================
+# Log-likelihood ratio (G2) internals
+# ===========================================================================
+
+cdef inline double _g2_stat(int64_t a, int64_t b, int64_t c, int64_t d) noexcept nogil:
+    """
+    Log-likelihood ratio (G2) statistic for a single 2x2 table.
+
+    G2 = 2 * sum(O_ij * ln(O_ij / E_ij)) for cells where O_ij > 0.
+    Returns NaN if N is zero.
+    """
+    cdef double N = <double>(a + b + c + d)
+    cdef double R1 = <double>(a + b)
+    cdef double R2 = <double>(c + d)
+    cdef double C1 = <double>(a + c)
+    cdef double C2 = <double>(b + d)
+    cdef double E_a, E_b, E_c, E_d
+    cdef double g2
+
+    if N == 0.0:
+        return NAN_VAL
+
+    E_a = R1 * C1 / N
+    E_b = R1 * C2 / N
+    E_c = R2 * C1 / N
+    E_d = R2 * C2 / N
+
+    g2 = 0.0
+    if a > 0 and E_a > 0.0:
+        g2 += <double>a * log(<double>a / E_a)
+    if b > 0 and E_b > 0.0:
+        g2 += <double>b * log(<double>b / E_b)
+    if c > 0 and E_c > 0.0:
+        g2 += <double>c * log(<double>c / E_c)
+    if d > 0 and E_d > 0.0:
+        g2 += <double>d * log(<double>d / E_d)
+
+    return 2.0 * g2
+
+
+# ===========================================================================
+# Public batch functions
+# ===========================================================================
 
 def batch_fisher_exact(np.int64_t[::1] a_arr, np.int64_t[::1] b_arr,
                        np.int64_t[::1] c_arr, np.int64_t[::1] d_arr,
@@ -370,3 +460,88 @@ def batch_fisher_exact(np.int64_t[::1] a_arr, np.int64_t[::1] b_arr,
                                            c_arr[i], d_arr[i])
 
     return pvals_np
+
+
+def batch_chi2(np.int64_t[::1] a_arr, np.int64_t[::1] b_arr,
+               np.int64_t[::1] c_arr, np.int64_t[::1] d_arr,
+               bint correction=False):
+    """
+    Vectorised Pearson's chi-squared test for N independent 2x2 tables.
+
+    Parameters
+    ----------
+    a_arr, b_arr, c_arr, d_arr : 1-D int64 arrays (contiguous)
+        Cell values for each table: [[a, b], [c, d]].
+    correction : bool
+        If True, apply Yates' continuity correction. Default False.
+
+    Returns
+    -------
+    (statistic, p_value) : tuple of numpy.ndarray (float64, length N)
+        Chi-squared statistics and corresponding p-values.
+        Tables with zero expected values produce NaN for both.
+    """
+    cdef Py_ssize_t n = a_arr.shape[0]
+    if b_arr.shape[0] != n or c_arr.shape[0] != n or d_arr.shape[0] != n:
+        raise ValueError("All input arrays must have the same length")
+
+    cdef Py_ssize_t i
+    cdef int corr_flag = 1 if correction else 0
+    cdef double chi2_val
+
+    stats_np = np.empty(n, dtype=np.float64)
+    pvals_np = np.empty(n, dtype=np.float64)
+    cdef double[::1] stats = stats_np
+    cdef double[::1] pvals = pvals_np
+
+    with nogil:
+        for i in range(n):
+            chi2_val = _chi2_stat(a_arr[i], b_arr[i], c_arr[i], d_arr[i],
+                                  corr_flag)
+            stats[i] = chi2_val
+            if chi2_val != chi2_val:  # NaN check
+                pvals[i] = NAN_VAL
+            else:
+                pvals[i] = chdtrc(1.0, chi2_val)
+
+    return stats_np, pvals_np
+
+
+def batch_log_likelihood(np.int64_t[::1] a_arr, np.int64_t[::1] b_arr,
+                         np.int64_t[::1] c_arr, np.int64_t[::1] d_arr):
+    """
+    Vectorised log-likelihood ratio (G2) test for N independent 2x2 tables.
+
+    Parameters
+    ----------
+    a_arr, b_arr, c_arr, d_arr : 1-D int64 arrays (contiguous)
+        Cell values for each table: [[a, b], [c, d]].
+
+    Returns
+    -------
+    (statistic, p_value) : tuple of numpy.ndarray (float64, length N)
+        G2 statistics and corresponding p-values (chi-squared df=1).
+        Tables with N=0 produce NaN for both.
+    """
+    cdef Py_ssize_t n = a_arr.shape[0]
+    if b_arr.shape[0] != n or c_arr.shape[0] != n or d_arr.shape[0] != n:
+        raise ValueError("All input arrays must have the same length")
+
+    cdef Py_ssize_t i
+    cdef double g2_val
+
+    stats_np = np.empty(n, dtype=np.float64)
+    pvals_np = np.empty(n, dtype=np.float64)
+    cdef double[::1] stats = stats_np
+    cdef double[::1] pvals = pvals_np
+
+    with nogil:
+        for i in range(n):
+            g2_val = _g2_stat(a_arr[i], b_arr[i], c_arr[i], d_arr[i])
+            stats[i] = g2_val
+            if g2_val != g2_val:  # NaN check
+                pvals[i] = NAN_VAL
+            else:
+                pvals[i] = chdtrc(1.0, g2_val)
+
+    return stats_np, pvals_np

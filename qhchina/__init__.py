@@ -66,6 +66,9 @@ from .analytics import (
     cooc_matrix,
     type_token_ratio,
     mattr,
+    kwic,
+    compare_collocates,
+    find_shared_sequences,
 )
 
 # Import preprocessing entry point

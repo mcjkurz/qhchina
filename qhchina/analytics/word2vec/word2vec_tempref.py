@@ -618,10 +618,6 @@ class TempRefWord2Vec(Word2Vec):
         self._sentences = training_corpus
         return super().train()
 
-    def _is_temporal_variant(self, word: str) -> bool:
-        """Check if a word is a temporal variant (e.g., '民_宋')."""
-        return word in self.reverse_temporal_map
-
     def calculate_semantic_change(
         self,
         word: str,
@@ -758,9 +754,6 @@ class TempRefWord2Vec(Word2Vec):
         Raises:
             ValueError: If the specified period is not found in the model.
         """
-        if not hasattr(self, 'period_vocab_counts'):
-            raise AttributeError("Vocabulary counts not available. Make sure the model has been initialized properly.")
-            
         if period is None:
             return self.period_vocab_counts.copy()
         else:

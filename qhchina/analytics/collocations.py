@@ -8,7 +8,7 @@ import pandas as pd
 from scipy import sparse
 
 from ..utils import apply_p_value_correction, VALID_CORRECTIONS, iter_batches, build_vocab_from_iter
-from .cython_ext.fisher import batch_fisher_exact
+from .cython_ext.statistics import batch_fisher_exact
 
 logger = logging.getLogger("qhchina.analytics.collocations")
 
@@ -17,6 +17,8 @@ __all__ = [
     'find_collocates',
     'cooc_matrix',
     'plot_collocates',
+    'kwic',
+    'compare_collocates',
     'FilterOptions',
     'CoocMatrix',
 ]
@@ -111,7 +113,7 @@ class CoocMatrix:
         Numpy-like indexing for co-occurrence lookups.
         
         - ``matrix["fox"]`` → 1D row vector, shape ``(V,)``
-        - ``matrix["fox", "dog"]`` → scalar ``int``
+        - ``matrix["fox", "dog"]`` → scalar (int for counts, float for PPMI)
         - ``matrix[["fox", "dog"]]`` → 2D row submatrix, shape ``(N, V)``
         - ``matrix["fox", :]`` → 1D row vector, shape ``(V,)``
         - ``matrix[:, "dog"]`` → 1D column vector, shape ``(V,)``
@@ -147,9 +149,10 @@ class CoocMatrix:
             idx = self._resolve_index(row_key)
             return self._matrix.getrow(idx).toarray().ravel()
         
-        return int(self._matrix[self._resolve_index(row_key), self._resolve_index(col_key)])
+        val = self._matrix[self._resolve_index(row_key), self._resolve_index(col_key)]
+        return val.item() if hasattr(val, 'item') else val
     
-    def get(self, row_key, col_key, default: int = 0) -> int:
+    def get(self, row_key, col_key, default: int | float = 0):
         """
         Get a co-occurrence count with a default value for missing pairs.
         
@@ -221,6 +224,73 @@ class CoocMatrix:
     def nnz(self) -> int:
         """Number of non-zero entries in the matrix."""
         return self._matrix.nnz
+    
+    def sum(self, axis: int | None = None) -> int | np.ndarray:
+        """
+        Sum co-occurrence counts along an axis.
+        
+        Args:
+            axis: Axis along which to sum.
+            
+                - None: Total sum of all entries (scalar int).
+                - 0: Column sums, shape ``(V,)``.
+                - 1: Row sums, shape ``(V,)``.
+        
+        Returns:
+            int for total sum, or 1-D numpy array of shape ``(V,)``.
+        """
+        if axis is None:
+            return int(self._matrix.sum())
+        if axis not in (0, 1):
+            raise ValueError(f"axis must be None, 0, or 1, got {axis}")
+        return np.asarray(self._matrix.sum(axis=axis)).ravel()
+    
+    def to_ppmi(self, alpha: float = 0.75) -> 'CoocMatrix':
+        """
+        Convert raw counts to Positive Pointwise Mutual Information.
+        
+        Returns a new CoocMatrix where each entry is:
+        
+        .. math::
+            \\text{PPMI}(w, c) = \\max\\bigl(0,\\; \\log_2 \\frac{P(w,c)}{P(w)\\,P_\\alpha(c)}\\bigr)
+        
+        Context distribution smoothing raises context (column) frequencies
+        to the power of ``alpha`` before computing PMI, which down-weights
+        frequent contexts (Levy et al., 2015).
+        
+        Args:
+            alpha: Context distribution smoothing exponent. 1.0 means no
+                smoothing (standard PMI). 0.75 is the recommended default.
+        
+        Returns:
+            New CoocMatrix with PPMI float64 values (sparse).
+        """
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError(f"alpha must be in (0, 1], got {alpha}")
+        
+        csr = self._matrix.astype(np.float64).copy()
+        
+        row_sums = np.asarray(csr.sum(axis=1)).ravel()
+        col_sums = np.asarray(csr.sum(axis=0)).ravel()
+        
+        if alpha != 1.0:
+            col_sums = col_sums ** alpha
+        
+        N = col_sums.sum()
+        
+        if N == 0:
+            return CoocMatrix(csr, list(self._vocab), dict(self._w2i))
+        
+        rows, cols = csr.nonzero()
+        expected = row_sums[rows] * col_sums[cols] / N
+        
+        with np.errstate(divide='ignore', invalid='ignore'):
+            pmi = np.where(expected > 0, np.log2(csr.data / expected), 0.0)
+        
+        csr.data = np.maximum(0.0, pmi)
+        csr.eliminate_zeros()
+        
+        return CoocMatrix(csr, list(self._vocab), dict(self._w2i))
     
     def __len__(self) -> int:
         """Return vocabulary size."""
@@ -729,6 +799,16 @@ def find_collocates(
             horizon = 5
     
     if filters:
+        valid_filter_keys = {
+            'max_p', 'max_adjusted_p', 'stopwords', 'min_word_length', 
+            'min_exp_local', 'max_exp_local',
+            'min_obs_local', 'max_obs_local', 'min_ratio_local', 'max_ratio_local',
+            'min_obs_global', 'max_obs_global'
+        }
+        invalid_keys = set(filters.keys()) - valid_filter_keys
+        if invalid_keys:
+            raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_filter_keys}")
+
         filter_strs = []
         if 'max_p' in filters:
             filter_strs.append(f"max_p={filters['max_p']}")
@@ -788,16 +868,6 @@ def find_collocates(
     # were never of interest in the first place.
     # =========================================================================
     if filters:
-        valid_keys = {
-            'max_p', 'max_adjusted_p', 'stopwords', 'min_word_length', 
-            'min_exp_local', 'max_exp_local',
-            'min_obs_local', 'max_obs_local', 'min_ratio_local', 'max_ratio_local',
-            'min_obs_global', 'max_obs_global'
-        }
-        invalid_keys = set(filters.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid filter keys: {invalid_keys}. Valid keys are: {valid_keys}")
-        
         # Validate and extract filter values upfront
         stopwords_set = None
         if 'stopwords' in filters:
@@ -1329,3 +1399,253 @@ def plot_collocates(
         plt.savefig(filename, bbox_inches='tight', dpi=300)
     
     plt.show()
+
+
+def kwic(
+    sentences: Iterable[list[str]],
+    target: str | list[str],
+    horizon: int = 10,
+    sort_by: str = 'right',
+    separator: str = '',
+    as_dataframe: bool = True,
+    max_results: int | None = None,
+    max_sentence_length: int | None = 256,
+) -> pd.DataFrame | list[dict]:
+    """
+    Generate a Keywords in Context (KWIC) concordance for target words.
+    
+    Scans a corpus for occurrences of one or more target words and returns
+    concordance lines showing left context, the keyword (node), and right
+    context. Results can be sorted by right context (R1), left context (L1),
+    or corpus position — the standard concordance sort options.
+    
+    Args:
+        sentences (Iterable[list[str]]): Iterable of tokenized sentences.
+        target (str | list[str]): Target word(s) to find concordance lines for.
+        horizon (int): Number of context tokens to show on each side of the
+            node. Default is 10.
+        sort_by (str): How to sort concordance lines:
+        
+            - ``'right'``: Alphabetically by right context (standard R1 sort).
+            - ``'left'``: Reverse alphabetically by last token of left context
+              (standard L1 sort).
+            - ``'position'``: Corpus order (by doc_index, then position).
+            
+            Default is ``'right'``.
+        separator (str): String used to join context tokens for display columns.
+            Default ``""`` (direct concatenation). Use
+            ``" "`` for space-segmented text.
+        as_dataframe (bool): If True, return a pandas DataFrame. Default True.
+        max_results (int | None): Maximum number of concordance lines to
+            return. None for no limit. Default None.
+        max_sentence_length (int | None): Truncate sentences longer than this.
+            None disables truncation. Default 256.
+    
+    Returns:
+        pd.DataFrame or list[dict] with columns/keys:
+        
+            - **left** (str): Left context joined by ``separator``.
+            - **node** (str): The keyword.
+            - **right** (str): Right context joined by ``separator``.
+            - **left_tokens** (list[str]): Left context as a token list.
+            - **right_tokens** (list[str]): Right context as a token list.
+            - **doc_index** (int): Index of the sentence in the corpus.
+            - **position** (int): Token position of the node in the sentence.
+    
+    Example:
+        >>> from qhchina.analytics import kwic
+        >>> sentences = [["天", "下", "大", "乱"], ["天", "命", "不", "可", "违"]]
+        >>> kwic(sentences, "天", horizon=3)
+    """
+    valid_sorts = {'right', 'left', 'position'}
+    if sort_by not in valid_sorts:
+        raise ValueError(f"sort_by must be one of {valid_sorts}, got '{sort_by}'")
+    
+    if isinstance(target, str):
+        target = [target]
+    target_set = set(target)
+    
+    if not target_set:
+        raise ValueError("target cannot be empty")
+    
+    output_cols = ['left', 'node', 'right', 'left_tokens', 'right_tokens', 'doc_index', 'position']
+    results: list[dict] = []
+    doc_idx = 0
+    hit_count = 0
+    
+    for batch in iter_batches(sentences, batch_words=100_000, max_length=max_sentence_length):
+        for sentence in batch:
+            for pos, token in enumerate(sentence):
+                if token in target_set:
+                    left_start = max(0, pos - horizon)
+                    right_end = min(len(sentence), pos + horizon + 1)
+                    
+                    left_tokens = sentence[left_start:pos]
+                    right_tokens = sentence[pos + 1:right_end]
+                    
+                    results.append({
+                        'left': separator.join(left_tokens),
+                        'node': token,
+                        'right': separator.join(right_tokens),
+                        'left_tokens': left_tokens,
+                        'right_tokens': right_tokens,
+                        'doc_index': doc_idx,
+                        'position': pos,
+                    })
+                    hit_count += 1
+                    
+                    if max_results is not None and hit_count >= max_results:
+                        break
+            
+            doc_idx += 1
+            if max_results is not None and hit_count >= max_results:
+                break
+        if max_results is not None and hit_count >= max_results:
+            break
+    
+    if sort_by == 'right':
+        results.sort(key=lambda r: r['right'])
+    elif sort_by == 'left':
+        results.sort(key=lambda r: r['left_tokens'][-1] if r['left_tokens'] else '')
+    elif sort_by == 'position':
+        results.sort(key=lambda r: (r['doc_index'], r['position']))
+    
+    if as_dataframe:
+        return pd.DataFrame(results, columns=output_cols) if results else pd.DataFrame(columns=output_cols)
+    return results
+
+
+def compare_collocates(
+    corpus_a: Iterable[list[str]],
+    corpus_b: Iterable[list[str]],
+    target_words: str | list[str],
+    method: str = 'window',
+    horizon: int | tuple | None = None,
+    min_obs: int = 5,
+    stable_threshold: float = 0.1,
+    as_dataframe: bool = True,
+    **kwargs,
+) -> pd.DataFrame | list[dict]:
+    """
+    Compare collocates of target words between two corpora.
+    
+    Runs collocation analysis on each corpus separately, then merges the
+    results to show which collocates strengthened, weakened, appeared, or
+    disappeared between the two corpora.
+    
+    Args:
+        corpus_a (Iterable[list[str]]): First corpus (tokenized sentences).
+            Must be restartable.
+        corpus_b (Iterable[list[str]]): Second corpus (tokenized sentences).
+            Must be restartable.
+        target_words (str | list[str]): Target word(s) to compare collocates for.
+        method (str): Collocation method (``'window'`` or ``'sentence'``).
+            Default ``'window'``.
+        horizon (int | tuple | None): Context window size. See
+            ``find_collocates`` for details. Default None (uses 5 for
+            window method).
+        min_obs (int): Minimum observed co-occurrence in either corpus for a
+            collocate to be included. Default 5.
+        stable_threshold (float): Minimum absolute ``log_ratio_change`` for a
+            collocate to be classified as ``'strengthened'`` or ``'weakened'``
+            rather than ``'stable'``. Default 0.1.
+        as_dataframe (bool): If True, return a pandas DataFrame. Default True.
+        **kwargs: Additional keyword arguments passed to ``find_collocates``
+            (e.g., ``alternative``, ``batch_words``, ``max_sentence_length``).
+    
+    Returns:
+        pd.DataFrame or list[dict] with columns/keys:
+        
+            - **target** (str): The target word.
+            - **collocate** (str): The co-occurring word.
+            - **ratio_a** (float): Observed/expected ratio in corpus A.
+            - **ratio_b** (float): Observed/expected ratio in corpus B.
+            - **log_ratio_change** (float): ``log2(ratio_b / ratio_a)``.
+              Positive = strengthened in B, negative = weakened in B.
+            - **obs_a** (int): Observed count in corpus A.
+            - **obs_b** (int): Observed count in corpus B.
+            - **p_value_a** (float): P-value in corpus A.
+            - **p_value_b** (float): P-value in corpus B.
+            - **status** (str): One of ``'strengthened'``, ``'weakened'``,
+              ``'appeared'`` (only in B), ``'disappeared'`` (only in A),
+              or ``'stable'``.
+    """
+    colloc_kwargs = dict(
+        method=method,
+        horizon=horizon,
+        as_dataframe=True,
+        sort_by='obs_local',
+        ascending=False,
+        **kwargs,
+    )
+    
+    df_a = find_collocates(corpus_a, target_words, **colloc_kwargs)
+    df_b = find_collocates(corpus_b, target_words, **colloc_kwargs)
+    
+    if df_a.empty and df_b.empty:
+        cols = [
+            'target', 'collocate', 'ratio_a', 'ratio_b', 'log_ratio_change',
+            'obs_a', 'obs_b', 'p_value_a', 'p_value_b', 'status',
+        ]
+        return pd.DataFrame(columns=cols) if as_dataframe else []
+    
+    merged = pd.merge(
+        df_a[['target', 'collocate', 'ratio_local', 'obs_local', 'p_value']],
+        df_b[['target', 'collocate', 'ratio_local', 'obs_local', 'p_value']],
+        on=['target', 'collocate'],
+        how='outer',
+        suffixes=('_a', '_b'),
+    )
+    
+    merged = merged.rename(columns={
+        'ratio_local_a': 'ratio_a',
+        'ratio_local_b': 'ratio_b',
+        'obs_local_a': 'obs_a',
+        'obs_local_b': 'obs_b',
+        'p_value_a': 'p_value_a',
+        'p_value_b': 'p_value_b',
+    })
+    
+    merged['obs_a'] = merged['obs_a'].fillna(0).astype(int)
+    merged['obs_b'] = merged['obs_b'].fillna(0).astype(int)
+    
+    if min_obs > 0:
+        mask = (merged['obs_a'] >= min_obs) | (merged['obs_b'] >= min_obs)
+        merged = merged[mask].copy()
+    
+    in_a = merged['ratio_a'].notna()
+    in_b = merged['ratio_b'].notna()
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        log_change = np.where(
+            in_a & in_b,
+            np.log2(merged['ratio_b'].fillna(0) / merged['ratio_a'].fillna(0).replace(0, np.nan)),
+            np.nan,
+        )
+    merged['log_ratio_change'] = log_change
+    
+    conditions = [
+        ~in_a & in_b,
+        in_a & ~in_b,
+        in_a & in_b & (log_change > stable_threshold),
+        in_a & in_b & (log_change < -stable_threshold),
+    ]
+    choices = ['appeared', 'disappeared', 'strengthened', 'weakened']
+    merged['status'] = np.select(conditions, choices, default='stable')
+    
+    sort_key = merged['log_ratio_change'].abs()
+    sort_key = sort_key.fillna(float('inf'))
+    merged = merged.sort_values(
+        by='log_ratio_change', key=lambda s: s.abs().fillna(float('inf')),
+        ascending=False,
+    ).reset_index(drop=True)
+    
+    output_cols = [
+        'target', 'collocate', 'ratio_a', 'ratio_b', 'log_ratio_change',
+        'obs_a', 'obs_b', 'p_value_a', 'p_value_b', 'status',
+    ]
+    merged = merged[output_cols]
+    
+    if as_dataframe:
+        return merged
+    return merged.to_dict('records')

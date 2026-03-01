@@ -25,7 +25,10 @@ from .topicmodels import LDAGibbsSampler
 from .stylometry import Stylometry, compare_corpora, type_token_ratio, mattr
 
 # Collocations
-from .collocations import find_collocates, cooc_matrix, plot_collocates
+from .collocations import find_collocates, cooc_matrix, plot_collocates, kwic, compare_collocates
+
+# Text reuse
+from .textreuse import find_shared_sequences
 
 __all__ = [
     # Corpus streaming
@@ -45,4 +48,8 @@ __all__ = [
     'find_collocates',
     'cooc_matrix',
     'plot_collocates',
+    'kwic',
+    'compare_collocates',
+    # Text reuse
+    'find_shared_sequences',
 ]

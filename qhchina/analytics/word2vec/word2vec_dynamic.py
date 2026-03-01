@@ -510,13 +510,10 @@ class DynamicWord2Vec(Word2Vec):
 
         Only one corpus is streamed at a time, so memory usage is constant.
         """
-        # Determine per-corpus token limits (for balanced strategy)
-        token_counts = {}
-        for label, corpus in self._corpora.items():
-            if hasattr(corpus, 'token_count'):
-                token_counts[label] = corpus.token_count
-            else:
-                token_counts[label] = sum(len(sent) for sent in corpus)
+        token_counts = {
+            label: sum(self.period_vocab_counts[label].values())
+            for label in self.labels
+        }
 
         if self._sampling_strategy == "balanced":
             min_count = min(token_counts.values())

@@ -23,9 +23,8 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import chi2_contingency
 from tqdm.auto import tqdm
-from .cython_ext.fisher import batch_fisher_exact
+from .cython_ext.statistics import batch_fisher_exact, batch_chi2, batch_log_likelihood
 from .vectors import cosine_similarity as _cosine_similarity, cosine_distance
 from ..config import resolve_seed
 from ..utils import validate_filters, apply_p_value_correction, VALID_CORRECTIONS
@@ -1997,8 +1996,14 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             Accepts lists, generators, or any iterable.
         corpusB: Iterable of tokens (flat) or iterable of token lists (nested).
             Accepts lists, generators, or any iterable.
-        method (str): 'fisher' for Fisher's exact test or 'chi2' or 'chi2_corrected' 
-            for the chi-square test. All tests use two-sided alternatives.
+        method (str): Statistical test to use. All tests use two-sided alternatives.
+            
+            - 'fisher': Fisher's exact test (default). Exact, recommended for small
+              sample sizes. Does not produce a test statistic.
+            - 'chi2': Pearson's chi-squared test.
+            - 'chi2_corrected': Chi-squared with Yates' continuity correction.
+            - 'log_likelihood': Log-likelihood ratio (G2) test. Standard "keyness"
+              measure in corpus linguistics (used by AntConc, Sketch Engine).
         filters (dict, optional): Dictionary of filters to apply to results.
             
             Eligibility filters (applied before testing; define the hypothesis family):
@@ -2039,12 +2044,17 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         ascending (bool): Sort direction. Default is False (descending).
     
     Returns:
-        If as_dataframe is True: pandas.DataFrame containing information about each 
-            word's frequency in both corpora, the p-value, and the ratio of relative 
-            frequencies.
-        If as_dataframe is False: list[dict] where each dict contains information 
-            about a word's frequency in both corpora, the p-value, and the ratio of 
-            relative frequencies.
+        pandas.DataFrame or list[dict] with columns/keys:
+        
+            - **word** (str): The word.
+            - **abs_freqA** / **abs_freqB** (int): Absolute frequency in each corpus.
+            - **rel_freqA** / **rel_freqB** (float): Relative frequency in each corpus.
+            - **rel_ratio** (float): Ratio of relative frequencies (relA / relB).
+            - **statistic** (float, optional): Test statistic (chi-squared or G2).
+              Present for 'chi2', 'chi2_corrected', and 'log_likelihood' methods.
+              Not present for 'fisher' (which has no test statistic).
+            - **p_value** (float): Two-sided p-value.
+            - **adjusted_p_value** (float, optional): Present only if ``correction`` is set.
     
     Note:
         Two-sided tests are used because we want to detect whether words are 
@@ -2103,12 +2113,14 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         raise ValueError("ascending must be a boolean")
     valid_sort_keys = {
         "word", "abs_freqA", "abs_freqB", "rel_freqA",
-        "rel_freqB", "rel_ratio", "p_value", "adjusted_p_value",
+        "rel_freqB", "rel_ratio", "statistic", "p_value", "adjusted_p_value",
     }
     if sort_by not in valid_sort_keys:
         raise ValueError(f"Invalid sort_by '{sort_by}'. Valid keys are: {valid_sort_keys}")
     if sort_by == "adjusted_p_value" and correction is None:
         raise ValueError("sort_by='adjusted_p_value' requires a correction method to be set")
+    if sort_by == "statistic" and method == 'fisher':
+        raise ValueError("sort_by='statistic' is not available for method='fisher' (Fisher's test has no test statistic)")
     
     # Validate filter keys
     valid_filter_keys = {'min_count', 'max_p', 'max_adjusted_p', 'stopwords', 'min_word_length'}
@@ -2213,8 +2225,11 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         if as_dataframe:
             cols = [
                 "word", "abs_freqA", "abs_freqB",
-                "rel_freqA", "rel_freqB", "rel_ratio", "p_value",
+                "rel_freqA", "rel_freqB", "rel_ratio",
             ]
+            if method != 'fisher':
+                cols.append("statistic")
+            cols.append("p_value")
             if correction is not None:
                 cols.append("adjusted_p_value")
             return pd.DataFrame(columns=cols)
@@ -2226,19 +2241,17 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     d_arr = totalB - b_arr
     
     n_words = len(kept_words)
-    pvals = np.empty(n_words, dtype=np.float64)
+    stat_values = None
     
     if method == 'fisher':
         pvals = batch_fisher_exact(a_arr, b_arr, c_arr, d_arr, 'two-sided')
     elif method in ('chi2', 'chi2_corrected'):
         corr = (method == 'chi2_corrected')
-        for i in tqdm(range(n_words)):
-            pvals[i] = chi2_contingency(
-                ((int(a_arr[i]), int(b_arr[i])), (int(c_arr[i]), int(d_arr[i]))),
-                correction=corr,
-            )[1]
+        stat_values, pvals = batch_chi2(a_arr, b_arr, c_arr, d_arr, correction=corr)
+    elif method == 'log_likelihood':
+        stat_values, pvals = batch_log_likelihood(a_arr, b_arr, c_arr, d_arr)
     else:
-        raise ValueError("method must be 'fisher', 'chi2', or 'chi2_corrected'")
+        raise ValueError("method must be 'fisher', 'chi2', 'chi2_corrected', or 'log_likelihood'")
     
     # Vectorized relative frequencies and ratios
     relA = a_arr / totalA
@@ -2260,6 +2273,8 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             relB = relB[indices]
             ratio = ratio[indices]
             pvals = pvals[indices]
+            if stat_values is not None:
+                stat_values = stat_values[indices]
     
     # =========================================================================
     # Multiple testing correction (based on the hypothesis family defined by
@@ -2284,6 +2299,8 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             ratio = ratio[indices]
             pvals = pvals[indices]
             p_adj = p_adj[indices]
+            if stat_values is not None:
+                stat_values = stat_values[indices]
     
     if as_dataframe:
         data = {
@@ -2293,8 +2310,10 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             "rel_freqA": relA,
             "rel_freqB": relB,
             "rel_ratio": ratio,
-            "p_value": pvals,
         }
+        if stat_values is not None:
+            data["statistic"] = stat_values
+        data["p_value"] = pvals
         if p_adj is not None:
             data["adjusted_p_value"] = p_adj
         results = pd.DataFrame(data)
@@ -2311,8 +2330,10 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             "rel_freqA": float(relA[i]),
             "rel_freqB": float(relB[i]),
             "rel_ratio": float(ratio[i]) if np.isfinite(ratio[i]) else np.inf,
-            "p_value": float(pvals[i]),
         }
+        if stat_values is not None:
+            entry["statistic"] = float(stat_values[i])
+        entry["p_value"] = float(pvals[i])
         if p_adj is not None:
             entry["adjusted_p_value"] = float(p_adj[i])
         out.append(entry)
