@@ -15,7 +15,6 @@ import numpy as np
 cimport numpy as np
 from libc.stdint cimport int32_t, int64_t, uint64_t
 from libc.stdlib cimport malloc, free
-from libc.string cimport memset
 
 
 def fingerprint_documents(list encoded_docs, int n):
@@ -97,15 +96,13 @@ def fingerprint_documents(list encoded_docs, int n):
 
 
 def find_candidate_pairs(int64_t[::1] ngram_ids, int32_t[::1] doc_ids,
-                         int32_t[::1] positions, int n_docs_a,
-                         bint cross_corpus):
+                         int32_t[::1] positions,
+                         bint within_documents):
     """
-    Build candidate seed-match pairs from fingerprint arrays using sorting.
+    Build candidate seed-match pairs from fingerprint arrays.
 
-    Replaces the Python inverted-index + candidate-pair extraction with a
-    single sort-based pass over typed arrays.  For each group of fingerprints
-    that share the same n-gram hash, emits all valid (doc_a, doc_b, pos_a,
-    pos_b) seed pairs.
+    Groups fingerprints by n-gram hash (via sorting), then emits all
+    valid ``(doc_a, doc_b, pos_a, pos_b)`` seed pairs within each group.
 
     Parameters
     ----------
@@ -115,37 +112,29 @@ def find_candidate_pairs(int64_t[::1] ngram_ids, int32_t[::1] doc_ids,
         Document index for each fingerprint.
     positions : int32 array
         Token position within the document for each fingerprint.
-    n_docs_a : int
-        Number of documents in corpus A.  In cross-corpus mode, documents
-        with ``doc_id < n_docs_a`` belong to A and the rest to B.
-    cross_corpus : bool
-        If True, only pair documents across corpora (A vs B).
-        If False, pair all distinct documents within one corpus.
+    within_documents : bool
+        If True, also emit pairs where ``doc_a == doc_b`` (self-reuse
+        within a single document).  If False, only pair distinct documents.
 
     Returns
     -------
     dict of (int, int) -> (ndarray, ndarray)
-        Maps ``(doc_a, doc_b)`` to a pair of int32 arrays ``(pos_a, pos_b)``
-        containing the seed positions, sorted by ``(pos_a, pos_b)``.
+        Maps ``(doc_a, doc_b)`` with ``doc_a <= doc_b`` to a pair of
+        int32 arrays ``(pos_a, pos_b)``, sorted by ``(pos_a, pos_b)``.
     """
     cdef Py_ssize_t N = ngram_ids.shape[0]
     if N == 0:
         return {}
 
-    # Argsort by ngram_id to group identical hashes together
     order_np = np.argsort(np.asarray(ngram_ids))
     cdef int64_t[::1] order = order_np.astype(np.int64)
 
-    # We'll collect seeds into a Python dict: (da, db) -> list of (pa, pb).
-    # The inner loop is pure C-typed arithmetic; only the dict insert touches
-    # Python objects, which is unavoidable but much cheaper than the old
-    # pure-Python version that also did per-element int() conversions.
     candidates = {}
 
     cdef Py_ssize_t grp_start = 0
     cdef Py_ssize_t grp_end, gi, gj, n_seeds
     cdef int64_t cur_hash
-    cdef int32_t da, db, pa, pb, key_a, key_b
+    cdef int32_t da, db, pa, pb
     cdef int32_t[::1] va, vb
 
     while grp_start < N:
@@ -158,52 +147,29 @@ def find_candidate_pairs(int64_t[::1] ngram_ids, int32_t[::1] doc_ids,
             grp_start = grp_end
             continue
 
-        if cross_corpus:
-            for gi in range(grp_start, grp_end):
-                da = doc_ids[order[gi]]
-                if da >= n_docs_a:
+        for gi in range(grp_start, grp_end):
+            da = doc_ids[order[gi]]
+            pa = positions[order[gi]]
+            for gj in range(gi + 1, grp_end):
+                db = doc_ids[order[gj]]
+                if da == db and not within_documents:
                     continue
-                pa = positions[order[gi]]
-                for gj in range(grp_start, grp_end):
-                    db = doc_ids[order[gj]]
-                    if db < n_docs_a:
-                        continue
-                    pb = positions[order[gj]]
-                    key_b = db - <int32_t>n_docs_a
-                    key = (da, key_b)
+                pb = positions[order[gj]]
+                if da <= db:
+                    key = (da, db)
                     try:
                         (<list>candidates[key]).append((pa, pb))
                     except KeyError:
                         candidates[key] = [(pa, pb)]
-        else:
-            for gi in range(grp_start, grp_end):
-                da = doc_ids[order[gi]]
-                pa = positions[order[gi]]
-                for gj in range(gi + 1, grp_end):
-                    db = doc_ids[order[gj]]
-                    if da == db:
-                        continue
-                    pb = positions[order[gj]]
-                    if da < db:
-                        key_a = da
-                        key_b = db
-                        key = (key_a, key_b)
-                        try:
-                            (<list>candidates[key]).append((pa, pb))
-                        except KeyError:
-                            candidates[key] = [(pa, pb)]
-                    else:
-                        key_a = db
-                        key_b = da
-                        key = (key_a, key_b)
-                        try:
-                            (<list>candidates[key]).append((pb, pa))
-                        except KeyError:
-                            candidates[key] = [(pb, pa)]
+                else:
+                    key = (db, da)
+                    try:
+                        (<list>candidates[key]).append((pb, pa))
+                    except KeyError:
+                        candidates[key] = [(pb, pa)]
 
         grp_start = grp_end
 
-    # Convert list-of-tuples to sorted parallel int32 arrays per pair
     result = {}
     for pair_key, seed_list in candidates.items():
         seed_list.sort()
@@ -230,22 +196,24 @@ def merge_and_verify(int32_t[::1] seeds_pos_a, int32_t[::1] seeds_pos_b,
     """
     Merge nearby seed matches and verify with banded edit distance.
 
-    Given parallel arrays of matching seed positions in documents A and B,
-    merge seeds that are close together into passage candidates, then
-    verify each candidate using banded Levenshtein distance.
+    Seeds are grouped by diagonal offset ``pos_a - pos_b`` so that
+    seeds from different alignment regions (common in large documents)
+    cannot interfere with each other during merging.  Within each
+    diagonal band, consecutive seeds are merged when the gap in
+    ``pos_a`` does not exceed *max_gap*.
 
     Parameters
     ----------
     seeds_pos_a, seeds_pos_b : 1-D int32 arrays (contiguous)
-        Parallel arrays of matching positions in doc A and doc B,
-        sorted by seeds_pos_a.
+        Parallel arrays of matching positions in doc A and doc B.
     tokens_a, tokens_b : 1-D int32 arrays (contiguous)
         Full token ID sequences for documents A and B.
     n : int
         N-gram size used for seeding. Each seed covers positions
         [pos, pos+n), so passage length is (end - start + n).
     max_gap : int
-        Maximum gap between consecutive seeds to merge into one passage.
+        Maximum gap between consecutive seeds to merge into one passage,
+        and maximum diagonal offset difference within a band.
     max_distance : int
         Maximum edit distance (band width) for verification.
 
@@ -259,36 +227,54 @@ def merge_and_verify(int32_t[::1] seeds_pos_a, int32_t[::1] seeds_pos_b,
     if n_seeds == 0:
         return []
 
-    # Merge seeds into passage candidates
+    # Sort seeds by (diagonal, pos_a) so seeds from the same alignment
+    # region are adjacent.  diagonal = pos_a - pos_b.
+    diag_np = np.asarray(seeds_pos_a).astype(np.int64) - np.asarray(seeds_pos_b).astype(np.int64)
+    order_np = np.lexsort((np.asarray(seeds_pos_a), diag_np))
+
+    cdef int64_t[::1] diag = diag_np
+    cdef int64_t[::1] order = order_np.astype(np.int64)
+
     cdef list passages = []
-    cdef int32_t start_a = seeds_pos_a[0]
-    cdef int32_t start_b = seeds_pos_b[0]
-    cdef int32_t end_a = seeds_pos_a[0]
-    cdef int32_t end_b = seeds_pos_b[0]
-    cdef Py_ssize_t i
-    cdef int32_t cur_a, cur_b
+    cdef Py_ssize_t i, idx, prev_idx
+    cdef int32_t start_a, start_b, end_a, end_b, cur_a, cur_b
+
+    prev_idx = <Py_ssize_t>order[0]
+    start_a = seeds_pos_a[prev_idx]
+    start_b = seeds_pos_b[prev_idx]
+    end_a = start_a
+    end_b = start_b
 
     for i in range(1, n_seeds):
-        cur_a = seeds_pos_a[i]
-        cur_b = seeds_pos_b[i]
+        idx = <Py_ssize_t>order[i]
+        cur_a = seeds_pos_a[idx]
+        cur_b = seeds_pos_b[idx]
 
-        if (cur_a - end_a) <= max_gap and (cur_b - end_b) <= max_gap:
-            end_a = cur_a
-            end_b = cur_b
-        else:
+        # New diagonal band — different alignment region
+        if diag[idx] - diag[prev_idx] > max_gap or diag[prev_idx] - diag[idx] > max_gap:
             passages.append((start_a, start_b, end_a, end_b))
             start_a = cur_a
             start_b = cur_b
             end_a = cur_a
             end_b = cur_b
+        # Same diagonal band — check pos_a gap
+        elif cur_a - end_a > max_gap:
+            passages.append((start_a, start_b, end_a, end_b))
+            start_a = cur_a
+            start_b = cur_b
+            end_a = cur_a
+            end_b = cur_b
+        else:
+            end_a = cur_a
+            end_b = cur_b
+
+        prev_idx = idx
 
     passages.append((start_a, start_b, end_a, end_b))
 
     # Verify each passage with banded edit distance.
     # The passage spans exactly [start, end + n) — the region covered by
-    # the merged seeds.  No extension beyond that: additional context would
-    # pull in unrelated tokens that inflate the edit distance and cause
-    # valid matches to be rejected.
+    # the merged seeds.
     cdef list results = []
     cdef int32_t pa, pb, ea, eb
     cdef Py_ssize_t len_a_val, len_b_val
