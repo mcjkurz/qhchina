@@ -71,11 +71,11 @@ def find_shared_sequences(
     *,
     n: int = 5,
     min_length: int = 10,
-    max_gap: int | None = None,
     min_similarity: float = 0.8,
-    max_distance: int | None = None,
     within_documents: bool = False,
     as_dataframe: bool = True,
+    _max_gap: int | None = None,
+    _max_distance: int | None = None,
 ) -> pd.DataFrame | list[dict]:
     """
     Find shared sequences (text reuse) across a collection of documents.
@@ -95,20 +95,28 @@ def find_shared_sequences(
             but are slower. Default 5.
         min_length (int): Minimum passage length (in tokens) to report.
             Default 10.
-        max_gap (int | None): Maximum gap between consecutive seeds to merge
-            into one passage candidate. If None, defaults to ``n + 1``, which
-            tolerates a single-token substitution (one substitution destroys
-            ``n`` consecutive seeds, creating a gap of ``n``). Default None.
         min_similarity (float): Minimum similarity score (0-1) for a passage
             to be reported. Computed as ``1 - distance / max_length``.
             Default 0.8.
-        max_distance (int | None): Maximum edit distance for verification.
-            If None, derived from ``min_similarity`` and ``min_length``:
-            ``int((1 - min_similarity) * min_length)``. Default None.
         within_documents (bool): If True, also detect repeated passages
             within a single document. If False (default), only compare
             distinct document pairs.
         as_dataframe (bool): If True, return a pandas DataFrame. Default True.
+        _max_gap (int | None): Maximum gap (in token positions)
+            between consecutive seeds to still merge them into one passage.
+            Defaults to ``n + 1``.  Why: a single substitution destroys
+            ``n`` consecutive n-gram seeds, producing a gap of exactly
+            ``n``; the default ``n + 1`` bridges that gap.  Increase to
+            tolerate longer insertions/deletions between seed clusters.
+        _max_distance (int | None): Maximum edit distance
+            allowed during passage verification.  Also controls the band
+            width of the banded Levenshtein computation, so it affects
+            both accuracy and speed.  Defaults to
+            ``int((1 - min_similarity) * min_length)`` — i.e. the number
+            of edits that would reduce a minimal-length passage to exactly
+            the similarity threshold.  Increase if you expect long passages
+            with many local edits that still meet ``min_similarity``
+            overall.
 
     Returns:
         pd.DataFrame or list[dict] with columns/keys:
@@ -144,10 +152,8 @@ def find_shared_sequences(
     if not 0 < min_similarity <= 1.0:
         raise ValueError(f"min_similarity must be in (0, 1], got {min_similarity}")
 
-    if max_gap is None:
-        max_gap = n + 1
-    if max_distance is None:
-        max_distance = max(1, int((1.0 - min_similarity) * min_length))
+    max_gap = _max_gap if _max_gap is not None else n + 1
+    max_distance = _max_distance if _max_distance is not None else max(1, int((1.0 - min_similarity) * min_length))
 
     docs = _validate_documents(documents)
 
