@@ -28,6 +28,7 @@ dist/
 .idea/
 .vscode/
 .cursor/
+.claude
 
 # Macbook stuff
 .DS_Store
