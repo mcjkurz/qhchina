@@ -30,6 +30,8 @@ class SegmentationWrapper:
         strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'. 
             Default is 'document'.
         chunk_size: Size of chunks when using 'chunk' strategy.
+        chunk_overlap: Fraction of overlap between consecutive chunks (0.0 to <1.0).
+            Only used when strategy is 'chunk'. Default is 0.0 (no overlap).
         filters: Dictionary of filters to apply during segmentation:
             - stopwords: List or set of stopwords to exclude (converted to set internally)
             - min_word_length: Minimum length of tokens to include (default 1)
@@ -45,7 +47,9 @@ class SegmentationWrapper:
     # Valid filter keys
     VALID_FILTER_KEYS = {'stopwords', 'min_word_length', 'excluded_pos'}
     
-    def __init__(self, strategy: str = "document", chunk_size: int = 512, filters: dict[str, Any] | None = None,
+    def __init__(self, strategy: str = "document", chunk_size: int = 512,
+                 chunk_overlap: float = 0.0,
+                 filters: dict[str, Any] | None = None,
                  user_dict: str | list[str | tuple] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         if strategy is None:
@@ -55,6 +59,9 @@ class SegmentationWrapper:
             raise ValueError(f"Invalid segmentation strategy: {strategy}. Must be one of: line, sentence, chunk, document")
         
         self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        if self.strategy == "chunk" and not (0 <= self.chunk_overlap < 1):
+            raise ValueError("chunk_overlap must be in [0, 1) when strategy is 'chunk'")
         self.filters = filters or {}
         self.user_dict = user_dict
         self._temp_dict_path = None  # Track temporary file for cleanup
@@ -262,7 +269,9 @@ class SegmentationWrapper:
         return [line.strip() for line in text.split('\n') if line.strip()]
     
     def _split_into_chunks(self, text: str, chunk_size: int) -> list[str]:
-        """Split text into chunks of specified size.
+        """Split text into chunks of specified size with optional overlap.
+        
+        Delegates to :func:`qhchina.helpers.texts.split_into_chunks`.
         
         Args:
             text: Text to split into chunks
@@ -271,15 +280,10 @@ class SegmentationWrapper:
         Returns:
             List of text chunks
         """
-        # Return empty list for empty text
+        from qhchina.helpers.texts import split_into_chunks
         if not text:
             return []
-            
-        chunks = []
-        for i in range(0, len(text), chunk_size):
-            chunks.append(text[i:i + chunk_size])
-            
-        return chunks
+        return split_into_chunks(text, chunk_size=chunk_size, overlap=self.chunk_overlap)
     
     def _split_into_sentences(self, text: str) -> list[str]:
         """Split text into sentences.
@@ -344,28 +348,16 @@ class SpacySegmenter(SegmentationWrapper):
         max_doc_length: Maximum document length before internal chunking. Documents longer
             than this will be split into chunks for processing to avoid memory issues.
             Default is 100000 characters (~100KB). Set to None to disable chunking.
-        user_dict: Custom user dictionary - either a list of words/tuples or path to a 
-            dictionary file.
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
-        chunk_size: Size of chunks when using 'chunk' strategy.
-        filters: Dictionary of filters to apply during segmentation:
-            - min_word_length: Minimum length of tokens to include (default 1)
-            - excluded_pos: Set of POS tags to exclude from token outputs
-            - stopwords: Set of stopwords to exclude
-        sentence_end_pattern: Regular expression pattern for sentence endings.
+        **kwargs: Base class arguments forwarded to :class:`SegmentationWrapper`
+            (strategy, chunk_size, chunk_overlap, filters, user_dict, sentence_end_pattern).
     """
     
     def __init__(self, model_name: str = "zh_core_web_sm", 
                  disable: list[str] | None = None,
                  batch_size: int = 200,
                  max_doc_length: int | None = 100000,
-                 user_dict: str | list[str | tuple] | None = None,
-                 strategy: str = "document", 
-                 chunk_size: int = 512,
-                 filters: dict[str, Any] | None = None,
-                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
+                 **kwargs):
+        super().__init__(**kwargs)
         self.model_name = model_name
         self.disable = disable or []
         self.batch_size = batch_size
@@ -554,30 +546,16 @@ class PKUSegmenter(SegmentationWrapper):
             - 'medicine': Medical domain
             - 'tourism': Tourism domain
             - Or a path to a custom model directory
-        user_dict: Custom user dictionary. Can be:
-            - str: Path to a dictionary file (one word per line)
-            - list[str]: List of words
-            - list[Tuple]: List of tuples (only first element/word is used)
         pos_tagging: Whether to include POS tagging in segmentation.
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
-        chunk_size: Size of chunks when using 'chunk' strategy.
-        filters: Dictionary of filters to apply during segmentation:
-            - min_word_length: Minimum length of tokens to include (default 1)
-            - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
-            - stopwords: Set of stopwords to exclude
-        sentence_end_pattern: Regular expression pattern for sentence endings.
+        **kwargs: Base class arguments forwarded to :class:`SegmentationWrapper`
+            (strategy, chunk_size, chunk_overlap, filters, user_dict, sentence_end_pattern).
     """
     
     def __init__(self, 
                  model_name: str = 'default',
-                 user_dict: str | list[str | tuple] | None = None,
                  pos_tagging: bool = False,
-                 strategy: str = "document",
-                 chunk_size: int = 512,
-                 filters: dict[str, Any] | None = None,
-                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
+                 **kwargs):
+        super().__init__(**kwargs)
         self.model_name = model_name
         self.pos_tagging = pos_tagging
         
@@ -690,29 +668,15 @@ class JiebaSegmenter(SegmentationWrapper):
     Segmentation wrapper for Jieba Chinese text segmentation.
     
     Args:
-        user_dict: Custom user dictionary for Jieba. Can be:
-            - str: Path to a dictionary file
-            - list[str]: List of words
-            - list[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
         pos_tagging: Whether to include POS tagging in segmentation.
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
-        chunk_size: Size of chunks when using 'chunk' strategy.
-        filters: Dictionary of filters to apply during segmentation:
-            - min_word_length: Minimum length of tokens to include (default 1)
-            - excluded_pos: List of POS tags to exclude (if pos_tagging is True)
-            - stopwords: Set of stopwords to exclude
-        sentence_end_pattern: Regular expression pattern for sentence endings.
+        **kwargs: Base class arguments forwarded to :class:`SegmentationWrapper`
+            (strategy, chunk_size, chunk_overlap, filters, user_dict, sentence_end_pattern).
     """
     
     def __init__(self, 
-                 user_dict: str | list[str | tuple] | None = None,
                  pos_tagging: bool = False,
-                 strategy: str = "document",
-                 chunk_size: int = 512,
-                 filters: dict[str, Any] | None = None,
-                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
+                 **kwargs):
+        super().__init__(**kwargs)
         self.pos_tagging = pos_tagging
         
         # Try to import jieba
@@ -869,15 +833,8 @@ class BertSegmenter(SegmentationWrapper):
             Default is True, which works for BERT-based models.
         max_sequence_length: Maximum sequence length for BERT models (default 512). If 
             the text is longer than this, it will be split into chunks.
-        user_dict: Custom user dictionary (not supported for BERT segmenter, will be ignored
-            with a warning).
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
-        chunk_size: Size of chunks when using 'chunk' strategy.
-        filters: Dictionary of filters to apply during segmentation:
-            - min_word_length: Minimum length of tokens to include (default 1)
-            - excluded_pos: Set of POS tags to exclude from token outputs
-            - stopwords: Set of stopwords to exclude
-        sentence_end_pattern: Regular expression pattern for sentence endings.
+        **kwargs: Base class arguments forwarded to :class:`SegmentationWrapper`
+            (strategy, chunk_size, chunk_overlap, filters, user_dict, sentence_end_pattern).
     """
     
     # Predefined tagging schemes
@@ -896,17 +853,12 @@ class BertSegmenter(SegmentationWrapper):
                  device: str | None = None,
                  remove_special_tokens: bool = True,
                  max_sequence_length: int = 512,
-                 user_dict: str | list[str | tuple] | None = None,
-                 strategy: str = "document",
-                 chunk_size: int = 512,
-                 filters: dict[str, Any] | None = None,
-                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
-        # Use max_sequence_length as chunk_size if not provided separately
-        if not chunk_size and strategy == "chunk":
-            chunk_size = max_sequence_length
+                 **kwargs):
+        strategy = kwargs.get('strategy', 'document')
+        if not kwargs.get('chunk_size') and strategy == "chunk":
+            kwargs['chunk_size'] = max_sequence_length
         
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
+        super().__init__(**kwargs)
         self.batch_size = batch_size
         self.remove_special_tokens = remove_special_tokens
         self.max_sequence_length = max_sequence_length
@@ -1181,15 +1133,8 @@ class LLMSegmenter(SegmentationWrapper):
         retry_patience: Number of retries for API calls (default 1, meaning 1 retry = 
             2 total attempts).
         timeout: Timeout in seconds for API calls (default 60.0). Set to None for no timeout.
-        user_dict: Custom user dictionary (not supported for LLM segmenter, will be ignored
-            with a warning).
-        strategy: Strategy to process texts. Options: 'line', 'sentence', 'chunk', 'document'.
-        chunk_size: Size of chunks when using 'chunk' strategy.
-        filters: Dictionary of filters to apply during segmentation:
-            - min_word_length: Minimum length of tokens to include (default 1)
-            - excluded_pos: Set of POS tags to exclude from token outputs
-            - stopwords: Set of stopwords to exclude
-        sentence_end_pattern: Regular expression pattern for sentence endings.
+        **kwargs: Base class arguments forwarded to :class:`SegmentationWrapper`
+            (strategy, chunk_size, chunk_overlap, filters, user_dict, sentence_end_pattern).
     """
     
     DEFAULT_PROMPT = """
@@ -1213,13 +1158,8 @@ class LLMSegmenter(SegmentationWrapper):
                  max_tokens: int = 2048,
                  retry_patience: int = 1,
                  timeout: float = 60.0,
-                 user_dict: str | list[str | tuple] | None = None,
-                 strategy: str = "document",
-                 chunk_size: int = 512,
-                 filters: dict[str, Any] | None = None,
-                 sentence_end_pattern: str = r"([。！？\.!?……]+)"):
-        super().__init__(strategy=strategy, chunk_size=chunk_size, filters=filters,
-                         user_dict=user_dict, sentence_end_pattern=sentence_end_pattern)
+                 **kwargs):
+        super().__init__(**kwargs)
         
         # Warn if user_dict is provided (not supported for LLM)
         if self.user_dict is not None:
@@ -1379,16 +1319,19 @@ class LLMSegmenter(SegmentationWrapper):
                 
         return results
 
-# Factory function to create appropriate segmenter based on the backend
-def create_segmenter(backend: str = "spacy", strategy: str = "document", chunk_size: int = 512, 
-                  sentence_end_pattern: str = r"([。！？\.!?……]+)", **kwargs) -> SegmentationWrapper:
+def create_segmenter(backend: str = "spacy", strategy: str = "document", chunk_size: int = 512,
+                     chunk_overlap: float = 0.0,
+                     sentence_end_pattern: str = r"([。！？\.!?……]+)", **kwargs) -> SegmentationWrapper:
     """Create a segmenter based on the specified backend.
     
     Args:
         backend: The segmentation backend to use ('spacy', 'pkuseg', 'jieba', 'bert', 'llm')
         strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'document']
         chunk_size: Size of chunks when using 'chunk' strategy
-        sentence_end_pattern: Regular expression pattern for sentence endings (default: Chinese and English punctuation)
+        chunk_overlap: Fraction of overlap between consecutive chunks (0.0 to <1.0).
+            Only used when strategy is 'chunk'. Default is 0.0 (no overlap).
+        sentence_end_pattern: Regular expression pattern for sentence endings
+            (default: Chinese and English punctuation)
         **kwargs: Additional arguments to pass to the segmenter constructor
             - user_dict: Custom user dictionary. Can be:
                 - str: Path to a dictionary file
@@ -1409,20 +1352,20 @@ def create_segmenter(backend: str = "spacy", strategy: str = "document", chunk_s
     Raises:
         ValueError: If the specified backend is not supported
     """
-    # Add strategy and chunk_size to kwargs
     kwargs['strategy'] = strategy
     kwargs['chunk_size'] = chunk_size
+    kwargs['chunk_overlap'] = chunk_overlap
     kwargs['sentence_end_pattern'] = sentence_end_pattern
     
-    if backend.lower() == "spacy":
-        return SpacySegmenter(**kwargs)
-    elif backend.lower() == "pkuseg":
-        return PKUSegmenter(**kwargs)
-    elif backend.lower() == "jieba":
-        return JiebaSegmenter(**kwargs)
-    elif backend.lower() == "bert":
-        return BertSegmenter(**kwargs)
-    elif backend.lower() == "llm":
-        return LLMSegmenter(**kwargs)
-    else:
+    backends = {
+        "spacy": SpacySegmenter,
+        "pkuseg": PKUSegmenter,
+        "jieba": JiebaSegmenter,
+        "bert": BertSegmenter,
+        "llm": LLMSegmenter,
+    }
+    
+    key = backend.lower()
+    if key not in backends:
         raise ValueError(f"Unsupported segmentation backend: {backend}")
+    return backends[key](**kwargs)
