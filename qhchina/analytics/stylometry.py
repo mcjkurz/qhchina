@@ -344,8 +344,11 @@ class Stylometry:
     Args:
         n_features (int): Number of most frequent n-grams to use as features (default: 100).
             Higher values capture more stylistic variation but may include noise.
-        ngram_range (tuple): Range of n-gram sizes as (min_n, max_n). Default (1, 1) = unigrams.
-            Use (1, 2) for unigrams + bigrams, (2, 2) for bigrams only.
+        ngram_range (tuple): Range of n-gram sizes as (min_n, max_n). Default (1, 1) uses
+            only unigrams (single tokens). Use (2, 2) for bigrams only, or (1, 2) to pool
+            unigrams and bigrams together. When multiple n-gram sizes are pooled, the top
+            ``n_features`` are selected from the combined set ranked by corpus frequency,
+            so the final feature set may contain a mix of different n-gram sizes.
         transform (str): Feature transformation method:
             - 'zscore': Z-score normalization (default, recommended for Delta methods)
             - 'tfidf': TF-IDF weighting
@@ -361,8 +364,6 @@ class Stylometry:
         cull (float): Minimum document frequency ratio (0.0-1.0). N-grams appearing in
             fewer than cull*100% of documents are removed. Helps filter rare words.
             Default: None (no culling).
-        chunk_size (int): If set, split documents into chunks of this many tokens.
-            Useful for comparing texts of similar length.
         mode (str): Attribution mode for delta classifier:
             - 'centroid': Compare to author centroids (averaged profiles)
             - 'instance': Compare to individual text instances
@@ -412,7 +413,6 @@ class Stylometry:
         distance: str = 'cosine',
         classifier: str = 'delta',
         cull: float | None = None,
-        chunk_size: int | None = None,
         mode: str = 'centroid',
     ):
         # Validate n_features
@@ -447,11 +447,6 @@ class Stylometry:
             if not isinstance(cull, (int, float)) or not (0.0 < cull < 1.0):
                 raise ValueError(f"cull must be a float between 0 and 1, got {cull}")
         
-        # Validate chunk_size
-        if chunk_size is not None:
-            if not isinstance(chunk_size, int) or chunk_size < 1:
-                raise ValueError(f"chunk_size must be a positive integer, got {chunk_size}")
-        
         # Validate mode
         if mode not in self.VALID_MODES:
             raise ValueError(f"mode must be one of {self.VALID_MODES}, got '{mode}'")
@@ -463,7 +458,6 @@ class Stylometry:
         self.distance_metric = distance
         self.classifier = classifier
         self.cull = cull
-        self.chunk_size = chunk_size
         self.mode = mode
         
         # Feature vocabulary learned from corpus
@@ -595,40 +589,6 @@ class Stylometry:
         return filtered
     
     # =========================================================================
-    # Document Chunking
-    # =========================================================================
-    
-    def _chunk_documents(
-        self, 
-        corpus: dict[str, list[list[str]]],
-    ) -> dict[str, list[list[str]]]:
-        """
-        Split documents into chunks of chunk_size tokens.
-        
-        Args:
-            corpus: Dict mapping author -> list of tokenized documents
-            
-        Returns:
-            New corpus dict with chunked documents
-        """
-        if self.chunk_size is None:
-            return corpus
-        
-        chunked_corpus: dict[str, list[list[str]]] = {}
-        
-        for author, documents in corpus.items():
-            chunks = []
-            for doc in documents:
-                # Split document into chunks
-                for i in range(0, len(doc), self.chunk_size):
-                    chunk = doc[i:i + self.chunk_size]
-                    if chunk:  # Include even small remainder chunks
-                        chunks.append(chunk)
-            chunked_corpus[author] = chunks
-        
-        return chunked_corpus
-    
-    # =========================================================================
     # Transformation Methods
     # =========================================================================
     
@@ -736,13 +696,12 @@ class Stylometry:
                     the same label are grouped together.
         
         Pipeline:
-        1. Apply chunking (if chunk_size is set)
-        2. Extract n-grams from all documents
-        3. Apply culling (remove sparse n-grams)
-        4. Select top n_features by frequency
-        5. Compute feature vectors for each document
-        6. Apply transformation (z-score or TF-IDF)
-        7. Compute author centroids (if mode='centroid')
+        1. Extract n-grams from all documents
+        2. Apply culling (remove sparse n-grams)
+        3. Select top n_features by frequency
+        4. Compute feature vectors for each document
+        5. Apply transformation (z-score or TF-IDF)
+        6. Compute author centroids (if mode='centroid')
         """
         # Convert list input to dict format
         if isinstance(corpus, list):
@@ -763,13 +722,10 @@ class Stylometry:
                 if not isinstance(doc, list) or len(doc) == 0:
                     raise ValueError(f"Document {i} for '{author}' must be non-empty list of tokens")
         
-        # Step 1: Apply chunking
-        corpus = self._chunk_documents(corpus)
-        
         # Validate we have enough documents
         total_docs = sum(len(docs) for docs in corpus.values())
         if total_docs < 2:
-            raise ValueError("corpus must contain at least 2 documents (after chunking)")
+            raise ValueError("corpus must contain at least 2 documents")
         
         self.authors = list(corpus.keys())
         
@@ -794,7 +750,7 @@ class Stylometry:
                     UserWarning
                 )
         
-        # Step 2: Extract n-grams and build corpus-wide counts
+        # Step 1: Extract n-grams and build corpus-wide counts
         corpus_ngram_counts = Counter()
         doc_ngram_sets: list[set] = []
         
@@ -809,7 +765,7 @@ class Stylometry:
                 corpus_ngram_counts.update(ngrams)
                 
                 # Generate doc_id
-                if len(documents) == 1 and self.chunk_size is None:
+                if len(documents) == 1:
                     doc_id = author
                 else:
                     doc_id = f"{author}_{i + 1}"
@@ -822,13 +778,13 @@ class Stylometry:
                     'yule_k': compute_yule_k(tokens),
                 })
         
-        # Step 3: Apply culling
+        # Step 2: Apply culling
         filtered_counts = self._apply_culling(corpus_ngram_counts, doc_ngram_sets)
         
         if len(filtered_counts) == 0:
             raise ValueError("No features remaining after culling. Lower the cull threshold.")
         
-        # Step 4: Select top n_features
+        # Step 3: Select top n_features
         self.features = extract_mfw(filtered_counts, min(self.n_features, len(filtered_counts)))
         
         if len(self.features) < self.n_features:
@@ -838,7 +794,7 @@ class Stylometry:
                 UserWarning
             )
         
-        # Step 5: Compute frequency vectors for each document
+        # Step 4: Compute frequency vectors for each document
         all_freq_vectors = []
         doc_freq_counts = np.zeros(len(self.features))  # For IDF calculation
         
@@ -854,7 +810,7 @@ class Stylometry:
         freq_matrix = np.array(all_freq_vectors)
         n_docs = len(temp_doc_data)
         
-        # Step 6: Compute transformation statistics
+        # Step 5: Compute transformation statistics
         if self.transform_type == 'zscore':
             self.feature_means = np.mean(freq_matrix, axis=0)
             self.feature_stds = np.std(freq_matrix, axis=0)
@@ -864,7 +820,7 @@ class Stylometry:
             doc_freq_counts[doc_freq_counts == 0] = 1  # Avoid division by zero
             self.idf_weights = np.log(n_docs / doc_freq_counts)
         
-        # Step 7: Build final document storage and transformed vectors
+        # Step 6: Build final document storage and transformed vectors
         self._doc_features = {}
         self.document_vectors = []
         self.document_labels = []
@@ -891,7 +847,7 @@ class Stylometry:
             self.document_ids.append(doc_id)
             self._doc_id_to_index[doc_id] = idx
         
-        # Step 8: Compute author centroids (for centroid mode)
+        # Step 7: Compute author centroids (for centroid mode)
         if self.mode == 'centroid':
             for author in self.authors:
                 author_indices = [i for i, lbl in enumerate(self.document_labels) if lbl == author]

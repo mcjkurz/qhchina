@@ -27,10 +27,10 @@ logger = logging.getLogger("qhchina.helpers.fonts")
 
 
 __all__ = [
+    'load_font',
     'load_fonts',
-    'set_font',
-    'get_font_path',
-    'current_font',
+    'get_current_font_name',
+    'get_current_font_path',
     'download_fonts',
     'list_remote_fonts',
     'list_cached_fonts',
@@ -42,6 +42,7 @@ __all__ = [
 # Configuration
 _DEFAULT_FONT_FILE = 'NotoSansTCSC-Regular.otf'
 _CACHE_DIR = _CACHE_BASE / 'fonts'
+_VALID_FONT_EXTENSIONS = ('.otf', '.ttf', '.OTF', '.TTF')
 
 # Thread safety
 _lock = threading.Lock()
@@ -100,25 +101,39 @@ def _add_to_font_manager(font_path: Path) -> str:
 
 def _set_rcparams(font_name: str) -> None:
     """Set matplotlib rcParams for the given font."""
-    is_serif = 'serif' in font_name.lower()
+    is_sans = 'sans' in font_name.lower()
     
-    if is_serif:
-        matplotlib.rcParams['font.serif'] = [font_name, 'serif']
-        matplotlib.rcParams['font.family'] = 'serif'
-    else:
+    if is_sans:
         matplotlib.rcParams['font.sans-serif'] = [font_name, 'sans-serif']
         matplotlib.rcParams['font.family'] = 'sans-serif'
+    else:
+        matplotlib.rcParams['font.serif'] = [font_name, 'serif']
+        matplotlib.rcParams['font.family'] = 'serif'
     
     matplotlib.rcParams['axes.unicode_minus'] = False
 
 
-def _ensure_cached(font_file: str, show_progress: bool = True) -> Path:
+def _validate_font_extension(font_str: str, param_name: str) -> None:
+    """Validate that a font string has a valid font extension."""
+    if not font_str.endswith(_VALID_FONT_EXTENSIONS):
+        raise ValueError(
+            f"Invalid font file for {param_name}='{font_str}'. "
+            f"Must end with one of: {', '.join(_VALID_FONT_EXTENSIONS)}"
+        )
+
+
+def _ensure_cached(
+    font_file: str,
+    show_progress: bool = True,
+    force_download: bool = False,
+) -> Path:
     """
     Ensure a font file is in the cache, downloading if necessary.
     
     Args:
         font_file: Font file name (e.g., 'NotoSerifTC-Regular.otf')
         show_progress: Show download progress
+        force_download: Re-download even if cached
     
     Returns:
         Path to the cached font file
@@ -130,7 +145,7 @@ def _ensure_cached(font_file: str, show_progress: bool = True) -> Path:
     _ensure_cache_dir()
     cached_path = _CACHE_DIR / font_file
     
-    if cached_path.exists():
+    if cached_path.exists() and not force_download:
         return cached_path
     
     # Query GitHub for download URL
@@ -145,7 +160,8 @@ def _ensure_cached(font_file: str, show_progress: bool = True) -> Path:
         )
     
     if show_progress:
-        print(f"Downloading font '{font_file}'...")
+        action = "Re-downloading" if force_download else "Downloading"
+        print(f"{action} font '{font_file}'...")
     
     _download_file(font_info['download_url'], cached_path)
     
@@ -160,147 +176,186 @@ def _ensure_cached(font_file: str, show_progress: bool = True) -> Path:
 # Public API
 # =============================================================================
 
+def load_font(
+    *,
+    remote: str | None = None,
+    path: str | Path | None = None,
+    force_download: bool = False,
+) -> str:
+    """
+    Load a font and set it as the active font for matplotlib.
+    
+    This function:
+    1. Downloads the font file if using `remote=` and not already cached
+    2. Registers the font with matplotlib's font manager
+    3. Sets matplotlib's rcParams to use this font for all subsequent plots
+       (font.family, font.sans-serif or font.serif, axes.unicode_minus)
+    
+    After calling this function, all matplotlib plots will use the loaded font.
+    
+    Args:
+        remote: Font filename from qhchina-data repository (e.g., 'NotoSerifTC-Regular.otf').
+                Uses cache if available, downloads otherwise.
+        path: Path to a local font file.
+        force_download: If True, re-download from repository even if cached.
+                        Only applies when using `remote=`. Ignored for `path=`.
+    
+    Returns:
+        The font name that was set (e.g., 'Noto Serif TC').
+    
+    If called with no arguments, loads the default font.
+    
+    Examples:
+        >>> from qhchina.helpers import load_font
+        >>> import matplotlib.pyplot as plt
+        
+        >>> # Load default font - plots will now render Chinese correctly
+        >>> load_font()
+        'Noto Sans CJK TC'
+        >>> plt.title('中文標題')  # This now works!
+        
+        >>> # Load specific font from repository
+        >>> load_font(remote='NotoSerifTC-Regular.otf')
+        'Noto Serif TC'
+        
+        >>> # Force re-download
+        >>> load_font(remote='NotoSerifTC-Regular.otf', force_download=True)
+        'Noto Serif TC'
+        
+        >>> # Load local font file
+        >>> load_font(path='/path/to/MyFont.otf')
+        'My Font'
+    
+    Raises:
+        ValueError: If both `remote` and `path` are provided, or if file extension is invalid.
+        FileNotFoundError: If local `path` does not exist.
+    """
+    if remote is not None and path is not None:
+        raise ValueError("Cannot specify both 'remote' and 'path'. Use one or the other.")
+    
+    if remote is not None:
+        _validate_font_extension(remote, 'remote')
+        cached_path = _ensure_cached(remote, force_download=force_download)
+        font_name = _add_to_font_manager(cached_path)
+    elif path is not None:
+        path_str = str(path)
+        _validate_font_extension(path_str, 'path')
+        font_path = Path(path)
+        if not font_path.exists():
+            raise FileNotFoundError(f"Font file not found: {path}")
+        font_name = _add_to_font_manager(font_path)
+    else:
+        # Default font
+        cached_path = _ensure_cached(_DEFAULT_FONT_FILE, force_download=force_download)
+        font_name = _add_to_font_manager(cached_path)
+    
+    _set_rcparams(font_name)
+    return font_name
+
+
 def load_fonts() -> str:
     """
     Load the default CJK font for matplotlib.
     
-    Downloads the font from GitHub if not already cached.
-    This is the simplest way to get started with Chinese text in plots.
+    This is a convenience function for backward compatibility.
+    Equivalent to calling `load_font()` with no arguments.
     
     Returns:
         The font name that was set (e.g., 'Noto Sans CJK TC')
     
     Example:
-        >>> import qhchina
-        >>> qhchina.load_fonts()
+        >>> from qhchina.helpers import load_fonts
+        >>> load_fonts()
         'Noto Sans CJK TC'
         >>> plt.title('中文標題')  # Now works!
     """
-    cached_path = _ensure_cached(_DEFAULT_FONT_FILE)
-    font_name = _add_to_font_manager(cached_path)
-    _set_rcparams(font_name)
-    return font_name
+    return load_font()
 
 
-def set_font(font: str) -> str:
+def get_current_font_path() -> str:
     """
-    Set matplotlib to use a specific font.
+    Get the file path of the currently loaded font.
     
-    Args:
-        font: One of:
-              - Font file name: 'NotoSerifTC-Regular.otf' (downloads from GitHub if needed)
-              - Local file path: '/path/to/font.otf' (must exist)
-              - Font name: 'Noto Serif TC', 'SimHei', etc. (sets rcParams directly)
+    This is useful for tools like WordCloud that require a font file path
+    rather than a font name.
     
     Returns:
-        The font name that was set
+        Absolute path to the currently loaded font file.
     
     Examples:
-        >>> # Use a font from qhchina-data (downloads if needed)
-        >>> qhchina.set_font('NotoSerifTC-Regular.otf')
-        'Noto Serif TC'
+        >>> from qhchina.helpers import load_font, get_current_font_path
         
-        >>> # Use a local font file
-        >>> qhchina.set_font('/path/to/MyFont.otf')
-        'My Font'
-        
-        >>> # Use an already-loaded or system font by name
-        >>> qhchina.set_font('Noto Serif TC')
-        'Noto Serif TC'
-    """
-    font_str = str(font)
-    
-    if font_str.endswith(('.otf', '.ttf', '.OTF', '.TTF')):
-        # It's a font file
-        path = Path(font_str)
-        
-        if path.exists():
-            # Local file path
-            font_name = _add_to_font_manager(path)
-        elif '/' in font_str or '\\' in font_str:
-            # Looks like a path but doesn't exist
-            raise FileNotFoundError(f"Font file not found: {font_str}")
-        else:
-            # Just a filename - download from GitHub
-            cached_path = _ensure_cached(font_str)
-            font_name = _add_to_font_manager(cached_path)
-    else:
-        # It's a font name - just use it directly
-        font_name = font_str
-    
-    _set_rcparams(font_name)
-    return font_name
-
-
-def get_font_path(font: str | None = None) -> str:
-    """
-    Get the file path for a font (for use with WordCloud, etc.).
-    
-    Args:
-        font: Font file name (e.g., 'NotoSerifTC-Regular.otf') or None for default.
-              Can also be a local file path.
-    
-    Returns:
-        Absolute path to the font file
-    
-    Example:
-        >>> path = qhchina.get_font_path()  # default font
+        >>> load_font()  # Load default font
+        'Noto Sans CJK TC'
+        >>> path = get_current_font_path()
         >>> wc = WordCloud(font_path=path, ...)
         
-        >>> path = qhchina.get_font_path('NotoSerifTC-Regular.otf')
+        >>> load_font(remote='NotoSerifTC-Regular.otf')
+        'Noto Serif TC'
+        >>> get_current_font_path()  # Returns path to NotoSerifTC-Regular.otf
+    
+    Raises:
+        RuntimeError: If no font has been loaded via load_font() yet.
     """
-    if font is None:
-        font = _DEFAULT_FONT_FILE
+    font_name = get_current_font_name()
     
-    font_str = str(font)
+    if font_name is None:
+        raise RuntimeError(
+            "No font has been loaded yet. Call load_font() first.\n"
+            "Example: load_font() or load_font(remote='NotoSerifTC-Regular.otf')"
+        )
     
-    # Check if it's an existing path
-    if Path(font_str).exists():
-        return str(Path(font_str).resolve())
+    # Use matplotlib's font manager to find the font file path
+    props = fm.FontProperties(family=font_name)
+    font_path = fm.findfont(props, fallback_to_default=False)
     
-    # Check if it ends with font extension
-    if font_str.endswith(('.otf', '.ttf', '.OTF', '.TTF')):
-        cached_path = _ensure_cached(font_str)
-        return str(cached_path)
-    
-    raise ValueError(
-        f"Cannot get path for '{font}'. "
-        f"Provide a font file name (e.g., 'NotoSerifTC-Regular.otf') or a local file path."
-    )
+    return font_path
 
 
-def download_fonts(fonts: str | list[str] | None = None) -> dict[str, str]:
+def download_fonts(fonts: list[str] | None = None) -> dict[str, str]:
     """
-    Download font files from the qhchina-data repository.
+    Pre-download font files from the qhchina-data repository.
+    
+    Use this to download fonts for offline use. The fonts are downloaded
+    but not set as the active matplotlib font. To download and activate
+    a font, use `load_font()` instead.
     
     Args:
-        fonts: Font file name(s) to download. If None, downloads ALL available fonts.
-               Examples:
-                 - None: download all fonts
-                 - 'NotoSerifTC-Regular.otf': download single font
-                 - ['NotoSerifTC-Regular.otf', 'NotoSerifSC-Regular.otf']: download multiple
+        fonts: List of font file names to download. If None, downloads ALL available fonts.
     
     Returns:
         Dict mapping file names to font names:
         {'NotoSerifTC-Regular.otf': 'Noto Serif TC', ...}
     
-    Example:
+    Examples:
+        >>> from qhchina.helpers import download_fonts
+        
         >>> # Download all fonts
-        >>> qhchina.download_fonts()
+        >>> download_fonts()
         {'NotoSansTCSC-Regular.otf': 'Noto Sans CJK TC', ...}
         
-        >>> # Download specific font
-        >>> qhchina.download_fonts('NotoSerifTC-Regular.otf')
-        {'NotoSerifTC-Regular.otf': 'Noto Serif TC'}
+        >>> # Download specific fonts
+        >>> download_fonts(['NotoSerifTC-Regular.otf', 'NotoSerifSC-Regular.otf'])
+        {'NotoSerifTC-Regular.otf': 'Noto Serif TC', ...}
+    
+    Raises:
+        TypeError: If fonts is not a list or None.
+        ValueError: If any font file has an invalid extension.
     """
     if fonts is None:
         # Download all available fonts
         remote = _query_github_api()
         font_files = [f['file'] for f in remote]
-    elif isinstance(fonts, str):
-        font_files = [fonts]
+    elif isinstance(fonts, list):
+        font_files = fonts
     else:
-        font_files = list(fonts)
+        raise TypeError(
+            f"fonts must be a list of font file names or None, got {type(fonts).__name__}. "
+            f"For a single font, use: download_fonts(['{fonts}'])"
+        )
+    
+    for font_file in font_files:
+        _validate_font_extension(font_file, 'fonts')
     
     result = {}
     for font_file in font_files:
@@ -366,12 +421,19 @@ def list_cached_fonts() -> list[dict]:
     return result
 
 
-def current_font() -> str | None:
+def get_current_font_name() -> str | None:
     """
-    Get the currently configured matplotlib font name.
+    Get the currently loaded matplotlib font name.
     
     Returns:
         The current font name, or None if using matplotlib defaults.
+    
+    Example:
+        >>> from qhchina.helpers import load_font, get_current_font_name
+        >>> load_font(remote='NotoSerifTC-Regular.otf')
+        'Noto Serif TC'
+        >>> get_current_font_name()
+        'Noto Serif TC'
     """
     try:
         font_family = matplotlib.rcParams.get('font.family', [])

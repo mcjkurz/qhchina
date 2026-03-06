@@ -6,10 +6,10 @@ This module provides:
 """
 
 from .fonts import (
+    load_font,
     load_fonts,
-    set_font,
-    get_font_path,
-    current_font,
+    get_current_font_name,
+    get_current_font_path,
     download_fonts,
     list_remote_fonts,
     list_cached_fonts,
@@ -21,10 +21,10 @@ from ..utils import LineSentenceFile
 
 __all__ = [
     # Font management
+    'load_font',
     'load_fonts',
-    'set_font', 
-    'get_font_path',
-    'current_font',
+    'get_current_font_name',
+    'get_current_font_path',
     'download_fonts',
     'list_remote_fonts',
     'list_cached_fonts',

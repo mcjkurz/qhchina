@@ -14,7 +14,7 @@ from queue import Queue
 from tqdm.auto import tqdm
 import time
 from ..vectors import cosine_similarity
-from .word2vec_utils import word2vec_c
+from .utils import word2vec_c
 from ...config import get_rng, resolve_seed
 from ...utils import iter_batches
 

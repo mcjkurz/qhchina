@@ -12,10 +12,10 @@ Example:
     from qhchina.analytics.word2vec import Word2Vec, TempRefWord2Vec, DynamicWord2Vec
 """
 
-from .word2vec_base import Word2Vec
-from .word2vec_tempref import TempRefWord2Vec
-from .word2vec_dynamic import DynamicWord2Vec
-from .word2vec_utils import (
+from .base import Word2Vec
+from .tempref import TempRefWord2Vec
+from .dynamic import DynamicWord2Vec
+from .utils import (
     BalancedSentenceIterator,
     SingleCorpusTemporalIterator,
     TemporalSentence,

@@ -17,8 +17,8 @@ import pickle
 import numpy as np
 from collections import Counter
 from collections.abc import Iterable
-from .word2vec_base import Word2Vec
-from .word2vec_utils import BalancedSentenceIterator, word2vec_c
+from .base import Word2Vec
+from .utils import BalancedSentenceIterator, word2vec_c
 from ..vectors import cosine_similarity
 
 logger = logging.getLogger("qhchina.analytics.tempref_word2vec")

@@ -332,32 +332,32 @@ class TestFonts:
         assert 'font_name' in cached[0]
         assert 'path' in cached[0]
     
-    def test_get_font_path(self):
-        """Test getting font path."""
-        from qhchina.helpers import get_font_path
+    def test_get_current_font_path(self):
+        """Test getting current font path after loading."""
+        from qhchina.helpers import load_font, get_current_font_path
         
-        # Should return a path for the default font
-        path = get_font_path()
+        # Load a font first
+        load_font()
+        
+        # Should return a path for the loaded font
+        path = get_current_font_path()
         
         assert path is not None
         assert Path(path).exists()
     
-    def test_get_font_path_with_filename(self):
-        """Test getting font path with explicit filename."""
-        from qhchina.helpers import get_font_path
+    def test_get_current_font_path_after_different_loads(self):
+        """Test that get_current_font_path returns correct path after loading different fonts."""
+        from qhchina.helpers import load_font, get_current_font_path
         
-        # Test with explicit font file names
-        for filename in ['NotoSansTCSC-Regular.otf', 'NotoSerifTC-Regular.otf']:
-            path = get_font_path(filename)
-            assert path is not None
-            assert Path(path).exists()
-    
-    def test_get_font_path_invalid_font(self):
-        """Test that invalid font name raises ValueError."""
-        from qhchina.helpers import get_font_path
+        # Load default font
+        load_font()
+        path1 = get_current_font_path()
+        assert 'NotoSans' in path1
         
-        with pytest.raises(ValueError, match="Cannot get path"):
-            get_font_path("NonExistentFont")
+        # Load a different font
+        load_font(remote='NotoSerifTC-Regular.otf')
+        path2 = get_current_font_path()
+        assert 'NotoSerif' in path2
     
     def test_load_fonts(self):
         """Test loading fonts for matplotlib."""
@@ -372,44 +372,62 @@ class TestFonts:
         """Test downloading a single font."""
         from qhchina.helpers import download_fonts
         
-        result = download_fonts('NotoSerifTC-Regular.otf')
+        result = download_fonts(['NotoSerifTC-Regular.otf'])
         
         assert isinstance(result, dict)
         assert 'NotoSerifTC-Regular.otf' in result
         assert result['NotoSerifTC-Regular.otf'] == 'Noto Serif TC'
     
-    def test_current_font(self):
-        """Test getting current font."""
-        from qhchina.helpers import current_font, load_fonts
+    def test_download_fonts_requires_list(self):
+        """Test that download_fonts requires a list, not a string."""
+        from qhchina.helpers import download_fonts
+        
+        with pytest.raises(TypeError, match="must be a list"):
+            download_fonts('NotoSerifTC-Regular.otf')
+    
+    def test_get_current_font_name(self):
+        """Test getting current font name."""
+        from qhchina.helpers import get_current_font_name, load_fonts
         
         load_fonts()
-        font = current_font()
+        font = get_current_font_name()
         
         assert font is not None
         assert font == 'Noto Sans CJK TC'
     
-    def test_set_font_with_filename(self):
-        """Test setting font with filename."""
-        from qhchina.helpers.fonts import set_font, current_font
+    def test_load_font_with_remote(self):
+        """Test loading font with remote filename."""
+        from qhchina.helpers.fonts import load_font, get_current_font_name
         
-        # Set with filename (downloads if needed)
-        font_name = set_font('NotoSerifTC-Regular.otf')
+        # Load with remote filename (downloads if needed)
+        font_name = load_font(remote='NotoSerifTC-Regular.otf')
         
         assert font_name == 'Noto Serif TC'
-        assert current_font() == 'Noto Serif TC'
+        assert get_current_font_name() == 'Noto Serif TC'
     
-    def test_set_font_with_font_name(self):
-        """Test setting font with font name."""
-        from qhchina.helpers.fonts import set_font, current_font, load_fonts
+    def test_load_font_default(self):
+        """Test loading default font."""
+        from qhchina.helpers.fonts import load_font, get_current_font_name
         
-        # First load default font
-        load_fonts()
-        
-        # Then set by name (font already in matplotlib)
-        font_name = set_font('Noto Sans CJK TC')
+        # Load default font
+        font_name = load_font()
         
         assert font_name == 'Noto Sans CJK TC'
-        assert current_font() == 'Noto Sans CJK TC'
+        assert get_current_font_name() == 'Noto Sans CJK TC'
+    
+    def test_load_font_invalid_extension(self):
+        """Test that invalid font extension raises ValueError."""
+        from qhchina.helpers.fonts import load_font
+        
+        with pytest.raises(ValueError, match="Invalid font file"):
+            load_font(remote='InvalidFont')
+    
+    def test_load_font_both_remote_and_path_raises(self):
+        """Test that specifying both remote and path raises ValueError."""
+        from qhchina.helpers.fonts import load_font
+        
+        with pytest.raises(ValueError, match="Cannot specify both"):
+            load_font(remote='NotoSerifTC-Regular.otf', path='/some/path.otf')
     
     def test_get_cache_dir(self):
         """Test getting cache directory."""

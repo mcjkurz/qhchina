@@ -21,8 +21,8 @@ import pickle
 import numpy as np
 from collections import Counter
 from collections.abc import Iterable
-from .word2vec_base import Word2Vec
-from .word2vec_utils import word2vec_c, TemporalSentenceIterator, SingleCorpusTemporalIterator
+from .base import Word2Vec
+from .utils import word2vec_c, TemporalSentenceIterator, SingleCorpusTemporalIterator
 from ..vectors import cosine_similarity
 from ...config import resolve_seed
 

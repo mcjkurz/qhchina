@@ -769,17 +769,6 @@ class TestStylometryBoundaryValues:
         
         # Should still have some features
         assert len(stylo.features) > 0
-    
-    def test_chunk_size(self, stylometry_corpus_dict):
-        """Test with chunk_size specified."""
-        from qhchina.analytics.stylometry import Stylometry
-        
-        # Use small chunk size
-        stylo = Stylometry(n_features=10, chunk_size=10)
-        stylo.fit_transform(stylometry_corpus_dict)
-        
-        # Should have more documents after chunking
-        assert len(stylo.document_ids) > 0
 
 
 class TestStylometryValidation:
