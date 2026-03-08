@@ -1836,6 +1836,8 @@ class Stylometry:
         title: str | None = None,
         fontsize: int = 10,
         color_threshold: float | None = None,
+        color_mode: str = 'clusters',
+        above_threshold_color: str = 'C0',
         filename: str | None = None,
         show: bool = True,
         distance: str | None = None,
@@ -1851,7 +1853,15 @@ class Stylometry:
             labels: Custom labels for leaves
             title: Plot title
             fontsize: Font size for labels
-            color_threshold: Distance threshold for coloring
+            color_threshold: Distance threshold for coloring. If None, uses
+                0.7 * max distance for 'clusters' mode, or no coloring for 'branches' mode.
+            color_mode: Coloring strategy:
+                - 'clusters': (scipy default) Links below threshold get distinct colors,
+                  identifying clusters that would form if cutting at that height.
+                - 'branches': Links above threshold get distinct colors, propagating
+                  downward to all descendants. Highlights major branching structure.
+            above_threshold_color: Color for links above threshold in 'clusters' mode,
+                or the default/root color in 'branches' mode when threshold is at max.
             filename: If provided, save figure to this path
             show: If True, display plot. If False, return result dict.
             distance: Distance metric override.
@@ -1868,6 +1878,10 @@ class Stylometry:
         if orientation not in valid_orientations:
             raise ValueError(f"orientation must be one of {valid_orientations}, got '{orientation}'")
         
+        valid_color_modes = ('clusters', 'branches')
+        if color_mode not in valid_color_modes:
+            raise ValueError(f"color_mode must be one of {valid_color_modes}, got '{color_mode}'")
+        
         linkage_matrix, doc_labels = self.hierarchical_clustering(
             method=method,
             level=level,
@@ -1880,14 +1894,32 @@ class Stylometry:
             doc_labels = list(labels)
         
         fig, ax = plt.subplots(figsize=figsize)
-        dendro_result = scipy_dendrogram(
-            linkage_matrix,
-            labels=doc_labels,
-            orientation=orientation,
-            leaf_font_size=fontsize,
-            color_threshold=color_threshold,
-            ax=ax,
-        )
+        
+        if color_mode == 'clusters':
+            dendro_result = scipy_dendrogram(
+                linkage_matrix,
+                labels=doc_labels,
+                orientation=orientation,
+                leaf_font_size=fontsize,
+                color_threshold=color_threshold,
+                above_threshold_color=above_threshold_color,
+                ax=ax,
+            )
+        else:
+            link_color_func = self._compute_branch_colors(
+                linkage_matrix,
+                color_threshold,
+                above_threshold_color,
+            )
+            dendro_result = scipy_dendrogram(
+                linkage_matrix,
+                labels=doc_labels,
+                orientation=orientation,
+                leaf_font_size=fontsize,
+                color_threshold=0,
+                link_color_func=link_color_func,
+                ax=ax,
+            )
         
         if title:
             ax.set_title(title, fontsize=fontsize + 4)
@@ -1903,6 +1935,78 @@ class Stylometry:
             dendro_result['fig'] = fig
             dendro_result['ax'] = ax
             return dendro_result
+    
+    def _compute_branch_colors(
+        self,
+        linkage_matrix: np.ndarray,
+        threshold: float | None,
+        default_color: str,
+    ) -> Callable[[int], str]:
+        """
+        Compute colors for 'branches' mode: major branches above threshold
+        get distinct colors that propagate to all descendants.
+        
+        Args:
+            linkage_matrix: Hierarchical clustering linkage matrix
+            threshold: Distance threshold. Links above this spawn new branch colors.
+                If None, no coloring is applied (all same color).
+            default_color: Color for the root/above-threshold portion
+        
+        Returns:
+            A function mapping cluster index to color string
+        """
+        n_leaves = len(linkage_matrix) + 1
+        n_merges = len(linkage_matrix)
+        
+        if threshold is None:
+            return lambda k: default_color
+        
+        colors = [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+        ]
+        
+        link_colors: dict[int, str] = {}
+        color_idx = 0
+        
+        def assign_colors(cluster_id: int, inherited_color: str | None) -> None:
+            nonlocal color_idx
+            
+            if cluster_id < n_leaves:
+                return
+            
+            row_idx = cluster_id - n_leaves
+            dist = linkage_matrix[row_idx, 2]
+            left = int(linkage_matrix[row_idx, 0])
+            right = int(linkage_matrix[row_idx, 1])
+            
+            if dist >= threshold:
+                link_colors[cluster_id] = default_color
+                
+                for child in (left, right):
+                    if child < n_leaves:
+                        continue
+                    child_dist = linkage_matrix[child - n_leaves, 2]
+                    if child_dist < threshold:
+                        new_color = colors[color_idx % len(colors)]
+                        color_idx += 1
+                        link_colors[child] = new_color
+                        assign_colors(child, new_color)
+                    else:
+                        assign_colors(child, None)
+            else:
+                if inherited_color is not None:
+                    link_colors[cluster_id] = inherited_color
+                else:
+                    link_colors[cluster_id] = default_color
+                assign_colors(left, inherited_color)
+                assign_colors(right, inherited_color)
+        
+        root_id = n_leaves + n_merges - 1
+        assign_colors(root_id, None)
+        
+        return lambda k: link_colors.get(k, default_color)
 
 
 # =============================================================================
