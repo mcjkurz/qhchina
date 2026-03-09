@@ -1391,6 +1391,9 @@ class HanLPSegmenter(SegmentationWrapper):
     It supports multiple pretrained models for different use cases (coarse/fine-grained,
     ancient Chinese, multilingual), and optionally POS tagging.
     
+    As of March 2026, HanLP 2.x is incompatible with transformers>=5.0 (encode_plus
+    API changes). Use: pip install "transformers<5.0" 
+    
     Args:
         model: Tokenizer model to use. Can be:
             - HanLP enum value (e.g., ``hanlp.pretrained.tok.FINE_ELECTRA_SMALL_ZH``)

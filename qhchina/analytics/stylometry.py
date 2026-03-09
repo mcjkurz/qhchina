@@ -364,6 +364,11 @@ class Stylometry:
         cull (float): Minimum document frequency ratio (0.0-1.0). N-grams appearing in
             fewer than cull*100% of documents are removed. Helps filter rare words.
             Default: None (no culling).
+        min_variance (float): Minimum variance threshold for features. Features with
+            variance (across documents) below this threshold are removed after the
+            top n_features are selected. Useful for filtering features that don't
+            vary enough to discriminate between authors. Default: None (no filtering).
+            Typical values for relative frequency features: 1e-6 to 1e-4.
         mode (str): Attribution mode for delta classifier:
             - 'centroid': Compare to author centroids (averaged profiles)
             - 'instance': Compare to individual text instances
@@ -413,6 +418,7 @@ class Stylometry:
         distance: str = 'cosine',
         classifier: str = 'delta',
         cull: float | None = None,
+        min_variance: float | None = None,
         mode: str = 'centroid',
     ):
         # Validate n_features
@@ -447,6 +453,11 @@ class Stylometry:
             if not isinstance(cull, (int, float)) or not (0.0 < cull < 1.0):
                 raise ValueError(f"cull must be a float between 0 and 1, got {cull}")
         
+        # Validate min_variance
+        if min_variance is not None:
+            if not isinstance(min_variance, (int, float)) or min_variance < 0:
+                raise ValueError(f"min_variance must be a non-negative number, got {min_variance}")
+        
         # Validate mode
         if mode not in self.VALID_MODES:
             raise ValueError(f"mode must be one of {self.VALID_MODES}, got '{mode}'")
@@ -458,6 +469,7 @@ class Stylometry:
         self.distance_metric = distance
         self.classifier = classifier
         self.cull = cull
+        self.min_variance = min_variance
         self.mode = mode
         
         # Feature vocabulary learned from corpus
@@ -809,6 +821,33 @@ class Stylometry:
         
         freq_matrix = np.array(all_freq_vectors)
         n_docs = len(temp_doc_data)
+        
+        # Step 4b: Filter by variance threshold
+        if self.min_variance is not None:
+            variances = np.var(freq_matrix, axis=0)
+            keep_mask = variances >= self.min_variance
+            n_removed = (~keep_mask).sum()
+            
+            if not keep_mask.any():
+                raise ValueError(
+                    f"No features remaining with variance >= {self.min_variance}. "
+                    "Lower the min_variance threshold."
+                )
+            
+            if n_removed > 0:
+                # Filter features, matrix, and doc_freq_counts
+                self.features = [f for f, keep in zip(self.features, keep_mask) if keep]
+                freq_matrix = freq_matrix[:, keep_mask]
+                doc_freq_counts = doc_freq_counts[keep_mask]
+                
+                # Update stored freq vectors in temp_doc_data
+                for doc_data in temp_doc_data:
+                    doc_data['freq_vector'] = doc_data['freq_vector'][keep_mask]
+                
+                logger.info(
+                    f"Variance filter (threshold={self.min_variance:.2e}): "
+                    f"removed {n_removed} low-variance features, {len(self.features)} remaining"
+                )
         
         # Step 5: Compute transformation statistics
         if self.transform_type == 'zscore':
@@ -1653,7 +1692,7 @@ class Stylometry:
         show: bool = True,
         show_loadings: bool = False,
         n_loadings: int = 20,
-        loading_by: str = 'overall',
+        loading_by: str = 'pc',
         loading_scale: float = 1.0,
         loading_alpha: float = 0.5,
         loading_color: str = 'gray',
@@ -1678,7 +1717,8 @@ class Stylometry:
                 with method='pca'.
             n_loadings: Number of top features to show as loading arrows.
             loading_by: How to select top features for loadings:
-                - 'overall': Select top N features by loading magnitude (default)
+                - 'pc': Select top N features per principal component (PC1 and PC2 separately, default)
+                - 'overall': Select top N features by combined loading magnitude
                 - 'author': Select top N features per author based on centroid direction
                   alignment (shows which features characterize each author)
             loading_scale: Scaling factor for loading arrows (default 1.0).
@@ -1704,8 +1744,8 @@ class Stylometry:
             )
             show_loadings = False
         
-        if loading_by not in ('overall', 'author'):
-            raise ValueError(f"loading_by must be 'overall' or 'author', got '{loading_by}'")
+        if loading_by not in ('overall', 'pc', 'author'):
+            raise ValueError(f"loading_by must be 'overall', 'pc', or 'author', got '{loading_by}'")
         
         vectors, doc_labels = self._get_vectors_and_labels(level)
         author_for_point = self.document_labels if level == 'document' else self.authors
@@ -1909,7 +1949,7 @@ class Stylometry:
             coords: PCA-transformed coordinates, shape (n_points, 2)
             pca: Fitted PCA object (must have components_ attribute)
             n_loadings: Number of top features to display
-            loading_by: 'overall' or 'author'
+            loading_by: 'overall', 'pc', or 'author'
             loading_scale: Multiplier to scale arrow lengths
             loading_alpha: Arrow transparency (0-1)
             loading_color: Arrow color (for overall mode)
@@ -1927,10 +1967,22 @@ class Stylometry:
         loading_max = np.max(np.abs(loadings))
         scale = (data_max / loading_max) * loading_scale
         
-        if loading_by == 'overall' or author_for_point is None:
-            # Overall mode: top N by magnitude
+        if loading_by == 'overall' or (loading_by not in ('pc', 'author') and author_for_point is None):
+            # Overall mode: top N by combined magnitude
             magnitudes = np.sqrt(loadings[:, 0]**2 + loadings[:, 1]**2)
             top_indices = np.argsort(magnitudes)[-n_loadings:]
+            self._draw_loading_arrows(
+                ax, loadings, top_indices, scale,
+                loading_color, loading_alpha, fontsize
+            )
+        elif loading_by == 'pc':
+            # Per-PC mode: top N features for each principal component
+            # Get top features for PC1 (by absolute loading)
+            pc1_top = set(np.argsort(np.abs(loadings[:, 0]))[-n_loadings:])
+            # Get top features for PC2 (by absolute loading)
+            pc2_top = set(np.argsort(np.abs(loadings[:, 1]))[-n_loadings:])
+            # Union of both sets (avoids duplicates)
+            top_indices = list(pc1_top | pc2_top)
             self._draw_loading_arrows(
                 ax, loadings, top_indices, scale,
                 loading_color, loading_alpha, fontsize
