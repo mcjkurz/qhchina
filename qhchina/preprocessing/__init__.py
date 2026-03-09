@@ -16,6 +16,8 @@ from .segmentation import (
     JiebaSegmenter,
     BertSegmenter,
     LLMSegmenter,
+    print_pos_tags,
+    POS_TAGS,
 )
 
 from .normalization import (
@@ -31,6 +33,8 @@ __all__ = [
     'JiebaSegmenter',
     'BertSegmenter',
     'LLMSegmenter',
+    'print_pos_tags',
+    'POS_TAGS',
     # Normalization
     'normalize',
     'NormalizeOptions',

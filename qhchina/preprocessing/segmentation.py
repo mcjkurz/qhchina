@@ -18,7 +18,10 @@ __all__ = [
     'JiebaSegmenter',
     'BertSegmenter',
     'LLMSegmenter',
+    'HanLPSegmenter',
     'create_segmenter',
+    'print_pos_tags',
+    'POS_TAGS',
 ]
 
 
@@ -40,6 +43,7 @@ class SegmentationWrapper:
             - str: Path to a dictionary file
             - list[str]: List of words
             - list[Tuple]: List of tuples like (word, freq, pos) or (word, freq)
+            - dict[str, str]: Dictionary mapping words to POS tags (e.g., {'word': 'n'})
         sentence_end_pattern: Regular expression pattern for sentence endings (default: 
             Chinese and English punctuation).
     """
@@ -50,7 +54,7 @@ class SegmentationWrapper:
     def __init__(self, strategy: str = "document", chunk_size: int = 512,
                  chunk_overlap: float = 0.0,
                  filters: dict[str, Any] | None = None,
-                 user_dict: str | list[str | tuple] | None = None,
+                 user_dict: str | list[str | tuple] | dict[str, str] | None = None,
                  sentence_end_pattern: str = r"([。！？\.!?……]+)"):
         if strategy is None:
             raise ValueError("strategy cannot be None")
@@ -96,12 +100,17 @@ class SegmentationWrapper:
         Returns:
             List of words or tuples if user_dict is provided, None otherwise.
             If user_dict is a file path, reads and parses the file.
+            If user_dict is a dict, converts to list of (word, tag) tuples.
         """
         if self.user_dict is None:
             return None
         
         if isinstance(self.user_dict, list):
             return self.user_dict
+        
+        # user_dict is a dict - convert to list of tuples
+        if isinstance(self.user_dict, dict):
+            return [(word, tag) for word, tag in self.user_dict.items()]
         
         # user_dict is a file path - read and parse it
         if isinstance(self.user_dict, str):
@@ -129,7 +138,7 @@ class SegmentationWrapper:
         """Get the user dictionary as a file path.
         
         If user_dict is already a path, returns it directly.
-        If user_dict is a list, creates a temporary file and returns its path.
+        If user_dict is a list or dict, creates a temporary file and returns its path.
         
         Args:
             default_freq: Default frequency to use for words without frequency.
@@ -147,32 +156,42 @@ class SegmentationWrapper:
         if isinstance(self.user_dict, str):
             return self.user_dict
         
-        # If it's a list, create a temporary file
-        if isinstance(self.user_dict, list):
-            try:
-                # Create a temporary file that won't be auto-deleted
-                fd, temp_path = tempfile.mkstemp(suffix='.txt', prefix='user_dict_')
-                self._temp_dict_path = temp_path
-                
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    for item in self.user_dict:
-                        if isinstance(item, str):
-                            # Add default frequency if specified
-                            if default_freq is not None:
-                                f.write(f"{item} {default_freq}\n")
+        # Convert dict or list to list format using base method
+        user_dict_list = self._get_user_dict_as_list()
+        if not user_dict_list:
+            return None
+        
+        # Create a temporary file from the list
+        try:
+            fd, temp_path = tempfile.mkstemp(suffix='.txt', prefix='user_dict_')
+            self._temp_dict_path = temp_path
+            
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                for item in user_dict_list:
+                    if isinstance(item, str):
+                        # Add default frequency if specified
+                        if default_freq is not None:
+                            f.write(f"{item} {default_freq}\n")
+                        else:
+                            f.write(f"{item}\n")
+                    elif isinstance(item, tuple):
+                        # Handle (word, tag) from dict conversion - need to add freq for Jieba
+                        if len(item) == 2 and default_freq is not None:
+                            # From dict: (word, tag) -> write as "word freq tag"
+                            word, tag = item
+                            if tag:
+                                f.write(f"{word} {default_freq} {tag}\n")
                             else:
-                                f.write(f"{item}\n")
-                        elif isinstance(item, tuple):
+                                f.write(f"{word} {default_freq}\n")
+                        else:
                             # Write tuple as space-separated: word freq pos
                             f.write(" ".join(str(x) for x in item) + "\n")
-                
-                logger.debug(f"Created temporary user dictionary at {temp_path}")
-                return temp_path
-            except Exception as e:
-                logger.error(f"Failed to create temporary user dictionary: {str(e)}")
-                return None
-        
-        return None
+            
+            logger.debug(f"Created temporary user dictionary at {temp_path}")
+            return temp_path
+        except Exception as e:
+            logger.error(f"Failed to create temporary user dictionary: {str(e)}")
+            return None
     
     def _cleanup_temp_files(self):
         """Clean up any temporary files created for user dictionary."""
@@ -615,6 +634,50 @@ class PKUSegmenter(SegmentationWrapper):
         # Reinitialize the segmenter without user dict
         self._init_segmenter()
         logger.info("PKUSeg user dictionary has been reset")
+    
+    def _get_user_dict_path(self, default_freq: int | None = None) -> str | None:
+        """Get the user dictionary as a file path for PKUSeg.
+        
+        PKUSeg requires a simple format: one word per line, no frequency or tags.
+        This overrides the base class method to produce PKUSeg-compatible output.
+        
+        Args:
+            default_freq: Ignored for PKUSeg (included for API compatibility).
+        
+        Returns:
+            Path to the user dictionary file, or None if no user_dict is provided.
+        """
+        if self.user_dict is None:
+            return None
+        
+        # If it's already a file path, return it directly
+        if isinstance(self.user_dict, str):
+            return self.user_dict
+        
+        # Convert dict or list to list format using base method
+        user_dict_list = self._get_user_dict_as_list()
+        if not user_dict_list:
+            return None
+        
+        # Create a temporary file with word-only format (PKUSeg requirement)
+        try:
+            fd, temp_path = tempfile.mkstemp(suffix='.txt', prefix='user_dict_')
+            self._temp_dict_path = temp_path
+            
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                for item in user_dict_list:
+                    if isinstance(item, tuple):
+                        # Extract just the word, ignore freq/tag
+                        word = item[0]
+                    else:
+                        word = str(item)
+                    f.write(f"{word}\n")
+            
+            logger.debug(f"Created PKUSeg user dictionary at {temp_path}")
+            return temp_path
+        except Exception as e:
+            logger.error(f"Failed to create temporary user dictionary: {str(e)}")
+            return None
     
     def _filter_tokens(self, tokens) -> list[str]:
         """Filter tokens based on filters."""
@@ -1319,13 +1382,252 @@ class LLMSegmenter(SegmentationWrapper):
                 
         return results
 
+
+class HanLPSegmenter(SegmentationWrapper):
+    """
+    Segmentation wrapper using HanLP 2.x neural tokenizers.
+    
+    HanLP provides state-of-the-art Chinese word segmentation using transformer models.
+    It supports multiple pretrained models for different use cases (coarse/fine-grained,
+    ancient Chinese, multilingual), and optionally POS tagging.
+    
+    Args:
+        model: Tokenizer model to use. Can be:
+            - HanLP enum value (e.g., ``hanlp.pretrained.tok.FINE_ELECTRA_SMALL_ZH``)
+            - String shorthand: 'coarse', 'fine', 'ctb9', 'ctb9_base', 'ancient', 
+              'large', 'multilingual'
+            - Full model name string (e.g., 'CTB9_TOK_ELECTRA_BASE')
+            - Direct URL or path to a model
+            - None for default (COARSE_ELECTRA_SMALL_ZH)
+        pos_tagging: Whether to enable POS tagging. When enabled, tokens can be
+            filtered using ``excluded_pos`` in filters. Default is False.
+        pos_model: POS tagger model to use when ``pos_tagging=True``. Can be:
+            - HanLP enum value (e.g., ``hanlp.pretrained.pos.CTB9_POS_ELECTRA_SMALL``)
+            - String shorthand: 'ctb9', 'ctb5', 'pku', 'c863'
+            - Full model name string (e.g., 'PKU_POS_ELECTRA_SMALL')
+            - Direct URL or path to a model
+            - None for default (CTB9_POS_ELECTRA_SMALL)
+        dict_mode: How to apply user dictionary. Options:
+            - 'force': High-priority dictionary that overrides model predictions
+              (longest-prefix-matching on input text)
+            - 'combine': Low-priority dictionary that combines with model predictions
+              (longest-prefix-matching on output tokens)
+            Default is 'force'.
+        **kwargs: Base class arguments forwarded to :class:`SegmentationWrapper`
+            (strategy, chunk_size, chunk_overlap, filters, user_dict, sentence_end_pattern).
+    
+    Example:
+        >>> import hanlp
+        >>> from qhchina.preprocessing import create_segmenter
+        >>> # Using HanLP enum directly (recommended)
+        >>> seg = create_segmenter("hanlp", model=hanlp.pretrained.tok.FINE_ELECTRA_SMALL_ZH)
+        >>> # Using string shorthand
+        >>> seg = create_segmenter("hanlp", model="fine")
+        >>> # With user dictionary
+        >>> seg = create_segmenter("hanlp", user_dict={"自定义词": "n"}, dict_mode="force")
+        >>> # With POS tagging and filtering
+        >>> seg = create_segmenter("hanlp", pos_tagging=True, 
+        ...                        filters={'excluded_pos': {'PU', 'DEG'}})
+    
+    Note:
+        HanLP uses CTB (Chinese Treebank) POS tags by default. Common tags include:
+        - NN: common noun
+        - NR: proper noun
+        - VV: verb
+        - VA: predicative adjective
+        - AD: adverb
+        - P: preposition
+        - DEG: associative 的
+        - PU: punctuation
+        - JJ: noun-modifier (adjective)
+        - CD: cardinal number
+        - M: measure word
+    """
+    
+    # Convenience map for tokenizer shortcuts
+    MODEL_MAP = {
+        "coarse": "COARSE_ELECTRA_SMALL_ZH",
+        "fine": "FINE_ELECTRA_SMALL_ZH",
+        "ctb9": "CTB9_TOK_ELECTRA_SMALL",
+        "ctb9_base": "CTB9_TOK_ELECTRA_BASE",
+        "ancient": "KYOTO_EVAHAN_TOK_LZH",
+        "large": "LARGE_ALBERT_BASE",
+        "multilingual": "UD_TOK_MMINILMV2L12",
+    }
+    
+    # Convenience map for POS tagger shortcuts
+    POS_MODEL_MAP = {
+        "ctb9": "CTB9_POS_ELECTRA_SMALL",
+        "ctb9_base": "CTB9_POS_ALBERT_BASE",
+        "ctb5": "CTB5_POS_RNN_FASTTEXT_ZH",
+        "pku": "PKU_POS_ELECTRA_SMALL",
+        "c863": "C863_POS_ELECTRA_SMALL",
+    }
+    
+    def __init__(
+        self,
+        model: str | None = None,
+        pos_tagging: bool = False,
+        pos_model: str | None = None,
+        dict_mode: str = "force",
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        
+        try:
+            import hanlp
+            self._hanlp = hanlp
+        except ImportError:
+            raise ImportError(
+                "hanlp is not installed. Please install it with 'pip install hanlp'"
+            )
+        
+        if dict_mode not in ("force", "combine"):
+            raise ValueError(f"dict_mode must be 'force' or 'combine', got '{dict_mode}'")
+        self._dict_mode = dict_mode
+        self.pos_tagging = pos_tagging
+        
+        # Resolve tokenizer model
+        model_path = self._resolve_tok_model(model, hanlp)
+        logger.info(f"Loading HanLP tokenizer model: {model_path}")
+        self._tokenizer = hanlp.load(model_path)
+        
+        # Optionally load POS tagger
+        self._pos_tagger = None
+        if pos_tagging:
+            pos_model_path = self._resolve_pos_model(pos_model, hanlp)
+            logger.info(f"Loading HanLP POS tagger model: {pos_model_path}")
+            self._pos_tagger = hanlp.load(pos_model_path)
+        
+        # Apply user dictionary if provided
+        if self.user_dict is not None:
+            self._apply_user_dict()
+    
+    def _resolve_tok_model(self, model: str | None, hanlp) -> str:
+        """Resolve tokenizer model to a loadable path/URL."""
+        if model is None:
+            return hanlp.pretrained.tok.COARSE_ELECTRA_SMALL_ZH
+        elif isinstance(model, str):
+            if model.lower() in self.MODEL_MAP:
+                model_name = self.MODEL_MAP[model.lower()]
+                return getattr(hanlp.pretrained.tok, model_name)
+            elif hasattr(hanlp.pretrained.tok, model):
+                return getattr(hanlp.pretrained.tok, model)
+            else:
+                return model
+        else:
+            return model
+    
+    def _resolve_pos_model(self, pos_model: str | None, hanlp) -> str:
+        """Resolve POS tagger model to a loadable path/URL."""
+        if pos_model is None:
+            return hanlp.pretrained.pos.CTB9_POS_ELECTRA_SMALL
+        elif isinstance(pos_model, str):
+            if pos_model.lower() in self.POS_MODEL_MAP:
+                model_name = self.POS_MODEL_MAP[pos_model.lower()]
+                return getattr(hanlp.pretrained.pos, model_name)
+            elif hasattr(hanlp.pretrained.pos, pos_model):
+                return getattr(hanlp.pretrained.pos, pos_model)
+            else:
+                return pos_model
+        else:
+            return pos_model
+    
+    def _apply_user_dict(self) -> None:
+        """Apply user dictionary to tokenizer via dict_force or dict_combine."""
+        user_dict_list = self._get_user_dict_as_list()
+        if not user_dict_list:
+            return
+        
+        default_tag = 'n'
+        custom_dict = {}
+        
+        for entry in user_dict_list:
+            if isinstance(entry, tuple):
+                word = entry[0]
+                if len(entry) == 2:
+                    tag = entry[1] if entry[1] is not None else default_tag
+                elif len(entry) >= 3:
+                    tag = entry[2] if entry[2] else default_tag
+                else:
+                    tag = default_tag
+            else:
+                word = str(entry)
+                tag = default_tag
+            custom_dict[word] = tag
+        
+        if not custom_dict:
+            return
+        
+        attr_name = "dict_force" if self._dict_mode == "force" else "dict_combine"
+        if hasattr(self._tokenizer, attr_name):
+            setattr(self._tokenizer, attr_name, custom_dict)
+            logger.info(f"Applied {len(custom_dict)} entries to HanLP {attr_name}")
+        else:
+            logger.warning(
+                f"This HanLP tokenizer model does not support {attr_name}. "
+                "User dictionary will be ignored."
+            )
+    
+    def _filter_tokens(self, tokens: list[str]) -> list[str]:
+        """Apply filters to tokens (no POS tags)."""
+        min_word_length = self.filters.get('min_word_length', 1)
+        stopwords = self.filters.get('stopwords', set())
+        
+        return [
+            token for token in tokens
+            if len(token) >= min_word_length
+            and token not in stopwords
+            and token.strip()
+        ]
+    
+    def _filter_tokens_with_pos(
+        self, tokens: list[str], pos_tags: list[str]
+    ) -> list[str]:
+        """Apply filters to tokens with POS tags."""
+        min_word_length = self.filters.get('min_word_length', 1)
+        stopwords = set(self.filters.get('stopwords', []))
+        excluded_pos = set(self.filters.get('excluded_pos', []))
+        
+        return [
+            token for token, pos in zip(tokens, pos_tags)
+            if len(token) >= min_word_length
+            and token not in stopwords
+            and pos not in excluded_pos
+            and token.strip()
+        ]
+    
+    def _process_all_texts(self, texts: list[str]) -> list[list[str]]:
+        """Process all text units with HanLP and return results.
+        
+        HanLP supports batch processing natively for efficiency.
+        When POS tagging is enabled, tokens are tagged and filtered accordingly.
+        
+        Args:
+            texts: List of all text units to process
+            
+        Returns:
+            List of lists of tokens, one list per text unit
+        """
+        tokenized = self._tokenizer(texts)
+        
+        if self.pos_tagging and self._pos_tagger is not None:
+            pos_tagged = self._pos_tagger(tokenized)
+            return [
+                self._filter_tokens_with_pos(tokens, tags)
+                for tokens, tags in zip(tokenized, pos_tagged)
+            ]
+        else:
+            return [self._filter_tokens(tokens) for tokens in tokenized]
+
+
 def create_segmenter(backend: str = "spacy", strategy: str = "document", chunk_size: int = 512,
                      chunk_overlap: float = 0.0,
                      sentence_end_pattern: str = r"([。！？\.!?……]+)", **kwargs) -> SegmentationWrapper:
     """Create a segmenter based on the specified backend.
     
     Args:
-        backend: The segmentation backend to use ('spacy', 'pkuseg', 'jieba', 'bert', 'llm')
+        backend: The segmentation backend to use ('spacy', 'pkuseg', 'jieba', 'bert', 'llm', 'hanlp')
         strategy: Strategy to process texts ['line', 'sentence', 'chunk', 'document']
         chunk_size: Size of chunks when using 'chunk' strategy
         chunk_overlap: Fraction of overlap between consecutive chunks (0.0 to <1.0).
@@ -1363,9 +1665,205 @@ def create_segmenter(backend: str = "spacy", strategy: str = "document", chunk_s
         "jieba": JiebaSegmenter,
         "bert": BertSegmenter,
         "llm": LLMSegmenter,
+        "hanlp": HanLPSegmenter,
     }
     
     key = backend.lower()
     if key not in backends:
         raise ValueError(f"Unsupported segmentation backend: {backend}")
     return backends[key](**kwargs)
+
+
+# POS tag documentation for each backend
+POS_TAGS = {
+    "spacy": {
+        "description": "spaCy uses Universal Dependencies (UD) POS tags",
+        "url": "https://universaldependencies.org/u/pos/",
+        "tags": {
+            "ADJ": "adjective",
+            "ADP": "adposition (preposition/postposition)",
+            "ADV": "adverb",
+            "AUX": "auxiliary verb",
+            "CCONJ": "coordinating conjunction",
+            "DET": "determiner",
+            "INTJ": "interjection",
+            "NOUN": "noun",
+            "NUM": "numeral",
+            "PART": "particle",
+            "PRON": "pronoun",
+            "PROPN": "proper noun",
+            "PUNCT": "punctuation",
+            "SCONJ": "subordinating conjunction",
+            "SYM": "symbol",
+            "VERB": "verb",
+            "X": "other",
+        },
+    },
+    "jieba": {
+        "description": "Jieba uses ICTCLAS/北大 POS tags (when pos_tagging=True)",
+        "url": "https://github.com/fxsjy/jieba",
+        "tags": {
+            "n": "noun (名词)",
+            "nr": "person name (人名)",
+            "ns": "place name (地名)",
+            "nt": "organization (机构团体)",
+            "nz": "other proper noun (其他专名)",
+            "v": "verb (动词)",
+            "vd": "adverb-verb (副动词)",
+            "vn": "noun-verb (名动词)",
+            "a": "adjective (形容词)",
+            "ad": "adverb-adjective (副形词)",
+            "an": "noun-adjective (名形词)",
+            "d": "adverb (副词)",
+            "m": "numeral (数词)",
+            "q": "classifier/measure word (量词)",
+            "r": "pronoun (代词)",
+            "p": "preposition (介词)",
+            "c": "conjunction (连词)",
+            "u": "auxiliary (助词)",
+            "uj": "的",
+            "uv": "地",
+            "ud": "得",
+            "ul": "了",
+            "e": "interjection (叹词)",
+            "y": "modal particle (语气词)",
+            "o": "onomatopoeia (拟声词)",
+            "w": "punctuation (标点符号)",
+            "x": "non-morpheme (非语素字)",
+            "eng": "English word",
+        },
+    },
+    "pkuseg": {
+        "description": "PKUSeg uses CTB-style POS tags (when pos_tagging=True)",
+        "url": "https://github.com/lancopku/pkuseg-python",
+        "tags": {
+            "n": "noun (名词)",
+            "nr": "person name (人名)",
+            "ns": "place name (地名)",
+            "nt": "organization (机构团体)",
+            "nx": "nominal string (名词性字符串)",
+            "nz": "other proper noun (其它专名)",
+            "v": "verb (动词)",
+            "vd": "adverb-verb (副动词)",
+            "vn": "noun-verb (名动词)",
+            "a": "adjective (形容词)",
+            "ad": "adverb-adjective (副形词)",
+            "an": "noun-adjective (名形词)",
+            "d": "adverb (副词)",
+            "m": "numeral (数词)",
+            "q": "classifier (量词)",
+            "r": "pronoun (代词)",
+            "p": "preposition (介词)",
+            "c": "conjunction (连词)",
+            "u": "auxiliary (助词)",
+            "xc": "other function word (其它虚词)",
+            "w": "punctuation (标点符号)",
+        },
+    },
+    "hanlp": {
+        "description": "HanLP uses CTB (Chinese Treebank) POS tags by default",
+        "url": "https://hanlp.hankcs.com/docs/annotations/pos/ctb.html",
+        "tags": {
+            "AD": "adverb (副词)",
+            "AS": "aspect marker (了/着/过)",
+            "BA": "把 in ba-construction",
+            "CC": "coordinating conjunction (并列连词)",
+            "CD": "cardinal number (基数词)",
+            "CS": "subordinating conjunction (从属连词)",
+            "DEC": "的 complementizer/nominalizer",
+            "DEG": "的 associative/genitive",
+            "DER": "得 resultative",
+            "DEV": "地 adverbial",
+            "DT": "determiner (限定词)",
+            "ETC": "等/等等 in coordination",
+            "FW": "foreign word",
+            "IJ": "interjection (感叹词)",
+            "JJ": "noun-modifier (形容词/名词修饰语)",
+            "LB": "被 in long bei-construction",
+            "LC": "localizer (方位词)",
+            "M": "measure word (量词)",
+            "MSP": "other particle (其它小品词)",
+            "NN": "common noun (普通名词)",
+            "NR": "proper noun (专有名词)",
+            "NT": "temporal noun (时间名词)",
+            "OD": "ordinal number (序数词)",
+            "ON": "onomatopoeia (拟声词)",
+            "P": "preposition (介词)",
+            "PN": "pronoun (代词)",
+            "PU": "punctuation (标点)",
+            "SB": "被 in short bei-construction",
+            "SP": "sentence-final particle (句末助词)",
+            "VA": "predicative adjective (谓语形容词)",
+            "VC": "copula 是",
+            "VE": "有 as main verb",
+            "VV": "other verb (其它动词)",
+        },
+        "models": {
+            "ctb9 (default)": "Chinese Treebank 9.0 tags (shown above)",
+            "pku": "PKU/北大 tags (similar to Jieba)",
+            "c863": "C863 corpus tags",
+        },
+    },
+}
+
+
+def print_pos_tags(backend: str | None = None) -> None:
+    """Print POS (Part-of-Speech) tag documentation for segmentation backends.
+    
+    This function displays the POS tags used by each backend that supports
+    POS tagging, helping users understand which tags to use in the
+    ``excluded_pos`` filter.
+    
+    Args:
+        backend: Specific backend to show tags for. Options:
+            - 'spacy': Universal Dependencies tags
+            - 'jieba': ICTCLAS/北大 tags
+            - 'pkuseg': CTB-style tags
+            - 'hanlp': Chinese Treebank tags (default) or PKU tags
+            - None: Show tags for all backends (default)
+    
+    Example:
+        >>> from qhchina.preprocessing import print_pos_tags
+        >>> print_pos_tags('hanlp')  # Show HanLP tags only
+        >>> print_pos_tags()  # Show all backends
+    """
+    if backend is not None:
+        backend = backend.lower()
+        if backend not in POS_TAGS:
+            valid = ", ".join(sorted(POS_TAGS.keys()))
+            print(f"Unknown backend: '{backend}'. Valid options: {valid}")
+            return
+        backends_to_show = [backend]
+    else:
+        backends_to_show = list(POS_TAGS.keys())
+    
+    for i, name in enumerate(backends_to_show):
+        if i > 0:
+            print()
+        info = POS_TAGS[name]
+        print("=" * 70)
+        print(f"  {name.upper()} POS Tags")
+        print("=" * 70)
+        print(f"Description: {info['description']}")
+        print(f"Reference:   {info['url']}")
+        print()
+        
+        # Print tags in a nice table format
+        print("Tags:")
+        print("-" * 50)
+        max_tag_len = max(len(tag) for tag in info["tags"])
+        for tag, desc in info["tags"].items():
+            print(f"  {tag:<{max_tag_len}}  {desc}")
+        
+        # Print model variants if available (e.g., HanLP)
+        if "models" in info:
+            print()
+            print("Model variants:")
+            print("-" * 50)
+            for model, model_desc in info["models"].items():
+                print(f"  {model}: {model_desc}")
+    
+    print()
+    print("=" * 70)
+    print("Usage: filters={'excluded_pos': {'PU', 'AD', ...}}")
+    print("=" * 70)
