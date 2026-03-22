@@ -54,7 +54,7 @@ def set_log_level(level: str) -> None:
 from .config import set_random_seed, get_random_seed, get_rng
 
 # Import corpus streaming utility
-from .utils import LineSentenceFile
+from .helpers.texts import LineSentenceFile
 
 # Import core analytics classes for convenient top-level access
 from .analytics import (

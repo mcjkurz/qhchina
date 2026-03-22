@@ -3,6 +3,7 @@ Tests for qhchina.analytics.stylometry module.
 """
 import pytest
 import numpy as np
+import pandas as pd
 
 
 @pytest.fixture
@@ -1006,3 +1007,66 @@ class TestCompareCorporaCorrection:
         assert isinstance(result, list)
         assert len(result) > 0
         assert 'adjusted_p_value' in result[0]
+
+
+# =============================================================================
+# compare_corpora: Log-likelihood and Statistic Column Tests
+# =============================================================================
+
+class TestCompareCorporaLogLikelihood:
+    """Tests for method='log_likelihood' in compare_corpora."""
+
+    def test_log_likelihood_method(self, sample_documents):
+        from qhchina.analytics import compare_corpora
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_corpora(corpus_a, corpus_b, method='log_likelihood')
+        assert isinstance(result, pd.DataFrame)
+        assert 'statistic' in result.columns
+        assert 'p_value' in result.columns
+        assert all(result['statistic'] >= 0)
+
+    def test_statistic_column_in_chi2(self, sample_documents):
+        from qhchina.analytics import compare_corpora
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_corpora(corpus_a, corpus_b, method='chi2')
+        assert 'statistic' in result.columns
+
+    def test_no_statistic_column_in_fisher(self, sample_documents):
+        from qhchina.analytics import compare_corpora
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_corpora(corpus_a, corpus_b, method='fisher')
+        assert 'statistic' not in result.columns
+
+    def test_sort_by_statistic(self, sample_documents):
+        from qhchina.analytics import compare_corpora
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_corpora(corpus_a, corpus_b, method='log_likelihood', sort_by='statistic')
+        if len(result) > 1:
+            assert result['statistic'].iloc[0] >= result['statistic'].iloc[1]
+
+    def test_sort_by_statistic_with_fisher_raises(self, sample_documents):
+        from qhchina.analytics import compare_corpora
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        with pytest.raises(ValueError, match="statistic.*not available.*fisher"):
+            compare_corpora(corpus_a, corpus_b, method='fisher', sort_by='statistic')
+
+    def test_invalid_method_raises(self, sample_documents):
+        from qhchina.analytics import compare_corpora
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        with pytest.raises(ValueError, match="method must be"):
+            compare_corpora(corpus_a, corpus_b, method='invalid')
+
+    def test_log_likelihood_as_list(self, sample_documents):
+        from qhchina.analytics import compare_corpora
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_corpora(corpus_a, corpus_b, method='log_likelihood', as_dataframe=False)
+        assert isinstance(result, list)
+        if result:
+            assert 'statistic' in result[0]

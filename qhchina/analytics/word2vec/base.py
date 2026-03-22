@@ -16,7 +16,7 @@ import time
 from ..vectors import cosine_similarity
 from .utils import word2vec_c
 from ...config import get_rng, resolve_seed
-from ...utils import iter_batches
+from ...helpers.texts import iter_batches
 
 logger = logging.getLogger("qhchina.analytics.word2vec")
 
@@ -122,6 +122,7 @@ class Word2Vec:
             self.sg = sg
             self.seed = seed
             self.alpha = alpha
+            self._initial_alpha = alpha  # Store original alpha for reset_lr=True
             self.min_alpha = min_alpha
             self.sample = sample
             self.shrink_windows = shrink_windows
@@ -134,8 +135,9 @@ class Word2Vec:
             self.calculate_loss = calculate_loss
             self.total_examples_hint = total_examples
             self.shuffle = shuffle
+            # NOTE: _sentences=None is intentional for loaded models (no corpus attached).
+            # Keep this branch in sync with the normal init path below when adding attributes.
             self._sentences = None
-            # Initialize empty structures - will be populated by load()
             self.vocab = {}
             self.index2word = []
             self.word_counts = Counter()
@@ -158,6 +160,7 @@ class Word2Vec:
         self.sg = sg
         self.seed = seed
         self.alpha = alpha
+        self._initial_alpha = alpha  # Store original alpha for reset_lr=True
         self.min_alpha = min_alpha
         self.sample = sample  # Threshold for subsampling
         self.shrink_windows = shrink_windows  # Dynamic window size
@@ -222,6 +225,106 @@ class Word2Vec:
         """
         self._count_words(sentences)
         self._filter_and_map_vocab()
+    
+    def _expand_vocab(self, sentences: Iterable[list[str]]) -> int:
+        """
+        Expand vocabulary with new words from sentences.
+        
+        Counts words in the new sentences, merges counts with existing word_counts,
+        and adds new words that meet the min_word_count threshold. Existing words
+        are not removed, only updated counts and new additions.
+        
+        New word embeddings are initialized using the mean of existing embeddings
+        (based on Hewitt 2021) to avoid breaking the pretrained distribution.
+        
+        Args:
+            sentences: Iterable of tokenized sentences.
+        
+        Returns:
+            Number of new words added to the vocabulary.
+        
+        Raises:
+            ValueError: If model has no existing vocabulary or vectors.
+        """
+        if not self.vocab or self.W is None:
+            raise ValueError(
+                "Cannot expand vocabulary on an uninitialized model. "
+                "Train the model first or use build_vocab()."
+            )
+        
+        # Count words in new sentences
+        new_counts = Counter()
+        total_new_tokens = 0
+        for sentence in sentences:
+            new_counts.update(sentence)
+            total_new_tokens += len(sentence)
+        
+        if not new_counts:
+            return 0
+        
+        # Merge counts with existing
+        old_vocab_size = len(self.vocab)
+        self.word_counts.update(new_counts)
+        self.total_corpus_tokens += total_new_tokens
+        
+        # Find genuinely new words that now meet threshold
+        new_words = []
+        for word, count in new_counts.items():
+            if word not in self.vocab and self.word_counts[word] >= self.min_word_count:
+                new_words.append(word)
+        
+        if not new_words:
+            # Update corpus_word_count for existing vocab words
+            self.corpus_word_count += sum(
+                new_counts[word] for word in new_counts if word in self.vocab
+            )
+            return 0
+        
+        # Initialize new embeddings using mean of existing (Hewitt 2021)
+        mu = np.mean(self.W, axis=0)
+        
+        # Compute covariance for optional noise
+        centered = self.W - mu
+        sigma = (centered.T @ centered) / len(self.W)
+        
+        # Sample new vectors from N(mu, sigma * 1e-5) for small noise
+        # This bounds KL divergence while adding some variation
+        n_new = len(new_words)
+        try:
+            new_vectors = self._rng.multivariate_normal(
+                mu, sigma * 1e-5, size=n_new
+            ).astype(self.dtype)
+        except np.linalg.LinAlgError:
+            # Fallback if covariance is singular: use mean with small uniform noise
+            new_vectors = np.tile(mu, (n_new, 1)).astype(self.dtype)
+            noise = (self._rng.random((n_new, self.vector_size)) - 0.5) * 0.01
+            new_vectors += noise.astype(self.dtype)
+        
+        # Expand W matrix
+        self.W = np.vstack([self.W, new_vectors])
+        
+        # Expand W_prime matrix (zeros for new words, same as initial training)
+        if self.W_prime is not None:
+            new_W_prime = np.zeros((n_new, self.vector_size), dtype=self.dtype)
+            self.W_prime = np.vstack([self.W_prime, new_W_prime])
+        
+        # Update vocabulary mappings
+        for word in new_words:
+            self.vocab[word] = len(self.index2word)
+            self.index2word.append(word)
+        
+        # Update corpus_word_count (existing vocab words + new words)
+        self.corpus_word_count += sum(
+            new_counts[word] for word in new_counts if word in self.vocab
+        )
+        
+        if self.verbose:
+            logger.info(
+                f"Vocabulary expanded: {old_vocab_size:,} -> {len(self.vocab):,} words "
+                f"(+{n_new:,} new)"
+            )
+        
+        return n_new
     
     def _count_words(self, sentences: Iterable[list[str]]) -> None:
         """
@@ -760,24 +863,76 @@ class Word2Vec:
         
         return epoch_loss, epoch_examples, epoch_words
 
-    def train(self) -> float | None:
+    def train(
+        self,
+        sentences: Iterable[list[str]] | None = None,
+        epochs: int | None = None,
+        update_vocab: bool = False,
+        reset_lr: bool = True,
+    ) -> float | None:
         """
-        Train word2vec model on sentences provided at initialization.
+        Train word2vec model on sentences.
         
         Processes sentences in batches using Cython-accelerated training.
         This approach is memory-efficient and works with both lists and iterables.
+        
+        This method supports incremental training: call it multiple times with
+        new data and ``update_vocab=True`` to expand the vocabulary and continue
+        training.
+        
+        Args:
+            sentences: Iterable of tokenized sentences. If None, uses sentences
+                provided at initialization.
+            epochs: Number of training epochs. If None, uses epochs from initialization.
+            update_vocab: If True, expand vocabulary with new words from sentences.
+                New words are initialized using the mean of existing embeddings
+                (Hewitt 2021) to preserve the pretrained distribution. Only
+                effective when the model already has a vocabulary.
+            reset_lr: If True (default), reset learning rate to ``_initial_alpha``
+                for this training run. If False, continue from current ``alpha``
+                (useful for true continuation of a training run).
         
         Returns:
             Final loss value if calculate_loss is True, None otherwise.
         
         Raises:
-            ValueError: If no sentences were provided at initialization.
+            ValueError: If no sentences are available (neither passed nor at init).
+        
+        Example:
+            # Initial training
+            model = Word2Vec(sentences, epochs=5)
+            model.train()
+            
+            # Continue training on same data
+            model.train(epochs=3, reset_lr=False)
+            
+            # Incremental training with new data
+            model.train(new_sentences, epochs=5, update_vocab=True)
         """
-        sentences = self._sentences
+        # Resolve sentences source
+        if sentences is None:
+            sentences = self._sentences
         if sentences is None:
             raise ValueError(
-                "No sentences provided. Pass sentences to Word2Vec() at initialization."
+                "No sentences provided. Pass sentences to train() or "
+                "provide them at Word2Vec() initialization."
             )
+        
+        # Resolve epochs
+        if epochs is None:
+            epochs = self.epochs
+        if epochs is None:
+            raise ValueError("epochs must be specified either at init or in train()")
+        if not isinstance(epochs, int) or epochs <= 0:
+            raise ValueError("epochs must be a positive integer")
+        
+        # Handle learning rate reset
+        if reset_lr:
+            # Reset to initial alpha (stored at init)
+            if hasattr(self, '_initial_alpha') and self._initial_alpha is not None:
+                self.alpha = self._initial_alpha
+            elif self.alpha is None:
+                self.alpha = 0.025
         
         # Handle missing alpha
         if self.alpha is None:
@@ -788,26 +943,40 @@ class Word2Vec:
         # Determine if we should decay the learning rate based on min_alpha
         decay_alpha = self.min_alpha is not None
         
-        # Build vocab if not already done
-        # Note: For non-list iterables, this will consume the iterator once
-        # The iterator must be restartable for training
-        if not self.vocab: 
+        # Handle vocabulary: expand, build from scratch, or use existing
+        if update_vocab and self.vocab:
+            # Expand existing vocabulary with new words
+            # Note: this consumes the iterator once for counting
+            new_words_added = self._expand_vocab(sentences)
+            if self.verbose and new_words_added > 0:
+                logger.info(f"Added {new_words_added:,} new words to vocabulary")
+        elif not self.vocab:
+            # Build vocabulary from scratch
             self.build_vocab(sentences)
+        
+        # Initialize vectors if needed
         if self.W is None or self.W_prime is None:
             self._initialize_vectors()
+        
+        # Ensure W_prime exists for training (may be None if loaded from external format)
+        if self.W_prime is None:
+            self.W_prime = np.zeros((len(self.vocab), self.vector_size), dtype=self.dtype)
+            if self.verbose:
+                logger.info("Initialized W_prime for training (was None from imported vectors)")
+        
         # Ensure work buffers exist (needed if continuing training on loaded model)
         if not hasattr(self, '_work') or self._work is None:
             self._work = np.zeros(self.vector_size, dtype=self.dtype)
             self._neu1 = np.zeros(self.vector_size, dtype=self.dtype)
         
         # Build alias table for O(1) negative sampling
+        # Must be rebuilt after vocab expansion
         self._build_alias_table()
         
         # Compute sample_ints for subsampling (needed for both training and example estimation)
         sample_ints = self._compute_sample_ints()
         
         # Read training configuration from instance attributes
-        epochs = self.epochs
         batch_size = self.batch_size
         callbacks = self.callbacks
         calculate_loss = self.calculate_loss
@@ -1088,6 +1257,98 @@ class Word2Vec:
         with open(path, 'wb') as f:
             pickle.dump(model_data, f, protocol=pickle.HIGHEST_PROTOCOL)
     
+    def export(self, path: str, format: str = "word2vec", binary: bool = True) -> None:
+        """
+        Export word vectors to external format for interoperability.
+        
+        Exports only the input embeddings (W matrix). Output embeddings (W_prime)
+        and word counts are not exported as external formats don't support them.
+        
+        Args:
+            path: Output file path.
+            format: Export format, one of:
+                - "word2vec": Google word2vec C format (default). Compatible with
+                  gensim's ``KeyedVectors.load_word2vec_format()``.
+                - "glove": GloVe text format. No header, space-separated values.
+                - "gensim": Gensim's native KeyedVectors format. Requires gensim.
+            binary: For word2vec format only. If True (default), write vectors as
+                binary floats. If False, write as text. Ignored for other formats.
+        
+        Example:
+            # Export to word2vec binary format
+            model.export("vectors.bin", format="word2vec", binary=True)
+            
+            # Export to text format for inspection
+            model.export("vectors.txt", format="word2vec", binary=False)
+            
+            # Export to GloVe format
+            model.export("vectors.glove.txt", format="glove")
+            
+            # Load in gensim
+            from gensim.models import KeyedVectors
+            kv = KeyedVectors.load_word2vec_format("vectors.bin", binary=True)
+        
+        Raises:
+            ValueError: If format is not recognized.
+            ImportError: If format="gensim" and gensim is not installed.
+        """
+        if self.W is None:
+            raise ValueError("No vectors to export. Train the model first.")
+        
+        format = format.lower()
+        
+        if format == "word2vec":
+            self._export_word2vec_format(path, binary=binary)
+        elif format == "glove":
+            self._export_glove_format(path)
+        elif format == "gensim":
+            self._export_gensim_format(path)
+        else:
+            raise ValueError(
+                f"Unknown format '{format}'. "
+                "Supported formats: 'word2vec', 'glove', 'gensim'."
+            )
+    
+    def _export_word2vec_format(self, path: str, binary: bool = True) -> None:
+        """Export to Google word2vec C format."""
+        vocab_size = len(self.vocab)
+        with open(path, 'wb') as f:
+            header = f"{vocab_size} {self.vector_size}\n"
+            f.write(header.encode('utf-8'))
+            
+            for word in self.index2word:
+                vec = self.W[self.vocab[word]]
+                if binary:
+                    f.write(word.encode('utf-8') + b' ')
+                    f.write(vec.astype(np.float32).tobytes())
+                    f.write(b'\n')
+                else:
+                    vec_str = ' '.join(f'{x:.6f}' for x in vec)
+                    line = f"{word} {vec_str}\n"
+                    f.write(line.encode('utf-8'))
+    
+    def _export_glove_format(self, path: str) -> None:
+        """Export to GloVe text format (no header)."""
+        with open(path, 'w', encoding='utf-8') as f:
+            for word in self.index2word:
+                vec = self.W[self.vocab[word]]
+                vec_str = ' '.join(f'{x:.6f}' for x in vec)
+                f.write(f"{word} {vec_str}\n")
+    
+    def _export_gensim_format(self, path: str) -> None:
+        """Export to gensim's native KeyedVectors format."""
+        try:
+            from gensim.models import KeyedVectors
+        except ImportError:
+            raise ImportError(
+                "gensim is required for format='gensim'. "
+                "Install it with: pip install gensim"
+            )
+        
+        kv = KeyedVectors(vector_size=self.vector_size)
+        kv.add_vectors(self.index2word, self.W)
+        kv.save(path)
+    
     @classmethod
     def load(cls, path: str) -> 'Word2Vec':
         """
@@ -1132,6 +1393,207 @@ class Word2Vec:
         # Restore corpus statistics (for potential further training or analysis)
         model.corpus_word_count = model_data.get('corpus_word_count', sum(model.word_counts.values()))
         model.total_corpus_tokens = model_data.get('total_corpus_tokens', model.corpus_word_count)
+        
+        return model
+    
+    @classmethod
+    def load_vectors(
+        cls,
+        path: str,
+        format: str = "word2vec",
+        binary: bool = True,
+    ) -> 'Word2Vec':
+        """
+        Load word vectors from external format.
+        
+        Creates a Word2Vec model from externally-trained vectors (e.g., from gensim,
+        original word2vec, or GloVe). The loaded model supports inference operations
+        (similarity queries, vector access) but lacks output embeddings (W_prime)
+        and word counts needed for training.
+        
+        To continue training on a loaded model, call ``train()`` with a corpus.
+        Use ``update_vocab=True`` if you want to add new words; otherwise the
+        existing vocabulary is preserved. Missing structures (W_prime, word_counts)
+        are initialized automatically.
+        
+        Args:
+            path: Path to the vectors file.
+            format: Input format, one of:
+                - "word2vec": Google word2vec C format (default). Compatible with
+                  gensim's ``save_word2vec_format()``.
+                - "glove": GloVe text format. No header, space-separated values.
+                - "gensim": Gensim's native KeyedVectors format.
+            binary: For word2vec format only. If True (default), expect binary floats.
+                If False, expect text format. Ignored for other formats.
+        
+        Returns:
+            Word2Vec model with loaded vectors. The model has:
+            - W: Input embeddings loaded from file
+            - W_prime: None (not available in external formats)
+            - word_counts: Empty (not available in external formats)
+        
+        Example:
+            # Load word2vec binary format
+            model = Word2Vec.load_vectors("vectors.bin", format="word2vec", binary=True)
+            
+            # Load GloVe format
+            model = Word2Vec.load_vectors("glove.txt", format="glove")
+            
+            # Use for similarity queries
+            similar = model.most_similar("king", topn=10)
+            
+            # Enable training by providing a corpus
+            model.train(new_sentences, epochs=5, update_vocab=True)
+        
+        Raises:
+            ValueError: If format is not recognized or file is malformed.
+            ImportError: If format="gensim" and gensim is not installed.
+        """
+        format = format.lower()
+        
+        if format == "word2vec":
+            return cls._load_word2vec_format(path, binary=binary)
+        elif format == "glove":
+            return cls._load_glove_format(path)
+        elif format == "gensim":
+            return cls._load_gensim_format(path)
+        else:
+            raise ValueError(
+                f"Unknown format '{format}'. "
+                "Supported formats: 'word2vec', 'glove', 'gensim'."
+            )
+    
+    @classmethod
+    def _load_word2vec_format(cls, path: str, binary: bool = True) -> 'Word2Vec':
+        """Load from Google word2vec C format."""
+        vocab = {}
+        index2word = []
+        vectors = []
+        
+        with open(path, 'rb') as f:
+            header = f.readline().decode('utf-8').strip()
+            parts = header.split()
+            if len(parts) != 2:
+                raise ValueError(
+                    f"Invalid word2vec header: expected '<vocab_size> <vector_size>', "
+                    f"got '{header}'"
+                )
+            vocab_size, vector_size = int(parts[0]), int(parts[1])
+            
+            for _ in range(vocab_size):
+                word_bytes = []
+                while True:
+                    ch = f.read(1)
+                    if ch == b' ':
+                        break
+                    if ch == b'':
+                        raise ValueError("Unexpected end of file while reading word")
+                    word_bytes.append(ch)
+                word = b''.join(word_bytes).decode('utf-8')
+                
+                if binary:
+                    vec_bytes = f.read(vector_size * 4)
+                    if len(vec_bytes) != vector_size * 4:
+                        raise ValueError(f"Unexpected end of file while reading vector for '{word}'")
+                    vec = np.frombuffer(vec_bytes, dtype=np.float32).copy()
+                    # Skip newline if present
+                    ch = f.read(1)
+                    if ch and ch != b'\n':
+                        f.seek(-1, 1)
+                else:
+                    line_rest = f.readline().decode('utf-8').strip()
+                    vec_parts = line_rest.split()
+                    if len(vec_parts) != vector_size:
+                        raise ValueError(
+                            f"Vector dimension mismatch for '{word}': "
+                            f"expected {vector_size}, got {len(vec_parts)}"
+                        )
+                    vec = np.array([float(x) for x in vec_parts], dtype=np.float32)
+                
+                vocab[word] = len(index2word)
+                index2word.append(word)
+                vectors.append(vec)
+        
+        W = np.vstack(vectors).astype(np.float32)
+        return cls._create_from_vectors(W, vocab, index2word, vector_size)
+    
+    @classmethod
+    def _load_glove_format(cls, path: str) -> 'Word2Vec':
+        """Load from GloVe text format (no header)."""
+        vocab = {}
+        index2word = []
+        vectors = []
+        vector_size = None
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                parts = line.strip().split(' ')
+                if len(parts) < 2:
+                    continue
+                
+                word = parts[0]
+                vec_parts = parts[1:]
+                
+                if vector_size is None:
+                    vector_size = len(vec_parts)
+                elif len(vec_parts) != vector_size:
+                    raise ValueError(
+                        f"Inconsistent vector dimension at line {line_num}: "
+                        f"expected {vector_size}, got {len(vec_parts)}"
+                    )
+                
+                vec = np.array([float(x) for x in vec_parts], dtype=np.float32)
+                vocab[word] = len(index2word)
+                index2word.append(word)
+                vectors.append(vec)
+        
+        if not vectors:
+            raise ValueError("No vectors found in file")
+        
+        W = np.vstack(vectors).astype(np.float32)
+        return cls._create_from_vectors(W, vocab, index2word, vector_size)
+    
+    @classmethod
+    def _load_gensim_format(cls, path: str) -> 'Word2Vec':
+        """Load from gensim's native KeyedVectors format."""
+        try:
+            from gensim.models import KeyedVectors
+        except ImportError:
+            raise ImportError(
+                "gensim is required for format='gensim'. "
+                "Install it with: pip install gensim"
+            )
+        
+        kv = KeyedVectors.load(path)
+        
+        vocab = {word: idx for idx, word in enumerate(kv.index_to_key)}
+        index2word = list(kv.index_to_key)
+        W = kv.vectors.astype(np.float32)
+        vector_size = kv.vector_size
+        
+        return cls._create_from_vectors(W, vocab, index2word, vector_size)
+    
+    @classmethod
+    def _create_from_vectors(
+        cls,
+        W: np.ndarray,
+        vocab: dict,
+        index2word: list,
+        vector_size: int,
+    ) -> 'Word2Vec':
+        """Create a Word2Vec model from loaded vectors."""
+        model = cls(
+            vector_size=vector_size,
+            _skip_init=True,
+        )
+        
+        model.vocab = vocab
+        model.index2word = index2word
+        model.W = W
+        model.W_prime = None  # Not available from external formats
+        model.word_counts = Counter()  # Not available from external formats
+        model.corpus_word_count = 0
+        model.total_corpus_tokens = 0
         
         return model
 

@@ -1004,3 +1004,40 @@ class DynamicWord2Vec(Word2Vec):
             logger.info(f"  - Embedding shape: U{model.U.shape}, V{model.V.shape}")
 
         return model
+    
+    def export(self, path: str, format: str = "word2vec", binary: bool = True) -> None:
+        """
+        Export is not supported for DynamicWord2Vec.
+        
+        DynamicWord2Vec contains 3D embedding tensors (U[T, vocab, dim]) and temporal
+        metadata that cannot be preserved in standard 2D vector formats.
+        
+        Use ``save()`` and ``load()`` instead to preserve all model data.
+        
+        Raises:
+            NotImplementedError: Always raised.
+        """
+        raise NotImplementedError(
+            "export() is not supported for DynamicWord2Vec. "
+            "Use save() and DynamicWord2Vec.load() instead to preserve "
+            "temporal embeddings and metadata (time slices, period labels)."
+        )
+    
+    @classmethod
+    def load_vectors(cls, path: str, format: str = "word2vec", binary: bool = True) -> 'DynamicWord2Vec':
+        """
+        load_vectors() is not supported for DynamicWord2Vec.
+        
+        External vector formats contain 2D embeddings, but DynamicWord2Vec requires
+        3D tensors (one embedding matrix per time slice) and temporal metadata.
+        
+        Use ``DynamicWord2Vec.load()`` to load a saved DynamicWord2Vec model.
+        
+        Raises:
+            NotImplementedError: Always raised.
+        """
+        raise NotImplementedError(
+            "load_vectors() is not supported for DynamicWord2Vec. "
+            "Use DynamicWord2Vec.load() to load a saved model, or use "
+            "Word2Vec.load_vectors() if you only need 2D embeddings."
+        )

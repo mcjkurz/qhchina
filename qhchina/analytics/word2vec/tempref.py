@@ -914,3 +914,40 @@ class TempRefWord2Vec(Word2Vec):
             logger.info(f"  - Period vocab counts: {len(model.period_vocab_counts)} periods")
         
         return model
+    
+    def export(self, path: str, format: str = "word2vec", binary: bool = True) -> None:
+        """
+        Export is not supported for TempRefWord2Vec.
+        
+        TempRefWord2Vec contains temporal metadata (period labels, target words,
+        temporal word mappings) that cannot be preserved in standard vector formats.
+        
+        Use ``save()`` and ``load()`` instead to preserve all model data.
+        
+        Raises:
+            NotImplementedError: Always raised.
+        """
+        raise NotImplementedError(
+            "export() is not supported for TempRefWord2Vec. "
+            "Use save() and TempRefWord2Vec.load() instead to preserve "
+            "temporal metadata (period labels, target words, temporal mappings)."
+        )
+    
+    @classmethod
+    def load_vectors(cls, path: str, format: str = "word2vec", binary: bool = True) -> 'TempRefWord2Vec':
+        """
+        load_vectors() is not supported for TempRefWord2Vec.
+        
+        External vector formats don't contain the temporal metadata required
+        for TempRefWord2Vec (period labels, target words, temporal mappings).
+        
+        Use ``TempRefWord2Vec.load()`` to load a saved TempRefWord2Vec model.
+        
+        Raises:
+            NotImplementedError: Always raised.
+        """
+        raise NotImplementedError(
+            "load_vectors() is not supported for TempRefWord2Vec. "
+            "Use TempRefWord2Vec.load() to load a saved model, or use "
+            "Word2Vec.load_vectors() if you only need the base embeddings."
+        )

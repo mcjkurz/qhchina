@@ -496,3 +496,29 @@ class TestGithubErrorSemantics:
 
         with pytest.raises(requests.RequestException):
             github.query_github_api("corpora")
+
+
+# =============================================================================
+# Top-level Import Tests
+# =============================================================================
+
+class TestTopLevelImports:
+    """Verify key functions are accessible from the top-level package."""
+
+    def test_import_kwic(self):
+        from qhchina import kwic
+        assert callable(kwic)
+
+    def test_import_compare_collocates(self):
+        from qhchina import compare_collocates
+        assert callable(compare_collocates)
+
+    def test_import_find_shared_sequences(self):
+        from qhchina import find_shared_sequences
+        assert callable(find_shared_sequences)
+
+    def test_import_from_analytics(self):
+        from qhchina.analytics import kwic, compare_collocates, find_shared_sequences
+        assert callable(kwic)
+        assert callable(compare_collocates)
+        assert callable(find_shared_sequences)

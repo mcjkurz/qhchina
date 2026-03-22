@@ -823,29 +823,36 @@ class TestBertSegmenter:
         # Just test that it can be imported, actual segmentation may require model download
         assert BertSegmenter is not None
     
-    def test_bert_user_dict_warning(self, bert_available, caplog):
+    def test_bert_user_dict_warning(self, bert_available, monkeypatch):
         """Test that BertSegmenter logs warning when user_dict is provided."""
         if not bert_available:
             pytest.skip("transformers not installed")
         
         import logging
-        from qhchina.preprocessing.segmentation import BertSegmenter
+        from qhchina.preprocessing import segmentation as seg_module
         
-        # This will fail to create due to missing model, but the warning should be logged
-        # before the model loading fails
+        # Track warning calls
+        warning_messages = []
+        original_warning = logging.Logger.warning
+        
+        def capture_warning(self, msg, *args, **kwargs):
+            warning_messages.append(msg % args if args else msg)
+            return original_warning(self, msg, *args, **kwargs)
+        
+        monkeypatch.setattr(logging.Logger, "warning", capture_warning)
+        
         try:
-            with caplog.at_level(logging.WARNING):
-                segmenter = BertSegmenter(
-                    model_name="bert-base-chinese",
-                    user_dict=["深度学习"]
-                )
-                segmenter.close()
+            segmenter = seg_module.BertSegmenter(
+                model_name="bert-base-chinese",
+                user_dict=["深度学习"]
+            )
+            segmenter.close()
         except Exception:
             pass  # Expected to fail due to missing model
         
         # Check that warning was logged
-        assert any("user_dict is not supported for BertSegmenter" in record.message 
-                   for record in caplog.records)
+        assert any("user_dict is not supported for BertSegmenter" in msg 
+                   for msg in warning_messages)
 
 
 class TestLLMSegmenter:

@@ -1520,3 +1520,229 @@ class TestFindCollocatesCorrection:
         
         if len(result) > 0:
             assert 'adjusted_p_value' in result.columns
+
+
+# =============================================================================
+# KWIC Tests
+# =============================================================================
+
+class TestKwic:
+    """Tests for kwic() function."""
+
+    def test_basic_kwic(self, sample_documents):
+        from qhchina.analytics.collocations import kwic
+        result = kwic(sample_documents, '也', horizon=3)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) > 0
+        expected_cols = {'left', 'node', 'right', 'left_tokens', 'right_tokens', 'doc_index', 'position'}
+        assert expected_cols.issubset(set(result.columns))
+        assert all(result['node'] == '也')
+
+    def test_kwic_multiple_targets(self, sample_documents):
+        from qhchina.analytics.collocations import kwic
+        result = kwic(sample_documents, ['也', '不'], horizon=3)
+        assert len(result) > 0
+        assert set(result['node'].unique()).issubset({'也', '不'})
+
+    def test_kwic_separator(self):
+        from qhchina.analytics.collocations import kwic
+        sentences = [['the', 'quick', 'brown', 'fox']]
+        result = kwic(sentences, 'quick', horizon=2, separator=' ')
+        assert result.iloc[0]['left'] == 'the'
+        assert result.iloc[0]['right'] == 'brown fox'
+
+    def test_kwic_default_separator_chinese(self):
+        from qhchina.analytics.collocations import kwic
+        sentences = [list("天下大乱")]
+        result = kwic(sentences, '下', horizon=2)
+        assert result.iloc[0]['left'] == '天'
+        assert result.iloc[0]['right'] == '大乱'
+
+    def test_kwic_sort_right(self):
+        from qhchina.analytics.collocations import kwic
+        sentences = [list("我的天"), list("他的地"), list("你的人")]
+        result = kwic(sentences, '的', sort_by='right')
+        rights = result['right'].tolist()
+        assert rights == sorted(rights)
+
+    def test_kwic_sort_left(self):
+        from qhchina.analytics.collocations import kwic
+        sentences = [list("我看天"), list("他看地"), list("你看人")]
+        result = kwic(sentences, '看', sort_by='left')
+        assert len(result) == 3
+
+    def test_kwic_sort_position(self):
+        from qhchina.analytics.collocations import kwic
+        sentences = [list("天下大乱"), list("天命不违")]
+        result = kwic(sentences, '天', sort_by='position')
+        assert result.iloc[0]['doc_index'] == 0
+        assert result.iloc[1]['doc_index'] == 1
+
+    def test_kwic_max_results(self, sample_documents):
+        from qhchina.analytics.collocations import kwic
+        result = kwic(sample_documents, '也', max_results=1)
+        assert len(result) <= 1
+
+    def test_kwic_as_list(self, sample_documents):
+        from qhchina.analytics.collocations import kwic
+        result = kwic(sample_documents, '也', as_dataframe=False)
+        assert isinstance(result, list)
+        if result:
+            assert 'left' in result[0]
+            assert 'node' in result[0]
+
+    def test_kwic_empty_result(self, sample_documents):
+        from qhchina.analytics.collocations import kwic
+        result = kwic(sample_documents, '不存在的词')
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+
+    def test_kwic_invalid_sort_raises(self, sample_documents):
+        from qhchina.analytics.collocations import kwic
+        with pytest.raises(ValueError, match="sort_by must be"):
+            kwic(sample_documents, '也', sort_by='invalid')
+
+    def test_kwic_empty_target_raises(self, sample_documents):
+        from qhchina.analytics.collocations import kwic
+        with pytest.raises(ValueError, match="target cannot be empty"):
+            kwic(sample_documents, [])
+
+    def test_kwic_left_tokens_and_right_tokens(self):
+        from qhchina.analytics.collocations import kwic
+        sentences = [list("天下大乱之后")]
+        result = kwic(sentences, '大', horizon=2)
+        row = result.iloc[0]
+        assert row['left_tokens'] == ['天', '下']
+        assert row['right_tokens'] == ['乱', '之']
+
+
+# =============================================================================
+# CoocMatrix.sum() and .to_ppmi() Tests
+# =============================================================================
+
+class TestCoocMatrixSum:
+    """Tests for CoocMatrix.sum() method."""
+
+    def test_sum_total(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        total = matrix.sum()
+        assert isinstance(total, int)
+        assert total > 0
+
+    def test_sum_axis0(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        col_sums = matrix.sum(axis=0)
+        assert isinstance(col_sums, np.ndarray)
+        assert len(col_sums) == len(matrix.vocab)
+        assert col_sums.sum() == matrix.sum()
+
+    def test_sum_axis1(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        row_sums = matrix.sum(axis=1)
+        assert isinstance(row_sums, np.ndarray)
+        assert len(row_sums) == len(matrix.vocab)
+        assert row_sums.sum() == matrix.sum()
+
+    def test_sum_invalid_axis_raises(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        with pytest.raises(ValueError, match="axis must be"):
+            matrix.sum(axis=2)
+
+
+class TestCoocMatrixPPMI:
+    """Tests for CoocMatrix.to_ppmi() method."""
+
+    def test_ppmi_returns_cooc_matrix(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix, CoocMatrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        ppmi = matrix.to_ppmi()
+        assert isinstance(ppmi, CoocMatrix)
+
+    def test_ppmi_values_nonnegative(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        ppmi = matrix.to_ppmi()
+        dense = ppmi.to_dense()
+        assert np.all(dense >= 0)
+
+    def test_ppmi_same_vocab(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        ppmi = matrix.to_ppmi()
+        assert ppmi.vocab == matrix.vocab
+
+    def test_ppmi_alpha_1_no_smoothing(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        ppmi = matrix.to_ppmi(alpha=1.0)
+        assert ppmi.nnz > 0
+
+    def test_ppmi_invalid_alpha_raises(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        with pytest.raises(ValueError, match="alpha must be"):
+            matrix.to_ppmi(alpha=0.0)
+        with pytest.raises(ValueError, match="alpha must be"):
+            matrix.to_ppmi(alpha=1.5)
+
+    def test_ppmi_indexing_returns_float(self, sample_documents):
+        from qhchina.analytics.collocations import cooc_matrix
+        matrix = cooc_matrix(sample_documents, horizon=2)
+        ppmi = matrix.to_ppmi()
+        val = ppmi[ppmi.vocab[0], ppmi.vocab[1]]
+        assert isinstance(val, (int, float, np.integer, np.floating))
+
+
+# =============================================================================
+# compare_collocates Tests
+# =============================================================================
+
+class TestCompareCollocates:
+    """Tests for compare_collocates() function."""
+
+    def test_basic_compare(self, sample_documents):
+        from qhchina.analytics.collocations import compare_collocates
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_collocates(corpus_a, corpus_b, target_words='也', min_obs=1)
+        assert isinstance(result, pd.DataFrame)
+        expected_cols = {'target', 'collocate', 'ratio_a', 'ratio_b',
+                        'log_ratio_change', 'obs_a', 'obs_b',
+                        'p_value_a', 'p_value_b', 'status'}
+        assert expected_cols.issubset(set(result.columns))
+
+    def test_compare_status_values(self, sample_documents):
+        from qhchina.analytics.collocations import compare_collocates
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_collocates(corpus_a, corpus_b, target_words='也', min_obs=1)
+        valid_statuses = {'strengthened', 'weakened', 'appeared', 'disappeared', 'stable'}
+        if not result.empty:
+            assert set(result['status'].unique()).issubset(valid_statuses)
+
+    def test_compare_as_list(self, sample_documents):
+        from qhchina.analytics.collocations import compare_collocates
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_collocates(corpus_a, corpus_b, target_words='也',
+                                    min_obs=1, as_dataframe=False)
+        assert isinstance(result, list)
+
+    def test_compare_empty_corpora(self):
+        from qhchina.analytics.collocations import compare_collocates
+        empty_a = [['x', 'y']]
+        empty_b = [['a', 'b']]
+        result = compare_collocates(empty_a, empty_b, target_words='z', min_obs=0)
+        assert isinstance(result, pd.DataFrame)
+
+    def test_compare_multiple_targets(self, sample_documents):
+        from qhchina.analytics.collocations import compare_collocates
+        corpus_a = sample_documents[:3]
+        corpus_b = sample_documents[2:]
+        result = compare_collocates(corpus_a, corpus_b,
+                                    target_words=['也', '不'], min_obs=1)
+        assert isinstance(result, pd.DataFrame)

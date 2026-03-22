@@ -689,7 +689,7 @@ def calculate_cooc_matrix(documents, dict word_to_index, str method,
         tuple: (indptr, indices, data) numpy arrays for direct construction
             of a scipy.sparse.csr_matrix with shape (vocab_size, vocab_size).
     """
-    from qhchina.utils import iter_batches
+    from qhchina.helpers.texts import iter_batches
     
     cdef int vocab_size = len(word_to_index)
     cdef unordered_map[long long, long long] counts

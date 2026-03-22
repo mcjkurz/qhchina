@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from ..utils import apply_p_value_correction, VALID_CORRECTIONS, iter_batches, build_vocab_from_iter
+from ..helpers.stats import apply_p_value_correction, VALID_CORRECTIONS
+from ..helpers.texts import iter_batches, build_vocab_from_iter
 from .cython_ext.statistics import batch_fisher_exact
 
 logger = logging.getLogger("qhchina.analytics.collocations")
@@ -505,7 +506,7 @@ def _calculate_collocations_window_python(
     """
     Pure Python window-based collocation counting (streaming, single-pass).
     
-    Streams batches via :func:`~qhchina.utils.iter_batches` and accumulates
+    Streams batches via :func:`~qhchina.helpers.texts.iter_batches` and accumulates
     into sparse Python dicts. Fallback when Cython is not available.
     
     Args:
@@ -633,7 +634,7 @@ def _calculate_collocations_sentence_python(
     """
     Pure Python sentence-based collocation counting (streaming, single-pass).
     
-    Streams batches via :func:`~qhchina.utils.iter_batches` and accumulates
+    Streams batches via :func:`~qhchina.helpers.texts.iter_batches` and accumulates
     into sparse Python dicts. Fallback when Cython is not available.
     
     Args:

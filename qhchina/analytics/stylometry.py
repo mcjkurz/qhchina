@@ -27,7 +27,7 @@ from tqdm.auto import tqdm
 from .cython_ext.statistics import batch_fisher_exact, batch_chi2, batch_log_likelihood
 from .vectors import cosine_similarity as _cosine_similarity, cosine_distance
 from ..config import resolve_seed
-from ..utils import validate_filters, apply_p_value_correction, VALID_CORRECTIONS
+from ..helpers.stats import validate_filters, apply_p_value_correction, VALID_CORRECTIONS
 
 logger = logging.getLogger("qhchina.analytics.stylometry")
 

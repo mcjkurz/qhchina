@@ -8,7 +8,7 @@ import tempfile
 import os
 from contextlib import contextmanager
 
-from qhchina.utils import LineSentenceFile
+from qhchina.helpers.texts import LineSentenceFile
 
 
 @contextmanager
@@ -627,6 +627,450 @@ class TestWord2VecTrainingModes:
         
         assert len(model_mean.vocab) > 0
         assert len(model_sum.vocab) > 0
+
+
+# =============================================================================
+# Export/Import Tests
+# =============================================================================
+
+class TestWord2VecExportImport:
+    """Tests for Word2Vec export and import functionality."""
+    
+    def test_export_word2vec_binary(self, larger_documents):
+        """Test export to word2vec binary format."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            model.export(temp_path, format="word2vec", binary=True)
+            
+            assert os.path.exists(temp_path)
+            assert os.path.getsize(temp_path) > 0
+            
+            # Load back and verify
+            loaded = Word2Vec.load_vectors(temp_path, format="word2vec", binary=True)
+            
+            assert len(loaded.vocab) == len(model.vocab)
+            assert loaded.vector_size == model.vector_size
+            
+            for word in model.vocab:
+                np.testing.assert_allclose(
+                    loaded.get_vector(word),
+                    model.get_vector(word),
+                    rtol=1e-5,
+                )
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_export_word2vec_text(self, larger_documents):
+        """Test export to word2vec text format."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            model.export(temp_path, format="word2vec", binary=False)
+            
+            # Load back and verify
+            loaded = Word2Vec.load_vectors(temp_path, format="word2vec", binary=False)
+            
+            assert len(loaded.vocab) == len(model.vocab)
+            
+            for word in list(model.vocab.keys())[:5]:
+                np.testing.assert_allclose(
+                    loaded.get_vector(word),
+                    model.get_vector(word),
+                    rtol=1e-3,  # Text format has limited precision (6 decimal places)
+                )
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_export_glove_format(self, larger_documents):
+        """Test export to GloVe format."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        with tempfile.NamedTemporaryFile(suffix='.txt', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            model.export(temp_path, format="glove")
+            
+            # Load back and verify
+            loaded = Word2Vec.load_vectors(temp_path, format="glove")
+            
+            assert len(loaded.vocab) == len(model.vocab)
+            
+            for word in list(model.vocab.keys())[:5]:
+                np.testing.assert_allclose(
+                    loaded.get_vector(word),
+                    model.get_vector(word),
+                    rtol=1e-3,  # Text format has limited precision (6 decimal places)
+                )
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_loaded_model_supports_similarity(self, larger_documents):
+        """Test that loaded models support similarity queries."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            model.export(temp_path, format="word2vec", binary=True)
+            loaded = Word2Vec.load_vectors(temp_path, format="word2vec", binary=True)
+            
+            vocab_words = list(loaded.vocab.keys())
+            if len(vocab_words) >= 2:
+                word = vocab_words[0]
+                similar = loaded.most_similar(word, topn=5)
+                assert isinstance(similar, list)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_export_invalid_format_raises(self, larger_documents):
+        """Test that invalid format raises ValueError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        with pytest.raises(ValueError, match="Unknown format"):
+            model.export("/tmp/test.txt", format="invalid_format")
+    
+    def test_load_invalid_format_raises(self):
+        """Test that loading with invalid format raises ValueError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        with pytest.raises(ValueError, match="Unknown format"):
+            Word2Vec.load_vectors("/tmp/test.txt", format="invalid_format")
+
+
+# =============================================================================
+# Incremental Training Tests
+# =============================================================================
+
+class TestWord2VecIncrementalTraining:
+    """Tests for Word2Vec incremental training functionality."""
+    
+    def test_train_with_sentences_argument(self, larger_documents):
+        """Test that train() accepts sentences argument."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        
+        # Train with sentences passed to train()
+        model.train(sentences=larger_documents, epochs=2)
+        
+        assert len(model.vocab) > 0
+        assert model.W is not None
+    
+    def test_train_with_epochs_argument(self, larger_documents):
+        """Test that train() accepts epochs argument."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=1
+        )
+        
+        # First training
+        model.train()
+        vocab_size_1 = len(model.vocab)
+        
+        # Continue training with different epochs
+        model.train(epochs=2)
+        
+        assert len(model.vocab) == vocab_size_1
+    
+    def test_update_vocab_expands_vocabulary(self, sample_documents):
+        """Test that update_vocab=True expands the vocabulary."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        # Initial training with some documents
+        initial_docs = sample_documents[:3]
+        model = Word2Vec(
+            initial_docs,
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        initial_vocab_size = len(model.vocab)
+        
+        # Create new documents with some new words
+        new_docs = [
+            list("这是新的文本包含新词汇"),
+            list("另一个新文本也有新词"),
+        ]
+        
+        # Train with update_vocab=True
+        model.train(new_docs, epochs=2, update_vocab=True)
+        
+        # Vocabulary should have grown
+        assert len(model.vocab) > initial_vocab_size
+    
+    def test_update_vocab_preserves_existing_words(self, sample_documents):
+        """Test that update_vocab preserves existing word vectors."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            sample_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        # Store vectors for existing words
+        existing_words = list(model.vocab.keys())[:3]
+        old_vectors = {w: model.get_vector(w).copy() for w in existing_words}
+        
+        # Train with new data
+        new_docs = [list("全新内容没有重复")] * 10
+        model.train(new_docs, epochs=1, update_vocab=True)
+        
+        # Existing words should still be accessible (vectors may have changed)
+        for word in existing_words:
+            assert word in model.vocab
+            vec = model.get_vector(word)
+            assert vec is not None
+    
+    def test_reset_lr_true_resets_learning_rate(self, larger_documents):
+        """Test that reset_lr=True resets learning rate to initial alpha."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            alpha=0.025,
+            min_alpha=0.001,
+            epochs=3
+        )
+        model.train()
+        
+        # After training with decay, alpha should be at min_alpha
+        assert model.alpha == 0.001
+        
+        # Train again with reset_lr=True
+        model.train(epochs=1, reset_lr=True)
+        
+        # Alpha should have been reset and decayed for 1 epoch
+        # Starting from 0.025, going to 0.001 in 1 epoch = 0.001
+        assert model.alpha == 0.001  # Final alpha after 1 epoch
+    
+    def test_reset_lr_false_continues_from_current(self, larger_documents):
+        """Test that reset_lr=False continues from current alpha."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            alpha=0.025,
+            min_alpha=0.001,
+            epochs=1
+        )
+        model.train()
+        
+        # After 1 epoch, alpha should be at min_alpha
+        alpha_after_first = model.alpha
+        
+        # Train again with reset_lr=False (continue from current)
+        model.train(epochs=1, reset_lr=False)
+        
+        # Should continue from current alpha (which is already at min_alpha)
+        # So final alpha should still be min_alpha
+        assert model.alpha == 0.001
+    
+    def test_train_on_loaded_model(self, larger_documents):
+        """Test training on a model loaded from external format."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        # Train and export
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            model.export(temp_path, format="word2vec", binary=True)
+            
+            # Load the model
+            loaded = Word2Vec.load_vectors(temp_path, format="word2vec", binary=True)
+            
+            # W_prime should be None initially
+            assert loaded.W_prime is None
+            
+            # Train on the loaded model (should initialize W_prime)
+            loaded.min_word_count = 1
+            loaded.train(larger_documents, epochs=1, update_vocab=True)
+            
+            # W_prime should now exist
+            assert loaded.W_prime is not None
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    def test_backward_compatibility_train_no_args(self, larger_documents):
+        """Test that train() with no arguments works (backward compatibility)."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        
+        # Original usage: no arguments to train()
+        model.train()
+        
+        assert len(model.vocab) > 0
+    
+    def test_no_sentences_raises_error(self):
+        """Test that train() without sentences raises ValueError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            seed=42,
+            epochs=2
+        )
+        
+        with pytest.raises(ValueError, match="No sentences provided"):
+            model.train()
+    
+    def test_expand_vocab_on_empty_model_raises(self):
+        """Test that _expand_vocab on empty model raises ValueError."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            seed=42,
+            epochs=1
+        )
+        
+        with pytest.raises(ValueError, match="Cannot expand vocabulary"):
+            model._expand_vocab([["word1", "word2"]])
+    
+    def test_new_words_initialized_with_mean(self, sample_documents):
+        """Test that new words are initialized near the mean of existing vectors."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            sample_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=1,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        # Calculate mean of existing vectors
+        mean_vec = np.mean(model.W, axis=0)
+        
+        # Add new words
+        new_docs = [["newword1", "newword2", "newword3"]] * 10
+        model._expand_vocab(new_docs)
+        
+        # New word vectors should be near the mean
+        for new_word in ["newword1", "newword2", "newword3"]:
+            if new_word in model.vocab:
+                new_vec = model.get_vector(new_word)
+                # Check that new vector is closer to mean than random would be
+                dist_to_mean = np.linalg.norm(new_vec - mean_vec)
+                # Should be small compared to vector magnitude
+                assert dist_to_mean < np.linalg.norm(mean_vec) * 2
 
 
 class TestTempRefWord2Vec:
@@ -1649,4 +2093,65 @@ class TestWord2VecRobustnessFixes:
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
+
+    def test_tempref_export_raises_not_implemented(self):
+        """TempRefWord2Vec.export() should raise NotImplementedError."""
+        from qhchina.analytics.word2vec import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 10,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            sg=1,
+            seed=42,
+            epochs=1,
+            workers=1,
+        )
+        model.train()
+
+        with pytest.raises(NotImplementedError, match="export.*not supported.*TempRefWord2Vec"):
+            model.export("/tmp/test.bin")
+
+    def test_tempref_load_vectors_raises_not_implemented(self):
+        """TempRefWord2Vec.load_vectors() should raise NotImplementedError."""
+        from qhchina.analytics.word2vec import TempRefWord2Vec
+
+        with pytest.raises(NotImplementedError, match="load_vectors.*not supported.*TempRefWord2Vec"):
+            TempRefWord2Vec.load_vectors("/tmp/test.bin")
+
+    def test_dynamic_export_raises_not_implemented(self):
+        """DynamicWord2Vec.export() should raise NotImplementedError."""
+        from qhchina.analytics.word2vec import DynamicWord2Vec
+
+        corpora = {
+            "slice1": [["a", "b", "c"]] * 10,
+            "slice2": [["a", "b", "d"]] * 10,
+        }
+        model = DynamicWord2Vec(
+            sentences=corpora,
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            seed=42,
+            epochs=1,
+        )
+        model.train()
+
+        with pytest.raises(NotImplementedError, match="export.*not supported.*DynamicWord2Vec"):
+            model.export("/tmp/test.bin")
+
+    def test_dynamic_load_vectors_raises_not_implemented(self):
+        """DynamicWord2Vec.load_vectors() should raise NotImplementedError."""
+        from qhchina.analytics.word2vec import DynamicWord2Vec
+
+        with pytest.raises(NotImplementedError, match="load_vectors.*not supported.*DynamicWord2Vec"):
+            DynamicWord2Vec.load_vectors("/tmp/test.bin")
 

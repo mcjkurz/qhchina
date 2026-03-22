@@ -13,7 +13,7 @@ Convenience imports:
 """
 
 # Corpus streaming
-from ..utils import LineSentenceFile
+from ..helpers.texts import LineSentenceFile
 
 # Word embeddings
 from .word2vec import Word2Vec, TempRefWord2Vec, DynamicWord2Vec
