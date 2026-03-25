@@ -1677,6 +1677,86 @@ class TestWord2VecVectorQuality:
             assert word not in similar_words, \
                 "most_similar should not include the query word"
 
+    def test_most_similar_with_vector(self, larger_documents):
+        """Test that most_similar accepts a vector as input."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            negative=3,
+            sg=1,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        vocab_words = list(model.vocab.keys())
+        if len(vocab_words) > 5:
+            word = vocab_words[0]
+            
+            # Get vector for the word
+            word_vector = model.get_vector(word)
+            
+            # Query most_similar with the vector (should give same results as word query)
+            similar_by_word = model.most_similar(word, topn=5)
+            similar_by_vector = model.most_similar(word_vector, topn=5)
+            
+            # Results should be similar, but vector query includes the original word
+            # since we didn't pass exclude
+            assert isinstance(similar_by_vector, list)
+            assert len(similar_by_vector) <= 5
+            
+            # When using exclude, results should match word-based query
+            similar_by_vector_excluded = model.most_similar(
+                word_vector, topn=5, exclude=[word]
+            )
+            assert similar_by_word == similar_by_vector_excluded
+    
+    def test_most_similar_vector_arithmetic(self, larger_documents):
+        """Test vector arithmetic with most_similar (e.g., king - man + woman)."""
+        from qhchina.analytics.word2vec import Word2Vec
+        
+        model = Word2Vec(
+            larger_documents,
+            vector_size=20,
+            window=2,
+            min_word_count=2,
+            negative=3,
+            sg=1,
+            seed=42,
+            epochs=2
+        )
+        model.train()
+        
+        vocab_words = list(model.vocab.keys())
+        if len(vocab_words) >= 3:
+            word_a, word_b, word_c = vocab_words[0], vocab_words[1], vocab_words[2]
+            
+            # Perform vector arithmetic
+            result_vector = model[word_a] - model[word_b] + model[word_c]
+            
+            # Query with the result vector
+            similar = model.most_similar(
+                result_vector, topn=5, exclude=[word_a, word_b, word_c]
+            )
+            
+            assert isinstance(similar, list)
+            assert len(similar) <= 5
+            
+            # Excluded words should not appear in results
+            similar_words = [w for w, _ in similar]
+            assert word_a not in similar_words
+            assert word_b not in similar_words
+            assert word_c not in similar_words
+            
+            # Each result should be a (word, float) tuple
+            for w, s in similar:
+                assert isinstance(w, str)
+                assert isinstance(s, float)
+
 
 # =============================================================================
 # Stress and Performance Tests

@@ -1153,41 +1153,78 @@ class Word2Vec:
     
     def most_similar(
         self, 
-        word: str, 
+        query: str | np.ndarray, 
         topn: int = 10,
-        cross_space: bool = False
+        exclude: list[str] | None = None,
+        cross_space: bool = False,
     ) -> list[tuple[str, float]]:
         """
-        Find the topn most similar words to the given word.
+        Find the topn most similar words to the given word or vector.
         
         Args:
-            word: Input word.
+            query: Input word (string) or vector (numpy array). When a word is
+                provided, its vector is looked up. When a vector is provided
+                (e.g., from arithmetic operations), it is used directly.
             topn: Number of similar words to return.
-            cross_space: If False (default), compare W vs W (second-order similarity).
-                If True, compare W vs W_prime (first-order similarity based on
+            exclude: List of words to exclude from results. Useful when doing
+                vector arithmetic to exclude the input words. When query is a
+                word, that word is automatically excluded.
+            cross_space: If False (default), compare against W (second-order similarity).
+                If True, compare against W_prime (first-order similarity based on
                 direct co-occurrence patterns).
         
         Returns:
             List of (word, similarity) tuples sorted by descending similarity.
         
         Raises:
-            KeyError: If word is not in vocabulary.
-        """
-        if word not in self.vocab:
-            raise KeyError(f"Word '{word}' not in vocabulary")
+            KeyError: If query is a word not in vocabulary.
+            ValueError: If query vector has wrong dimensions.
         
-        word_idx = self.vocab[word]
-        word_vec = self.W[word_idx].reshape(1, -1)
+        Example:
+            # Find words similar to a single word
+            model.most_similar("king", topn=5)
+            
+            # Vector arithmetic: king - man + woman ≈ queen
+            vec = model["king"] - model["man"] + model["woman"]
+            model.most_similar(vec, topn=5, exclude=["king", "man", "woman"])
+        """
+        if isinstance(query, str):
+            if query not in self.vocab:
+                raise KeyError(f"Word '{query}' not in vocabulary")
+            query_vec = self.W[self.vocab[query]].reshape(1, -1)
+            exclude_indices = {self.vocab[query]}
+        else:
+            query_vec = np.asarray(query)
+            if query_vec.ndim == 1:
+                query_vec = query_vec.reshape(1, -1)
+            if query_vec.shape[1] != self.vector_size:
+                raise ValueError(
+                    f"Query vector has {query_vec.shape[1]} dimensions, "
+                    f"expected {self.vector_size}"
+                )
+            exclude_indices = set()
+        
+        if exclude:
+            for word in exclude:
+                if word in self.vocab:
+                    exclude_indices.add(self.vocab[word])
         
         if cross_space:
-            sim = cosine_similarity(word_vec, self.W_prime).flatten()
+            sim = cosine_similarity(query_vec, self.W_prime).flatten()
         else:
-            sim = cosine_similarity(word_vec, self.W).flatten()
+            sim = cosine_similarity(query_vec, self.W).flatten()
         
-        k = min(topn + 1, len(sim))
+        k = min(topn + len(exclude_indices), len(sim))
         top_candidates = np.argpartition(-sim, k)[:k]
         top_sorted = top_candidates[np.argsort(-sim[top_candidates])]
-        return [(self.index2word[i], float(sim[i])) for i in top_sorted if i != word_idx][:topn]
+        
+        results = []
+        for i in top_sorted:
+            if i not in exclude_indices:
+                results.append((self.index2word[i], float(sim[i])))
+                if len(results) >= topn:
+                    break
+        return results
 
     def similarity(
         self, 
