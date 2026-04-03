@@ -782,7 +782,9 @@ class LDAGibbsSampler:
             'estimate_alpha': self.estimate_alpha,
             'burnin': self.burnin,
             'random_state': self.random_state,
-            'iterations': self.iterations
+            'iterations': self.iterations,
+            'log_interval': self.log_interval,
+            'rng_state': self._rng.get_state(),
         }
         
         np.save(filepath, model_data)
@@ -805,6 +807,8 @@ class LDAGibbsSampler:
         random_state = model_data.get('random_state', None)
         iterations = model_data.get('iterations', 100)
         
+        log_interval = model_data.get('log_interval', None)
+        
         model = cls(
             n_topics=model_data['n_topics'],
             alpha=model_data['alpha'],
@@ -816,7 +820,8 @@ class LDAGibbsSampler:
             stopwords=set(model_data.get('stopwords', [])) if model_data.get('stopwords') else None,
             estimate_alpha=estimate_alpha,
             burnin=burnin,
-            random_state=random_state
+            random_state=random_state,
+            log_interval=log_interval
         )
         
         model.vocabulary = model_data['vocabulary']
@@ -831,6 +836,13 @@ class LDAGibbsSampler:
             model.id_to_word = None
         
         model.alpha_sum = np.sum(model.alpha)
+        
+        # Restore RNG state so that inference produces identical results to the
+        # original model at the point it was saved (the RNG will have advanced
+        # during training; a fresh seed would reset it to the wrong position).
+        rng_state = model_data.get('rng_state')
+        if rng_state is not None:
+            model._rng.set_state(rng_state)
         
         if model_data['n_wt'] is not None:
             model.n_wt = np.array(model_data['n_wt'], dtype=np.int32)

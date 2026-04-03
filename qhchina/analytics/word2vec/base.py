@@ -208,6 +208,13 @@ class Word2Vec:
         if workers < 1:
             raise ValueError("workers must be at least 1")
         self.workers = workers
+        if workers > 1 and effective_seed is not None:
+            logger.warning(
+                "Setting a random seed with workers > 1 does not guarantee "
+                "reproducible results. The ordering of floating-point operations "
+                "across threads is non-deterministic. For fully reproducible "
+                "training, use workers=1."
+            )
         self.callbacks = callbacks
         self.calculate_loss = calculate_loss
         self.total_examples_hint = total_examples
