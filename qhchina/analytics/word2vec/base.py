@@ -2,6 +2,19 @@
 Word2Vec implementation for learning word embeddings.
 
 Provides CBOW and Skip-gram architectures for training word vectors from text corpora.
+
+Token-count terminology used throughout this module:
+
+- ``input_words``: every token supplied by the corpus, including tokens that
+  are not in the fitted vocabulary.
+- ``vocab_words``: input tokens found in the fitted vocabulary, counted before
+  subsampling.
+- ``retained_words``: vocabulary tokens left after subsampling in the compiled
+  training buffer.
+- ``examples``: actual training objectives (Skip-gram pairs or CBOW centers).
+
+Learning-rate progress uses input words so its numerator and exact corpus-size
+denominator always describe the same token stream.
 """
 
 import logging
@@ -57,8 +70,6 @@ class Word2Vec:
         workers (int): Number of worker threads for parallel training (default: 1).
         callbacks (list of callable, optional): Callback functions to call after each epoch.
         calculate_loss (bool): Whether to calculate and return the final loss (default: True).
-        total_examples (int, optional): Total number of training examples per epoch. When provided 
-            along with ``min_alpha``, uses this exact value for learning rate decay calculation.
         shuffle (bool, optional): Whether to shuffle sentences before each epoch. 
             Defaults to True if sentences is a list, False otherwise.
     
@@ -105,7 +116,6 @@ class Word2Vec:
         workers: int = 1,
         callbacks: list[Callable] | None = None,
         calculate_loss: bool = True,
-        total_examples: int | None = None,
         shuffle: bool | None = None,
         _skip_init: bool = False,
     ):
@@ -133,7 +143,6 @@ class Word2Vec:
             self.workers = workers
             self.callbacks = callbacks
             self.calculate_loss = calculate_loss
-            self.total_examples_hint = total_examples
             self.shuffle = shuffle
             # NOTE: _sentences=None is intentional for loaded models (no corpus attached).
             # Keep this branch in sync with the normal init path below when adding attributes.
@@ -202,8 +211,12 @@ class Word2Vec:
         
         # Training configuration
         self.epochs = epochs
-        if batch_size <= 0:
-            raise ValueError("batch_size must be greater than 0")
+        max_batch_words = word2vec_c.MAX_WORDS_IN_BATCH_CAP
+        if batch_size <= 0 or batch_size > max_batch_words:
+            raise ValueError(
+                f"batch_size must be between 1 and {max_batch_words:,} words "
+                "(the fixed capacity of the compiled training buffer)"
+            )
         self.batch_size = batch_size
         if workers < 1:
             raise ValueError("workers must be at least 1")
@@ -217,7 +230,6 @@ class Word2Vec:
             )
         self.callbacks = callbacks
         self.calculate_loss = calculate_loss
-        self.total_examples_hint = total_examples
         self.shuffle = shuffle
 
     def build_vocab(self, sentences: Iterable[list[str]]) -> None:
@@ -232,8 +244,26 @@ class Word2Vec:
         """
         self._count_words(sentences)
         self._filter_and_map_vocab()
+
+    def _input_words_per_epoch(self, sentences: Iterable[list[str]]) -> int:
+        """Return the exact raw-token count produced by one corpus traversal."""
+        if hasattr(sentences, "token_count"):
+            return int(sentences.token_count)
+        if hasattr(sentences, "_total_tokens"):
+            return int(sentences._total_tokens)
+        total = 0
+        max_batch_words = word2vec_c.MAX_WORDS_IN_BATCH_CAP
+        for sentence_number, sentence in enumerate(sentences, start=1):
+            if len(sentence) > max_batch_words:
+                raise ValueError(
+                    f"Sentence {sentence_number} contains {len(sentence):,} words, "
+                    f"exceeding the compiled limit of {max_batch_words:,}. "
+                    "Split the sentence before training."
+                )
+            total += len(sentence)
+        return total
     
-    def _expand_vocab(self, sentences: Iterable[list[str]]) -> int:
+    def _expand_vocab(self, sentences: Iterable[list[str]]) -> tuple[int, int]:
         """
         Expand vocabulary with new words from sentences.
         
@@ -248,7 +278,7 @@ class Word2Vec:
             sentences: Iterable of tokenized sentences.
         
         Returns:
-            Number of new words added to the vocabulary.
+            Tuple of ``(new_words_added, tokens_in_update_corpus)``.
         
         Raises:
             ValueError: If model has no existing vocabulary or vectors.
@@ -262,12 +292,19 @@ class Word2Vec:
         # Count words in new sentences
         new_counts = Counter()
         total_new_tokens = 0
-        for sentence in sentences:
+        max_batch_words = word2vec_c.MAX_WORDS_IN_BATCH_CAP
+        for sentence_number, sentence in enumerate(sentences, start=1):
+            if len(sentence) > max_batch_words:
+                raise ValueError(
+                    f"Sentence {sentence_number} contains {len(sentence):,} words, "
+                    f"exceeding the compiled limit of {max_batch_words:,}. "
+                    "Split the sentence before training."
+                )
             new_counts.update(sentence)
             total_new_tokens += len(sentence)
         
         if not new_counts:
-            return 0
+            return 0, 0
         
         # Merge counts with existing
         old_vocab_size = len(self.vocab)
@@ -285,7 +322,7 @@ class Word2Vec:
             self.corpus_word_count += sum(
                 new_counts[word] for word in new_counts if word in self.vocab
             )
-            return 0
+            return 0, total_new_tokens
         
         # Initialize new embeddings using mean of existing (Hewitt 2021)
         mu = np.mean(self.W, axis=0)
@@ -331,7 +368,7 @@ class Word2Vec:
                 f"(+{n_new:,} new)"
             )
         
-        return n_new
+        return n_new, total_new_tokens
     
     def _count_words(self, sentences: Iterable[list[str]]) -> None:
         """
@@ -346,18 +383,26 @@ class Word2Vec:
         Raises:
             ValueError: If sentences is empty or contains no words.
         """
-        self.word_counts = Counter()
+        word_counts = Counter()
         sentence_count = 0
+        max_batch_words = word2vec_c.MAX_WORDS_IN_BATCH_CAP
         
-        for sentence in sentences:
-            self.word_counts.update(sentence)
+        for sentence_number, sentence in enumerate(sentences, start=1):
+            if len(sentence) > max_batch_words:
+                raise ValueError(
+                    f"Sentence {sentence_number} contains {len(sentence):,} words, "
+                    f"exceeding the compiled limit of {max_batch_words:,}. "
+                    "Split the sentence before training."
+                )
+            word_counts.update(sentence)
             sentence_count += 1
         
         if sentence_count == 0:
             raise ValueError("sentences cannot be empty")
         
-        if not self.word_counts:
+        if not word_counts:
             raise ValueError("sentences contains no words. Provide non-empty tokenized sentences.")
+        self.word_counts = word_counts
     
     def _filter_and_map_vocab(self) -> None:
         """
@@ -407,58 +452,6 @@ class Word2Vec:
                 f"{self.corpus_word_count:,} tokens in vocab, "
                 f"{self.total_corpus_tokens:,} total tokens"
             )
-
-    def _estimate_example_count(self, sample_ints: np.ndarray) -> int:
-        """
-        Estimate total training examples per epoch for learning rate decay scheduling.
-        
-        Args:
-            sample_ints: Pre-computed subsampling thresholds from _compute_sample_ints().
-        
-        Returns:
-            Estimated number of training examples per epoch.
-        """
-        # Vocabulary coverage: probability that a random word position is in vocabulary
-        if self.total_corpus_tokens > 0:
-            vocab_coverage = self.corpus_word_count / self.total_corpus_tokens
-        else:
-            vocab_coverage = 1.0
-        
-        # Edge factor: accounts for sentence boundary effects where context windows
-        # are truncated. This is the only remaining heuristic (~5% loss estimate).
-        edge_factor = 0.95
-        
-        # Calculate effective word count after subsampling
-        # Convert sample_ints back to keep probabilities: keep_prob = sample_ints / (2^32 - 1)
-        if self.sample > 0 and sample_ints is not None and self.corpus_word_count > 0:
-            # Expected retained words = sum of (count * keep_probability)
-            max_uint32 = 4294967295.0
-            effective_words = sum(
-                self.word_counts[word] * (sample_ints[idx] / max_uint32)
-                for word, idx in self.vocab.items()
-            )
-            # Average keep probability for context words (same distribution)
-            avg_keep_prob = effective_words / self.corpus_word_count
-        else:
-            effective_words = self.corpus_word_count
-            avg_keep_prob = 1.0
-        
-        # Average window size: if shrink_windows, uniform[1, window] has mean (window+1)/2
-        avg_window = (self.window + 1) / 2.0 if self.shrink_windows else self.window
-        
-        if self.sg:  # Skip-gram
-            # Each center word pairs with ~2*window context words (left + right)
-            # Context words must: (1) be in vocabulary, (2) survive subsampling
-            # Edge factor accounts for truncated windows at sentence boundaries
-            estimated = int(effective_words * 2 * avg_window * vocab_coverage * avg_keep_prob * edge_factor)
-        else:  # CBOW
-            # Each center word generates 1 example (context words as input)
-            # Edge factor accounts for sentence boundaries
-            # Additional factor for cases where all context words are subsampled away
-            context_survival = max(0.5, vocab_coverage * avg_keep_prob)
-            estimated = int(effective_words * edge_factor * context_survival)
-        
-        return max(1, estimated)
 
     def _initialize_vectors(self) -> None:
         """Initialize embedding matrices and work buffers.
@@ -589,35 +582,32 @@ class Word2Vec:
         
         Higher keep probability → higher threshold → more likely to be kept.
         """
+        return self._compute_sample_ints_from_counts(
+            self.word_counts,
+            self.corpus_word_count,
+        )
+
+    def _compute_sample_ints_from_counts(
+        self,
+        counts_by_word: Counter,
+        total_count: int,
+    ) -> np.ndarray:
+        """Build subsampling thresholds from one explicit token distribution."""
         sample_ints = np.zeros(len(self.vocab), dtype=np.uint32)
-        
-        if self.sample <= 0:
-            # No subsampling - thresholds don't matter because use_subsampling=False
-            # in the Cython call, so this array won't be used for comparisons.
+        if self.sample <= 0 or total_count <= 0:
             return sample_ints
-        
-        total_words = self.corpus_word_count
-        
-        # Guard against empty vocabulary (all words filtered)
-        if total_words == 0:
-            return sample_ints
-        
-        # Build counts array ordered by vocab index
-        V = len(self.vocab)
-        counts = np.empty(V, dtype=np.float64)
-        for word, idx in self.vocab.items():
-            counts[idx] = self.word_counts[word]
-        
-        # Google/Gensim formula: keep_prob = sqrt(t/f) + t/f
-        word_freq = counts / total_words
+
+        counts = np.array(
+            [counts_by_word.get(word, 0) for word in self.index2word],
+            dtype=np.float64,
+        )
+        observed = counts > 0
+        keep_prob = np.ones(len(counts), dtype=np.float64)
+        word_freq = counts[observed] / total_count
         t_over_f = self.sample / word_freq
-        keep_prob = np.sqrt(t_over_f) + t_over_f
+        keep_prob[observed] = np.sqrt(t_over_f) + t_over_f
         np.clip(keep_prob, 0.0, 1.0, out=keep_prob)
-        
-        # Convert to uint32 thresholds: word is kept if threshold >= random
-        sample_ints = (keep_prob * 4294967295.0).clip(0, 4294967295).astype(np.uint32)
-        
-        return sample_ints
+        return (keep_prob * 4294967295.0).astype(np.uint32)
     
     def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -663,9 +653,9 @@ class Word2Vec:
             context_buffer: Thread-private context index buffer (CBOW only).
         
         Returns:
-            Tuple of (batch_loss, batch_examples, batch_words).
+            Tuple of (batch_loss, batch_examples, batch_vocab_words).
         """
-        batch_loss, batch_examples, batch_words, _ = word2vec_c.train_batch(
+        batch_loss, batch_examples, batch_vocab_words, _ = word2vec_c.train_batch(
             self.W,
             self.W_prime,
             batch,
@@ -686,7 +676,7 @@ class Word2Vec:
             random_seed,
             calculate_loss,
         )
-        return batch_loss, batch_examples, batch_words
+        return batch_loss, batch_examples, batch_vocab_words
     
     def _worker_loop(
         self,
@@ -702,8 +692,9 @@ class Word2Vec:
         thread-private buffers, and reports progress back via the progress queue.
         
         Args:
-            job_queue: Queue containing (batch, alpha, seed) tuples or None (poison pill).
-            progress_queue: Queue for reporting (loss, examples, words) results.
+            job_queue: Queue containing ``(batch, input_words, alpha, seed)``
+                tuples or None (poison pill).
+            progress_queue: Queue for reporting loss and token-count results.
             sample_ints: Subsampling thresholds array (shared, read-only).
             calculate_loss: Whether to compute and report loss values.
         """
@@ -715,22 +706,32 @@ class Word2Vec:
                 progress_queue.put(None)
                 break
             
-            batch, alpha, seed = job
+            batch, batch_input_words, alpha, seed = job
             
-            batch_loss, batch_examples, batch_words = self._train_batch_worker(
-                batch, sample_ints, alpha, seed, calculate_loss, work, neu1, context_buffer
-            )
-            
-            progress_queue.put((batch_loss, batch_examples, batch_words))
+            try:
+                batch_loss, batch_examples, batch_vocab_words = self._train_batch_worker(
+                    batch, sample_ints, alpha, seed, calculate_loss, work, neu1, context_buffer
+                )
+                progress_queue.put(
+                    (
+                        batch_loss,
+                        batch_examples,
+                        batch_vocab_words,
+                        batch_input_words,
+                    )
+                )
+            except Exception as exc:
+                progress_queue.put(("worker_error", exc))
     
     def _job_producer(
         self,
         sentences: Iterable[list[str]],
         job_queue: Queue,
+        progress_queue: Queue,
         start_alpha: float,
         min_alpha_val: float,
         decay_alpha: bool,
-        total_words_all_epochs: int,
+        input_words_per_epoch: int,
         epoch: int,
         epochs: int,
     ) -> None:
@@ -743,31 +744,53 @@ class Word2Vec:
         
         Args:
             sentences: Iterable of tokenized sentences.
-            job_queue: Queue to put (batch, alpha, seed) jobs into.
+            job_queue: Queue to put ``(batch, input_words, alpha, seed)`` jobs into.
+            progress_queue: Queue used to report producer failures.
             start_alpha: Initial learning rate.
             min_alpha_val: Minimum learning rate (for decay).
             decay_alpha: Whether to decay learning rate.
-            total_words_all_epochs: Total words across all epochs (for decay calculation).
+            input_words_per_epoch: All input tokens in one epoch.
             epoch: Current epoch number (0-indexed).
             epochs: Total number of epochs.
         """
-        words_produced = 0
-        base_words = epoch * self.corpus_word_count
-        
-        for batch in iter_batches(sentences, batch_words=self.batch_size, max_length=None):
-            if decay_alpha and total_words_all_epochs > 0:
-                global_words = base_words + words_produced
-                progress = min(global_words / total_words_all_epochs, 1.0)
-                batch_alpha = start_alpha + (min_alpha_val - start_alpha) * progress
-            else:
-                batch_alpha = start_alpha
-            
-            batch_seed = self._get_random_state()
-            job_queue.put((batch, batch_alpha, batch_seed))
-            words_produced += sum(len(s) for s in batch)
-        
-        for _ in range(self.workers):
-            job_queue.put(None)
+        input_words_queued = 0
+        total_input_words = input_words_per_epoch * epochs
+        epoch_input_offset = epoch * input_words_per_epoch
+        max_batch_words = word2vec_c.MAX_WORDS_IN_BATCH_CAP
+
+        def validated_sentences():
+            for sentence_number, sentence in enumerate(sentences, start=1):
+                if len(sentence) > max_batch_words:
+                    raise ValueError(
+                        f"Sentence {sentence_number} contains {len(sentence):,} words, "
+                        f"exceeding the compiled limit of {max_batch_words:,}. "
+                        "Split the sentence before training."
+                    )
+                yield sentence
+
+        try:
+            batches = iter_batches(
+                validated_sentences(),
+                batch_words=self.batch_size,
+                max_length=None,
+            )
+            for batch in batches:
+                batch_input_words = sum(len(sentence) for sentence in batch)
+                if decay_alpha and total_input_words > 0:
+                    input_words_seen = epoch_input_offset + input_words_queued
+                    progress = min(input_words_seen / total_input_words, 1.0)
+                    batch_alpha = start_alpha + (min_alpha_val - start_alpha) * progress
+                else:
+                    batch_alpha = start_alpha
+
+                batch_seed = self._get_random_state()
+                job_queue.put((batch, batch_input_words, batch_alpha, batch_seed))
+                input_words_queued += batch_input_words
+        except Exception as exc:
+            progress_queue.put(("producer_error", exc))
+        finally:
+            for _ in range(self.workers):
+                job_queue.put(None)
     
     def _train_epoch_threaded(
         self,
@@ -776,13 +799,13 @@ class Word2Vec:
         start_alpha: float,
         min_alpha_val: float,
         decay_alpha: bool,
-        total_words_all_epochs: int,
+        input_words_per_epoch: int,
         epoch: int,
         epochs: int,
         calculate_loss: bool,
         progress_bar,
         recent_losses: list,
-    ) -> tuple[float, int, int]:
+    ) -> tuple[float, int, int, int]:
         """
         Train one epoch using producer-consumer threading model.
         
@@ -796,7 +819,7 @@ class Word2Vec:
             start_alpha: Initial learning rate.
             min_alpha_val: Minimum learning rate.
             decay_alpha: Whether to decay learning rate.
-            total_words_all_epochs: Total words across all epochs.
+            input_words_per_epoch: All input tokens in one epoch.
             epoch: Current epoch number (0-indexed).
             epochs: Total number of epochs.
             calculate_loss: Whether to compute loss.
@@ -804,7 +827,7 @@ class Word2Vec:
             recent_losses: List for tracking recent loss values (modified in place).
         
         Returns:
-            Tuple of (epoch_loss, epoch_examples, epoch_words).
+            Tuple of ``(loss, examples, vocab_words, input_words)``.
         """
         queue_factor = 2
         job_queue = Queue(maxsize=queue_factor * self.workers)
@@ -821,8 +844,8 @@ class Word2Vec:
         producer_thread = threading.Thread(
             target=self._job_producer,
             args=(
-                sentences, job_queue, start_alpha, min_alpha_val,
-                decay_alpha, total_words_all_epochs, epoch, epochs,
+                sentences, job_queue, progress_queue, start_alpha, min_alpha_val,
+                decay_alpha, input_words_per_epoch, epoch, epochs,
             ),
         )
         
@@ -834,19 +857,26 @@ class Word2Vec:
         
         epoch_loss = 0.0
         epoch_examples = 0
-        epoch_words = 0
+        epoch_vocab_words = 0
+        epoch_input_words = 0
         unfinished_workers = self.workers
+        training_error = None
         
         while unfinished_workers > 0:
             result = progress_queue.get()
             if result is None:
                 unfinished_workers -= 1
                 continue
+            if result[0] in ("producer_error", "worker_error"):
+                if training_error is None:
+                    training_error = result[1]
+                continue
             
-            batch_loss, batch_examples, batch_words = result
+            batch_loss, batch_examples, batch_vocab_words, batch_input_words = result
             epoch_loss += batch_loss
             epoch_examples += batch_examples
-            epoch_words += batch_words
+            epoch_vocab_words += batch_vocab_words
+            epoch_input_words += batch_input_words
             
             if batch_examples > 0 and batch_loss > 0:
                 batch_avg_loss = batch_loss / batch_examples
@@ -855,20 +885,30 @@ class Word2Vec:
             if progress_bar is not None:
                 recent_avg = sum(recent_losses) / len(recent_losses) if recent_losses else 0.0
                 if decay_alpha:
-                    global_words = epoch * self.corpus_word_count + epoch_words
-                    progress = min(global_words / total_words_all_epochs, 1.0) if total_words_all_epochs > 0 else 0
+                    total_input_words = input_words_per_epoch * epochs
+                    input_words_seen = (
+                        epoch * input_words_per_epoch + epoch_input_words
+                    )
+                    progress = (
+                        min(input_words_seen / total_input_words, 1.0)
+                        if total_input_words > 0
+                        else 0
+                    )
                     current_alpha = start_alpha + (min_alpha_val - start_alpha) * progress
                     postfix_str = f"loss={recent_avg:.6f}, lr={current_alpha:.6f}"
                 else:
                     postfix_str = f"loss={recent_avg:.6f}"
                 progress_bar.set_postfix_str(postfix_str)
-                progress_bar.update(batch_words)
+                progress_bar.update(batch_input_words)
         
         producer_thread.join()
         for t in worker_threads:
             t.join()
-        
-        return epoch_loss, epoch_examples, epoch_words
+
+        if training_error is not None:
+            raise training_error
+
+        return epoch_loss, epoch_examples, epoch_vocab_words, epoch_input_words
 
     def train(
         self,
@@ -924,6 +964,12 @@ class Word2Vec:
                 "No sentences provided. Pass sentences to train() or "
                 "provide them at Word2Vec() initialization."
             )
+        if iter(sentences) is sentences:
+            raise ValueError(
+                "sentences must be restartable because vocabulary counting and "
+                "multi-epoch training traverse the corpus more than once. "
+                "Use a list or LineSentenceFile instead of a one-shot iterator."
+            )
         
         # Resolve epochs
         if epochs is None:
@@ -953,13 +999,20 @@ class Word2Vec:
         # Handle vocabulary: expand, build from scratch, or use existing
         if update_vocab and self.vocab:
             # Expand existing vocabulary with new words
-            # Note: this consumes the iterator once for counting
-            new_words_added = self._expand_vocab(sentences)
+            new_words_added, input_words_per_epoch = self._expand_vocab(sentences)
             if self.verbose and new_words_added > 0:
                 logger.info(f"Added {new_words_added:,} new words to vocabulary")
         elif not self.vocab:
             # Build vocabulary from scratch
             self.build_vocab(sentences)
+            input_words_per_epoch = self.total_corpus_tokens
+        else:
+            # Existing vocabulary, new training run: count the exact raw words
+            # used by the producer so learning-rate numerator and denominator match.
+            input_words_per_epoch = self._input_words_per_epoch(sentences)
+
+        if input_words_per_epoch <= 0:
+            raise ValueError("sentences contains no words. Provide non-empty tokenized sentences.")
         
         # Initialize vectors if needed
         if self.W is None or self.W_prime is None:
@@ -980,37 +1033,21 @@ class Word2Vec:
         # Must be rebuilt after vocab expansion
         self._build_alias_table()
         
-        # Compute sample_ints for subsampling (needed for both training and example estimation)
+        # Compute subsampling thresholds from the fitted vocabulary distribution.
         sample_ints = self._compute_sample_ints()
         
         # Read training configuration from instance attributes
         batch_size = self.batch_size
         callbacks = self.callbacks
         calculate_loss = self.calculate_loss
-        total_examples = self.total_examples_hint
         
         # Setup for loss calculation
         total_loss = 0.0
         examples_processed_total = 0
-        total_example_count = 0
         recent_losses = deque(maxlen=100)
         
-        # Estimate total examples if needed for learning rate decay
-        examples_per_epoch = None
-        if decay_alpha:
-            if total_examples is not None:
-                examples_per_epoch = total_examples
-                total_example_count = total_examples * epochs
-            else:
-                examples_per_epoch = self._estimate_example_count(sample_ints)
-                total_example_count = examples_per_epoch * epochs
-        
-        # Track progress across all epochs for learning rate decay
-        total_words_all_epochs = self.corpus_word_count * epochs
-        global_words_processed = 0
-        
         start_alpha = self.alpha
-        min_alpha_val = self.min_alpha if self.min_alpha else start_alpha
+        min_alpha_val = self.min_alpha if self.min_alpha is not None else start_alpha
         
         if self.verbose:
             logger.info(f"Starting training: {epochs} epoch(s), batch_size={batch_size:,}, alpha={self.alpha}")
@@ -1043,7 +1080,7 @@ class Word2Vec:
                 bar_format = '{l_bar}{bar}| {percentage:.1f}% [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
                 progress_bar = tqdm(
                     desc=f"Epoch {epoch+1}/{epochs}",
-                    total=self.corpus_word_count,
+                    total=input_words_per_epoch,
                     bar_format=bar_format,
                     unit=" tokens",
                     unit_scale=True,
@@ -1053,13 +1090,18 @@ class Word2Vec:
                 progress_bar = None
             
             # Train epoch using threaded producer-consumer model
-            epoch_loss, epoch_examples, epoch_words = self._train_epoch_threaded(
+            (
+                epoch_loss,
+                epoch_examples,
+                epoch_vocab_words,
+                epoch_input_words,
+            ) = self._train_epoch_threaded(
                 sentences=sentences,
                 sample_ints=sample_ints,
                 start_alpha=start_alpha,
                 min_alpha_val=min_alpha_val,
                 decay_alpha=decay_alpha,
-                total_words_all_epochs=total_words_all_epochs,
+                input_words_per_epoch=input_words_per_epoch,
                 epoch=epoch,
                 epochs=epochs,
                 calculate_loss=calculate_loss,
@@ -1094,7 +1136,8 @@ class Word2Vec:
             if self.verbose:
                 elapsed = time.time() - epoch_start_time
                 logger.info(f"Epoch {epoch+1}/{epochs} completed: {epoch_examples:,} examples, "
-                          f"{epoch_words:,} words in {elapsed:.1f}s")
+                          f"{epoch_vocab_words:,} in-vocabulary words from "
+                          f"{epoch_input_words:,} input words in {elapsed:.1f}s")
         
         # Update the instance alpha to reflect the final learning rate
         if decay_alpha:

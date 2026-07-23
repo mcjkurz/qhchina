@@ -8,6 +8,7 @@ import numpy as np
 import tempfile
 import os
 from qhchina.analytics import DynamicWord2Vec
+from qhchina.analytics.vectors import cosine_similarity
 
 
 # =============================================================================
@@ -325,6 +326,34 @@ class TestDynamicWord2VecAPI:
         # Each vector should have unit length
         norms = np.linalg.norm(all_vecs, axis=1)
         assert np.allclose(norms, 1.0, atol=1e-6)
+
+    def test_tuple_indexing_requires_time_label(self, small_model):
+        """Temporal indexing must never silently select the first slice."""
+        word = "民"
+        np.testing.assert_array_equal(
+            small_model[word, "宋"],
+            small_model.get_vector(word, "宋"),
+        )
+        with pytest.raises(TypeError, match="requires \\(word, time_label\\)"):
+            _ = small_model[word]
+
+    def test_similarity_requires_explicit_time_label(self, small_model):
+        """Similarity must use the requested temporal slice."""
+        word1 = "民"
+        word2 = next(word for word in small_model.vocab if word != word1)
+        song = small_model.similarity(word1, word2, "宋")
+        ming = small_model.similarity(word1, word2, "明")
+
+        expected_song = cosine_similarity(
+            small_model.get_vector(word1, "宋"),
+            small_model.get_vector(word2, "宋"),
+        )
+        expected_ming = cosine_similarity(
+            small_model.get_vector(word1, "明"),
+            small_model.get_vector(word2, "明"),
+        )
+        assert song == pytest.approx(expected_song)
+        assert ming == pytest.approx(expected_ming)
 
     def test_most_similar(self, small_model):
         """Test most_similar() per time slice."""

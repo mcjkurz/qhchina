@@ -54,10 +54,10 @@ class LineSentenceFile:
         token_count = 0
         with open(self.filepath, 'r', encoding='utf-8') as f:
             for line in f:
-                line = line.rstrip('\n\r')
-                if line:
+                tokens = line.split()
+                if tokens:
                     sentence_count += 1
-                    token_count += len(line.split(' '))
+                    token_count += len(tokens)
                     if self.limit is not None and sentence_count >= self.limit:
                         break
         return sentence_count, token_count
@@ -67,9 +67,9 @@ class LineSentenceFile:
         count = 0
         with open(self.filepath, 'r', encoding='utf-8') as f:
             for line in f:
-                line = line.rstrip('\n\r')
-                if line:
-                    yield line.split(' ')
+                tokens = line.split()
+                if tokens:
+                    yield tokens
                     count += 1
                     if self.limit is not None and count >= self.limit:
                         return
@@ -537,7 +537,11 @@ def download_corpus(name: str, parent_dir: str | None = None, show_progress: boo
     total_size = 0
     for file_info in txt_files:
         dest_path = output_dir / file_info["name"]
-        _download_file(file_info["download_url"], dest_path)
+        _download_file(
+            file_info["download_url"],
+            dest_path,
+            expected_size=file_info.get("size"),
+        )
 
         file_size = dest_path.stat().st_size
         total_size += file_size
@@ -622,7 +626,11 @@ def download_file(path: str, output_dir: str | None = None) -> None:
         dest_path = output_path / filename
     
     # Download the file
-    _download_file(file_info['download_url'], dest_path)
+    _download_file(
+        file_info['download_url'],
+        dest_path,
+        expected_size=file_info.get('size'),
+    )
 
 
 def list_remote_corpora() -> list[str]:

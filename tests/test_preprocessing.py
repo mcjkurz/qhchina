@@ -4,6 +4,9 @@ Tests for qhchina.preprocessing module.
 import pytest
 import tempfile
 import os
+import sys
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 
 # =============================================================================
@@ -71,6 +74,66 @@ class TestSegmentationWrapper:
         
         wrapper = SegmentationWrapper(strategy="chunk", chunk_size=100)
         assert wrapper.chunk_size == 100
+
+
+class TestExcludedPOSConfiguration:
+    """Tests for backend-specific excluded_pos validation."""
+
+    @pytest.mark.parametrize(
+        ("class_name", "kwargs", "message"),
+        [
+            ("BertSegmenter", {"model_name": "unused"}, "does not produce POS tags"),
+            (
+                "LLMSegmenter",
+                {"api_key": "unused", "model": "unused", "endpoint": ""},
+                "does not produce POS tags",
+            ),
+            ("JiebaSegmenter", {}, "requires pos_tagging=True"),
+            ("PKUSegmenter", {}, "requires pos_tagging=True"),
+            ("HanLPSegmenter", {}, "requires pos_tagging=True"),
+        ],
+    )
+    def test_rejects_excluded_pos_without_pos_output(
+        self, class_name, kwargs, message
+    ):
+        """Reject excluded_pos before loading backend dependencies or models."""
+        from qhchina.preprocessing import segmentation
+
+        segmenter_class = getattr(segmentation, class_name)
+        with pytest.raises(ValueError, match=message):
+            segmenter_class(filters={"excluded_pos": {"PUNCT"}}, **kwargs)
+
+    def test_spacy_accepts_excluded_pos(self, monkeypatch):
+        """spaCy emits POS tags and should accept excluded_pos."""
+        from qhchina.preprocessing.segmentation import SpacySegmenter
+
+        fake_spacy = SimpleNamespace(load=MagicMock(return_value=SimpleNamespace()))
+        monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
+
+        segmenter = SpacySegmenter(filters={"excluded_pos": {"PUNCT"}})
+
+        assert segmenter.filters["excluded_pos"] == {"PUNCT"}
+
+    def test_hanlp_accepts_excluded_pos_with_pos_tagging(self, monkeypatch):
+        """HanLP supports excluded_pos when its POS tagger is enabled."""
+        from qhchina.preprocessing.segmentation import HanLPSegmenter
+
+        fake_hanlp = SimpleNamespace(
+            pretrained=SimpleNamespace(
+                tok=SimpleNamespace(COARSE_ELECTRA_SMALL_ZH="tokenizer"),
+                pos=SimpleNamespace(CTB9_POS_ELECTRA_SMALL="pos-tagger"),
+            ),
+            load=MagicMock(side_effect=[MagicMock(), MagicMock()]),
+        )
+        monkeypatch.setitem(sys.modules, "hanlp", fake_hanlp)
+
+        segmenter = HanLPSegmenter(
+            pos_tagging=True,
+            filters={"excluded_pos": {"PU"}},
+        )
+
+        assert segmenter.pos_tagging is True
+        assert segmenter.filters["excluded_pos"] == {"PU"}
 
 
 class TestJiebaSegmenter:
@@ -321,6 +384,7 @@ class TestJiebaSegmenter:
         # Exclude pronouns ('r')
         segmenter = JiebaSegmenter(
             strategy="document",
+            pos_tagging=True,
             filters={'excluded_pos': {'r'}}  # 'r' is pronoun in Jieba
         )
         tokens = segmenter.segment(text)
@@ -460,7 +524,10 @@ class TestPKUSegmenter:
         text = "我在年青时候也曾经做过许多梦"
         
         # POS tagging returns words only (tags are used internally for filtering)
-        segmenter = PKUSegmenter(pos_tagging=True)
+        segmenter = PKUSegmenter(
+            pos_tagging=True,
+            filters={'excluded_pos': {'x'}},
+        )
         tokens = segmenter.segment(text)
         
         assert isinstance(tokens, list)
@@ -866,6 +933,71 @@ class TestLLMSegmenter:
             return True
         except ImportError:
             return False
+
+    @staticmethod
+    def make_mock_segmenter(response_content):
+        """Build an LLMSegmenter with a mocked API response."""
+        from qhchina.preprocessing.segmentation import LLMSegmenter
+
+        response = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=response_content)
+                )
+            ]
+        )
+        create = MagicMock(return_value=response)
+        segmenter = LLMSegmenter.__new__(LLMSegmenter)
+        segmenter.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=create)
+            )
+        )
+        segmenter.model = "mock-model"
+        segmenter.prompt = LLMSegmenter.DEFAULT_PROMPT
+        segmenter.system_message = None
+        segmenter.temperature = 0
+        segmenter.max_tokens = 100
+        segmenter.retry_patience = 0
+        return segmenter, create
+
+    def test_llm_accepts_tokens_object(self):
+        """Accept the single supported response schema."""
+        segmenter, create = self.make_mock_segmenter(
+            '{"tokens": ["今天", "天气"]}'
+        )
+
+        assert segmenter._call_llm_api("今天天气") == ["今天", "天气"]
+        call_kwargs = create.call_args.kwargs
+        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert '{"tokens": [' in call_kwargs["messages"][0]["content"]
+
+    @pytest.mark.parametrize(
+        ("response_content", "message"),
+        [
+            ('{"words": ["今天"]}', "missing required 'tokens' key"),
+            ('{"tokens": "今天"}', "'tokens' must be a list of strings"),
+            (
+                '{"tokens": ["今天", 1]}',
+                "every item in 'tokens' must be a string",
+            ),
+        ],
+    )
+    def test_llm_rejects_malformed_tokens_schema(
+        self, response_content, message
+    ):
+        """Raise descriptive errors for invalid tokens contracts."""
+        segmenter, _ = self.make_mock_segmenter(response_content)
+
+        with pytest.raises(ValueError, match=message):
+            segmenter._call_llm_api("今天天气")
+
+    def test_llm_rejects_legacy_top_level_array(self):
+        """Do not preserve compatibility with array responses."""
+        segmenter, _ = self.make_mock_segmenter('["今天", "天气"]')
+
+        with pytest.raises(ValueError, match="top-level JSON object"):
+            segmenter._call_llm_api("今天天气")
     
     def test_llm_user_dict_warning(self, openai_available, caplog):
         """Test that LLMSegmenter logs warning when user_dict is provided."""

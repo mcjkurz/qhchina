@@ -247,6 +247,8 @@ class TempRefWord2Vec(Word2Vec):
             self.targets = list(targets) if targets else []
             self._target_set = set(self.targets)
             self.period_vocab_counts = {}
+            self.center_word_counts = Counter()
+            self.context_word_counts = Counter()
             self.temporal_word_map = {}
             self.reverse_temporal_map = {}
             self._corpora = None
@@ -293,6 +295,8 @@ class TempRefWord2Vec(Word2Vec):
         self.targets = list(targets)
         self._target_set = set(targets)
         self._sampling_strategy = sampling_strategy
+        self.center_word_counts = Counter()
+        self.context_word_counts = Counter()
         
         self._corpora = {}
         for label, corpus in sentences.items():
@@ -383,6 +387,13 @@ class TempRefWord2Vec(Word2Vec):
                 remaining = token_limit - tokens_counted
                 if remaining <= 0:
                     break
+                if len(sentence) > word2vec_c.MAX_WORDS_IN_BATCH_CAP:
+                    raise ValueError(
+                        f"A sentence in period '{label}' contains {len(sentence):,} words, "
+                        f"exceeding the compiled limit of "
+                        f"{word2vec_c.MAX_WORDS_IN_BATCH_CAP:,}. "
+                        "Split the sentence before training."
+                    )
                 
                 # Truncate sentence if it would exceed the limit
                 if len(sentence) > remaining:
@@ -402,6 +413,10 @@ class TempRefWord2Vec(Word2Vec):
         
         if not self.word_counts:
             raise ValueError("Corpora contain no words.")
+
+        # These are the counts of actual tagged tokens presented as centers
+        # during training. Synthetic base forms are maintained separately.
+        self.center_word_counts = self.word_counts.copy()
         
         if self.verbose:
             for label, counter in self.period_vocab_counts.items():
@@ -434,16 +449,19 @@ class TempRefWord2Vec(Word2Vec):
             logger.warning(f"Sample: {missing_variants[:10]}")
             logger.warning("These variants will not be part of the temporal analysis.")
         
-        added_base_words = 0
-        total_base_count = 0
+        self.context_word_counts = Counter(
+            {
+                word: self.center_word_counts[word]
+                for word in self.index2word
+                if word not in self.reverse_temporal_map
+            }
+        )
         skipped_base_words = []
         
         for base_word, variants in self.temporal_word_map.items():
             # Calculate base word count as sum of all temporal variant counts
-            base_count = sum(
-                self.word_counts.get(variant, 0) 
-                for variant in variants
-            )
+            retained_variants = [variant for variant in variants if variant in self.vocab]
+            base_count = sum(self.center_word_counts[variant] for variant in retained_variants)
             
             # Only add base word if at least one variant has counts
             if base_count == 0:
@@ -455,18 +473,10 @@ class TempRefWord2Vec(Word2Vec):
                 word_id = len(self.index2word)
                 self.vocab[base_word] = word_id
                 self.index2word.append(base_word)
-                self.word_counts[base_word] = base_count
-                added_base_words += 1
-                total_base_count += base_count
-            else:
-                # Base word already in vocab - update its count
-                self.word_counts[base_word] = base_count
+            self.context_word_counts[base_word] = base_count
         
         if skipped_base_words:
             logger.warning(f"Skipped {len(skipped_base_words)} base words with no variant counts: {skipped_base_words[:5]}...")
-        
-        if added_base_words > 0:
-            self.corpus_word_count += total_base_count
         
         # Build the temporal index map for Cython acceleration
         self._build_temporal_index_map()
@@ -511,16 +521,25 @@ class TempRefWord2Vec(Word2Vec):
             self._alias_index = np.array([], dtype=np.uint32)
             return
         
-        weights = np.array([
-            0.0 if word in self.reverse_temporal_map
-            else self.word_counts[word] ** self.ns_exponent
-            for word in self.index2word
-        ], dtype=np.float64)
+        weights = np.array(
+            [
+                self.context_word_counts.get(word, 0) ** self.ns_exponent
+                for word in self.index2word
+            ],
+            dtype=np.float64,
+        )
         
         self._build_alias_from_weights(weights)
         
         n_excluded = sum(1 for w in self.index2word if w in self.reverse_temporal_map)
         logger.debug(f"Built alias table excluding {n_excluded} temporal variants from negative sampling")
+
+    def _compute_sample_ints(self) -> np.ndarray:
+        """Subsample actual center tokens, never synthetic context-only bases."""
+        return self._compute_sample_ints_from_counts(
+            self.center_word_counts,
+            self.corpus_word_count,
+        )
     
     def _get_thread_working_mem(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -559,12 +578,17 @@ class TempRefWord2Vec(Word2Vec):
             context_buffer: Unused (temporal training is Skip-gram only).
         
         Returns:
-            Tuple of (batch_loss, batch_examples, batch_words).
+            Tuple of (batch_loss, batch_examples, batch_vocab_words).
         """
         if not hasattr(self, 'temporal_index_map') or self.temporal_index_map is None:
             self._build_temporal_index_map()
         
-        batch_loss, batch_examples, batch_words, _ = word2vec_c.train_batch_temporal(
+        (
+            batch_loss,
+            batch_examples,
+            batch_vocab_words,
+            _,
+        ) = word2vec_c.train_batch_temporal(
             self.W,
             self.W_prime,
             batch,
@@ -582,7 +606,7 @@ class TempRefWord2Vec(Word2Vec):
             random_seed,
             calculate_loss,
         )
-        return batch_loss, batch_examples, batch_words
+        return batch_loss, batch_examples, batch_vocab_words
     
     def train(self) -> float | None:
         """
@@ -781,7 +805,8 @@ class TempRefWord2Vec(Word2Vec):
         model_data = {
             'vocab': self.vocab,
             'index2word': self.index2word,
-            'word_counts': dict(self.word_counts),
+            'center_word_counts': dict(self.center_word_counts),
+            'context_word_counts': dict(self.context_word_counts),
             'corpus_word_count': self.corpus_word_count,
             'total_corpus_tokens': self.total_corpus_tokens,
             'vector_size': self.vector_size,
@@ -885,13 +910,15 @@ class TempRefWord2Vec(Word2Vec):
         model.labels = labels
         model.vocab = model_data['vocab']
         model.index2word = model_data['index2word']
-        model.word_counts = Counter(model_data.get('word_counts', {}))
+        model.center_word_counts = Counter(model_data['center_word_counts'])
+        model.context_word_counts = Counter(model_data['context_word_counts'])
+        model.word_counts = model.center_word_counts
         model.W = model_data['W']
         model.W_prime = model_data['W_prime']
         
         # Restore corpus statistics
-        model.corpus_word_count = model_data.get('corpus_word_count', sum(model.word_counts.values()))
-        model.total_corpus_tokens = model_data.get('total_corpus_tokens', model.corpus_word_count)
+        model.corpus_word_count = model_data['corpus_word_count']
+        model.total_corpus_tokens = model_data['total_corpus_tokens']
         
         # Restore TempRefWord2Vec-specific data
         model.temporal_word_map = model_data['temporal_word_map']

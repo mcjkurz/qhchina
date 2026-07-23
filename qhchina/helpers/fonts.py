@@ -163,7 +163,11 @@ def _ensure_cached(
         action = "Re-downloading" if force_download else "Downloading"
         print(f"{action} font '{font_file}'...")
     
-    _download_file(font_info['download_url'], cached_path)
+    _download_file(
+        font_info['download_url'],
+        cached_path,
+        expected_size=font_info['size'],
+    )
     
     if show_progress:
         size_mb = cached_path.stat().st_size / 1024 / 1024

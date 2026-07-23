@@ -72,6 +72,45 @@ class TestLoadText:
         assert len(texts) == 1
 
 
+class TestLineSentenceFile:
+    """Tests for streaming whitespace-tokenized sentence files."""
+
+    def test_whitespace_tokenization_counts_and_yields(self, tmp_path):
+        from qhchina.helpers.texts import LineSentenceFile
+
+        corpus = tmp_path / "sentences.txt"
+        corpus.write_text(
+            "  first   second  \n"
+            "\tthird\tfourth\t\n"
+            "   \n"
+            "\n"
+            " fifth\t  sixth   seventh \n",
+            encoding="utf-8",
+        )
+
+        sentences = LineSentenceFile(str(corpus))
+
+        assert len(sentences) == 3
+        assert sentences.token_count == 7
+        assert list(sentences) == [
+            ["first", "second"],
+            ["third", "fourth"],
+            ["fifth", "sixth", "seventh"],
+        ]
+
+    def test_limit_ignores_blank_lines(self, tmp_path):
+        from qhchina.helpers.texts import LineSentenceFile
+
+        corpus = tmp_path / "limited.txt"
+        corpus.write_text("\n one  two \n\t\nthree\tfour five\n", encoding="utf-8")
+
+        sentences = LineSentenceFile(str(corpus), limit=1)
+
+        assert len(sentences) == 1
+        assert sentences.token_count == 2
+        assert list(sentences) == [["one", "two"]]
+
+
 class TestLoadStopwords:
     """Tests for stopword loading functions."""
     
@@ -496,6 +535,84 @@ class TestGithubErrorSemantics:
 
         with pytest.raises(requests.RequestException):
             github.query_github_api("corpora")
+
+
+class TestGithubDownloads:
+    """Tests for atomic GitHub asset downloads."""
+
+    @staticmethod
+    def _patch_download(monkeypatch, github, chunks):
+        class FakeResponse:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size=65536):
+                yield from chunks
+
+        class FakeRequests:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        monkeypatch.setattr(github, "_get_requests", lambda: FakeRequests())
+
+    def test_download_replaces_existing_destination_atomically(
+        self, monkeypatch, tmp_path
+    ):
+        from qhchina.helpers import github
+
+        destination = tmp_path / "asset.bin"
+        destination.write_bytes(b"old content")
+        self._patch_download(monkeypatch, github, [b"new ", b"content"])
+
+        github.download_file(
+            "https://example.invalid/asset.bin",
+            destination,
+            expected_size=len(b"new content"),
+        )
+
+        assert destination.read_bytes() == b"new content"
+        assert list(tmp_path.glob(".asset.bin.*.tmp")) == []
+
+    def test_interrupted_download_cleans_up_and_preserves_existing(
+        self, monkeypatch, tmp_path
+    ):
+        from qhchina.helpers import github
+
+        destination = tmp_path / "asset.bin"
+        destination.write_bytes(b"known good")
+
+        def interrupted_chunks():
+            yield b"partial"
+            raise RuntimeError("connection interrupted")
+
+        self._patch_download(monkeypatch, github, interrupted_chunks())
+
+        with pytest.raises(RuntimeError, match="connection interrupted"):
+            github.download_file("https://example.invalid/asset.bin", destination)
+
+        assert destination.read_bytes() == b"known good"
+        assert list(tmp_path.glob(".asset.bin.*.tmp")) == []
+
+    def test_size_mismatch_cleans_up_and_preserves_existing(
+        self, monkeypatch, tmp_path
+    ):
+        from qhchina.helpers import github
+
+        destination = tmp_path / "asset.bin"
+        destination.write_bytes(b"known good")
+        self._patch_download(monkeypatch, github, [b"too short"])
+
+        with pytest.raises(ValueError, match="Downloaded size mismatch"):
+            github.download_file(
+                "https://example.invalid/asset.bin",
+                destination,
+                expected_size=100,
+            )
+
+        assert destination.read_bytes() == b"known good"
+        assert list(tmp_path.glob(".asset.bin.*.tmp")) == []
 
 
 # =============================================================================

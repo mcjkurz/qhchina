@@ -511,6 +511,42 @@ class Stylometry:
         if metric not in self.DISTANCE_FUNCTIONS:
             raise ValueError(f"distance must be one of {list(self.DISTANCE_FUNCTIONS.keys())}, got '{metric}'")
         return self.DISTANCE_FUNCTIONS[metric], metric
+
+    @staticmethod
+    def _distances_to_vectors(
+        query: np.ndarray,
+        vectors: np.ndarray,
+        metric: str,
+    ) -> np.ndarray:
+        """Vectorize distances from one query to a matrix of row vectors."""
+        query = np.asarray(query)
+        vectors = np.asarray(vectors)
+        if query.ndim != 1:
+            raise ValueError("query must be a one-dimensional feature vector")
+        if vectors.ndim != 2:
+            raise ValueError("vectors must be a two-dimensional feature matrix")
+        if vectors.shape[1] != query.shape[0]:
+            raise ValueError(
+                "query and vectors must have the same number of features"
+            )
+
+        if metric == 'cosine':
+            similarities = _cosine_similarity(
+                query[np.newaxis, :],
+                vectors,
+            )
+            return 1.0 - np.asarray(similarities).reshape(-1)
+
+        differences = vectors - query
+        if metric == 'burrows_delta':
+            return np.mean(np.abs(differences), axis=1)
+        if metric == 'manhattan':
+            return np.sum(np.abs(differences), axis=1)
+        if metric == 'euclidean':
+            return np.linalg.norm(differences, axis=1)
+        if metric == 'eder_delta':
+            return np.sqrt(np.mean(differences ** 2, axis=1))
+        raise ValueError(f"Unsupported distance metric: {metric!r}")
     
     def _validate_tokens(self, tokens: list[str], name: str = "tokens") -> None:
         """Validate that tokens is a non-empty list of strings."""
@@ -1149,7 +1185,10 @@ class Stylometry:
         Bootstrap analysis for prediction robustness.
         
         Resamples features n_iter times and computes prediction statistics
-        to assess how robust the attribution is.
+        to assess how robust the attribution is. In ``centroid`` mode, each
+        sampled query is compared with author centroids. In ``instance`` mode,
+        it is compared with individual documents and the nearest document's
+        author receives the prediction.
         
         Args:
             text: List of tokens (the disputed text)
@@ -1197,57 +1236,78 @@ class Stylometry:
         if not (0.0 < sample_ratio <= 1.0):
             raise ValueError(f"sample_ratio must be between 0 and 1, got {sample_ratio}")
         
-        distance_fn, _ = self._get_distance_fn(distance)
+        _, metric = self._get_distance_fn(distance)
         n_features = len(self.features)
         sample_size = max(1, int(n_features * sample_ratio))
         
         # Extract n-grams from text once
         text_ngrams = self._extract_ngrams(text)
         text_freq_dict = get_relative_frequencies(text_ngrams)
+
+        # Transform the full query once. All supported transformations are
+        # feature-wise, so selecting bootstrap columns afterward is equivalent
+        # to rebuilding and transforming a sampled vector each iteration.
+        text_freq_vector = np.array(
+            [text_freq_dict.get(feature, 0.0) for feature in self.features]
+        )
+        if self.transform_type == 'zscore':
+            transformed_text_vector = (
+                text_freq_vector - self.feature_means
+            ) / self.feature_stds
+        elif self.transform_type == 'tfidf':
+            transformed_text_vector = text_freq_vector * self.idf_weights
+        else:
+            transformed_text_vector = text_freq_vector
         
         # Track predictions and distances per iteration
         predictions = []
         author_distances: dict[str, list[float]] = {author: [] for author in self.authors}
+
+        centroid_matrix = None
+        document_matrix = None
+        author_document_indices = None
+        if self.mode == 'centroid':
+            centroid_matrix = np.vstack(
+                [self.author_centroids[author] for author in self.authors]
+            )
+        else:
+            document_matrix = np.asarray(self.document_vectors)
+            document_labels = np.asarray(self.document_labels, dtype=object)
+            author_document_indices = {
+                author: np.flatnonzero(document_labels == author)
+                for author in self.authors
+            }
         
         rng = np.random.default_rng(seed)
         
         for _ in range(n_iter):
             # Sample features
             feature_indices = rng.choice(n_features, size=sample_size, replace=False)
-            sampled_features = [self.features[i] for i in feature_indices]
+            text_vec = transformed_text_vector[feature_indices]
             
-            # Build text vector with sampled features
-            text_freq_vec = np.array([text_freq_dict.get(f, 0.0) for f in sampled_features])
-            
-            # Transform using sampled feature statistics
-            if self.transform_type == 'zscore':
-                sampled_means = self.feature_means[feature_indices]
-                sampled_stds = self.feature_stds[feature_indices]
-                text_vec = (text_freq_vec - sampled_means) / sampled_stds
-            elif self.transform_type == 'tfidf':
-                sampled_idf = self.idf_weights[feature_indices]
-                text_vec = text_freq_vec * sampled_idf
+            if self.mode == 'centroid':
+                sampled_centroids = centroid_matrix[:, feature_indices]
+                distances = self._distances_to_vectors(
+                    text_vec,
+                    sampled_centroids,
+                    metric,
+                )
+                best_author = self.authors[int(np.argmin(distances))]
+                for author, dist in zip(self.authors, distances):
+                    author_distances[author].append(float(dist))
             else:
-                text_vec = text_freq_vec
-            
-            # Compare to each author centroid (using sampled features)
-            best_author = None
-            best_dist = float('inf')
-            
-            for author in self.authors:
-                if self.mode == 'centroid':
-                    author_full_vec = self.author_centroids[author]
-                else:
-                    author_full_vec = self._get_author_vector(author)
-                
-                author_vec = author_full_vec[feature_indices]
-                dist = distance_fn(text_vec, author_vec)
-                author_distances[author].append(float(dist))
-                
-                if dist < best_dist:
-                    best_dist = dist
-                    best_author = author
-            
+                sampled_documents = document_matrix[:, feature_indices]
+                distances = self._distances_to_vectors(
+                    text_vec,
+                    sampled_documents,
+                    metric,
+                )
+                best_author = self.document_labels[int(np.argmin(distances))]
+                for author, document_indices in author_document_indices.items():
+                    author_distances[author].append(
+                        float(np.min(distances[document_indices]))
+                    )
+
             predictions.append(best_author)
         
         # Compute statistics
@@ -1578,7 +1638,8 @@ class Stylometry:
         Args:
             method: Linkage method - 'single', 'complete', 'average', 'weighted', or 'ward'
             level: 'document' or 'author'
-            distance: Distance metric override.
+            distance: Distance metric override. Ward linkage requires
+                Euclidean distance.
         
         Returns:
             (linkage_matrix, labels)
@@ -1592,6 +1653,12 @@ class Stylometry:
         if method not in self.VALID_CLUSTERING_METHODS:
             raise ValueError(f"method must be one of {self.VALID_CLUSTERING_METHODS}, got '{method}'")
         
+        _, metric = self._get_distance_fn(distance)
+        if method == 'ward' and metric != 'euclidean':
+            raise ValueError(
+                f"Ward linkage requires Euclidean distance, got '{metric}'"
+            )
+
         vectors, doc_labels = self._get_vectors_and_labels(level)
         
         if len(vectors) < 2:
@@ -2091,7 +2158,7 @@ class Stylometry:
         Visualize hierarchical clustering as a dendrogram.
         
         Args:
-            method: Linkage method
+            method: Linkage method. Ward linkage requires Euclidean distance.
             level: 'document' or 'author'
             orientation: 'top', 'bottom', 'left', or 'right'
             figsize: Figure size
@@ -2313,9 +2380,12 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             
             Eligibility filters (applied before testing; define the hypothesis family):
             
-            - 'min_count': int or tuple - Minimum count threshold(s) for a word to be 
-              included (can be a single int for both corpora or tuple (min_countA, 
-              min_countB)). Default is 0.
+            - 'min_count': int or tuple - Minimum count threshold(s), combined
+              with AND semantics. An integer ``n`` requires at least ``n``
+              occurrences in both corpora. A tuple ``(a, b)`` requires at
+              least ``a`` occurrences in corpus A and at least ``b`` in
+              corpus B. Thus ``(5, 0)`` filters only on corpus A, while
+              ``(0, 5)`` filters only on corpus B. Default is 0.
             - 'stopwords': list - Words to exclude from results.
             - 'min_word_length': int - Minimum character length for words.
             

@@ -399,7 +399,7 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
             b = target_counts[target] - a
             c = global_counts[candidate] - a
             if method == 'window':
-                # Per Evert (2008): exclude positions where target is at center
+                # Evert (2008) surface setup: sample space excludes node tokens.
                 d = (total - global_counts[target]) - (a + b + c)
             else:  # sentence
                 d = total - a - b - c
@@ -425,6 +425,9 @@ def _calculate_collocations_window_cython(
     
     Pass 1 builds vocabulary; pass 2 streams batches through Cython nogil
     counting and accumulates into pre-allocated numpy arrays.
+
+    Implements Evert (2008) surface-contingency setup: for each target word, sample
+    space excludes positions whose token is the target itself.
     
     Args:
         sentences: Restartable iterable of tokenized sentences.
@@ -508,6 +511,9 @@ def _calculate_collocations_window_python(
     
     Streams batches via :func:`~qhchina.helpers.texts.iter_batches` and accumulates
     into sparse Python dicts. Fallback when Cython is not available.
+
+    Implements Evert (2008) surface-contingency setup: for each target word, sample
+    space excludes positions whose token is the target itself.
     
     Args:
         sentences: Iterable of tokenized sentences.
@@ -546,8 +552,10 @@ def _calculate_collocations_window_python(
                         word = sentence[j]
                         if word in target_set and word not in seen_targets:
                             seen_targets.add(word)
-                            T_count[word] += 1
-                            candidate_in_context[word][token] += 1
+                            if token != word:
+                                # Exclude node-token positions for each target.
+                                T_count[word] += 1
+                                candidate_in_context[word][token] += 1
 
     return _build_results_from_counts(
         target_words, T_count, candidate_in_context, token_counter, total_tokens, alternative, method='window'
@@ -693,8 +701,10 @@ def find_collocates(
         target_words (str | list[str]): Target word(s) to find collocates for.
         method (str): Method to use for calculating collocations. Either 'window' or 
             'sentence'. 'window' uses a sliding window of specified horizon around each 
-            token. 'sentence' considers whole sentences as context units (horizon not 
-            applicable). Default is 'window'.
+            token. In window mode, contingency tables follow Evert (2008):
+            for each target word, positions whose token equals the target are excluded
+            from the sample space. 'sentence' considers whole sentences as context
+            units (horizon not applicable). Default is 'window'.
         horizon (int | tuple | None): Context window size relative to the target 
             word. Only applicable when method='window'. Must be None when method='sentence'.
             - int: Symmetric window (e.g., 5 means 5 words on each side of target)
@@ -798,6 +808,13 @@ def find_collocates(
     elif method == 'window':
         if horizon is None:
             horizon = 5
+
+    if iter(sentences) is sentences:
+        raise ValueError(
+            "sentences must be restartable because collocation analysis traverses "
+            "the corpus more than once. Use a list or a restartable iterable "
+            "instead of a one-shot iterator."
+        )
     
     if filters:
         valid_filter_keys = {

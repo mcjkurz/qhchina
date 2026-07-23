@@ -373,8 +373,10 @@ cdef calculate_window_counts(
                 n_active = <int>active_targets.size()
                 for j in range(n_active):
                     t = active_targets[j]
-                    T_count[t] += 1
-                    candidate_counts[t, token_idx] += 1
+                    # Evert (2008) surface setup: exclude node-token positions per target.
+                    if token_idx != target_indices[t]:
+                        T_count[t] += 1
+                        candidate_counts[t, token_idx] += 1
                 
                 window_epoch += 1
     

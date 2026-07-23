@@ -418,7 +418,7 @@ class DynamicWord2Vec(Word2Vec):
             context_buffer: Unused (temporal training is Skip-gram only).
 
         Returns:
-            Tuple of (batch_loss, batch_examples, batch_words).
+            Tuple of (batch_loss, batch_examples, batch_vocab_words).
         """
         # Extract sentences and time indices from TemporalSentence objects
         # TemporalSentence is a list subclass, so we can use it directly as tokens
@@ -428,7 +428,12 @@ class DynamicWord2Vec(Word2Vec):
         U_flat = self.U.reshape(-1)
         V_flat = self.V.reshape(-1)
 
-        batch_loss, batch_examples, batch_words, _ = word2vec_c.train_batch_dynamic(
+        (
+            batch_loss,
+            batch_examples,
+            batch_vocab_words,
+            _,
+        ) = word2vec_c.train_batch_dynamic(
             U_flat,
             V_flat,
             self.num_time_slices,
@@ -449,7 +454,7 @@ class DynamicWord2Vec(Word2Vec):
             random_seed,
             calculate_loss,
         )
-        return batch_loss, batch_examples, batch_words
+        return batch_loss, batch_examples, batch_vocab_words
 
     def train(self) -> float | None:
         """
@@ -634,6 +639,42 @@ class DynamicWord2Vec(Word2Vec):
                 return vector / norm
 
         return vector
+
+    def __getitem__(self, key: tuple[str, str]) -> np.ndarray:
+        """Return one temporal vector using ``model[word, time_label]``."""
+        if not isinstance(key, tuple) or len(key) != 2:
+            raise TypeError(
+                "DynamicWord2Vec indexing requires (word, time_label), "
+                "for example model['民', '宋']"
+            )
+        word, time_label = key
+        if not isinstance(word, str) or not isinstance(time_label, str):
+            raise TypeError("word and time_label must both be strings")
+        return self.get_vector(word, time_label)
+
+    def similarity(
+        self,
+        word1: str,
+        word2: str,
+        time_label: str,
+        cross_space: bool = False,
+    ) -> float:
+        """Calculate similarity within one explicitly selected time slice."""
+        if word1 not in self.vocab:
+            raise KeyError(f"Word '{word1}' not found in vocabulary")
+        if word2 not in self.vocab:
+            raise KeyError(f"Word '{word2}' not found in vocabulary")
+        if time_label not in self.label2idx:
+            raise KeyError(
+                f"Time label '{time_label}' not found. "
+                f"Available labels: {list(self.label2idx)}"
+            )
+
+        t = self.label2idx[time_label]
+        word1_vec = self.U[t, self.vocab[word1]]
+        target_matrix = self.V if cross_space else self.U
+        word2_vec = target_matrix[t, self.vocab[word2]]
+        return float(cosine_similarity(word1_vec, word2_vec))
 
     def get_all_time_vectors(self, word: str, normalize: bool = False) -> np.ndarray:
         """

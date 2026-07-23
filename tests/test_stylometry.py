@@ -279,11 +279,52 @@ class TestCompareCorpora:
             as_dataframe=True
         )
         
-        # Results should only include words passing filters
-        # Each word must have freq >= min_count in at least one corpus
+        # Results should only include words passing filters.
+        # Each word must have freq >= min_count in both corpora.
         if len(result) > 0:
-            assert all((result['abs_freqA'] >= 5) | (result['abs_freqB'] >= 5))
+            assert all((result['abs_freqA'] >= 5) & (result['abs_freqB'] >= 5))
             assert all(result['p_value'] <= 0.05)
+
+    def test_compare_corpora_min_count_int_requires_both_corpora(self):
+        """A scalar min_count applies to both corpora with AND semantics."""
+        from qhchina.analytics.stylometry import compare_corpora
+
+        corpus_a = ["both"] * 5 + ["short_b"] * 5 + ["only_a"] * 5
+        corpus_b = ["both"] * 5 + ["short_b"] * 4 + ["only_b"] * 5
+
+        result = compare_corpora(
+            corpus_a,
+            corpus_b,
+            filters={'min_count': 5},
+            as_dataframe=True,
+        )
+
+        assert set(result['word']) == {"both"}
+
+    @pytest.mark.parametrize(
+        ("min_count", "expected"),
+        [
+            ((5, 0), {"both", "short_b", "only_a"}),
+            ((0, 5), {"both", "only_b"}),
+        ],
+    )
+    def test_compare_corpora_min_count_tuple_applies_per_corpus(
+        self, min_count, expected
+    ):
+        """Tuple thresholds independently constrain A and B, joined by AND."""
+        from qhchina.analytics.stylometry import compare_corpora
+
+        corpus_a = ["both"] * 5 + ["short_b"] * 5 + ["only_a"] * 5
+        corpus_b = ["both"] * 5 + ["short_b"] * 4 + ["only_b"] * 5
+
+        result = compare_corpora(
+            corpus_a,
+            corpus_b,
+            filters={'min_count': min_count},
+            as_dataframe=True,
+        )
+
+        assert set(result['word']) == expected
     
     def test_compare_corpora_chi2_methods(self, song_ming_flat):
         """Test different statistical methods."""
@@ -574,6 +615,87 @@ class TestStylometryBootstrap:
         assert results1['prediction'] == results2['prediction']
         assert results1['confidence'] == results2['confidence']
 
+    def test_bootstrap_predict_distinguishes_instance_from_centroid_mode(self):
+        """Instance mode selects a nearest document, not an author mean."""
+        from qhchina.analytics.stylometry import Stylometry
+
+        corpus = {
+            "author_a": [list("aaaaaaaaaa"), list("bbbbbbbbbb")],
+            "author_b": [list("aaaaaaabbb"), list("aaaaaaabbb")],
+        }
+        query = list("aaaaaaaaaa")
+
+        centroid = Stylometry(
+            n_features=2,
+            transform='tfidf',
+            distance='euclidean',
+            mode='centroid',
+        )
+        centroid.fit_transform(corpus)
+        centroid_result = centroid.bootstrap_predict(
+            query, n_iter=1, sample_ratio=1.0, seed=1
+        )
+
+        instance = Stylometry(
+            n_features=2,
+            transform='tfidf',
+            distance='euclidean',
+            mode='instance',
+        )
+        instance.fit_transform(corpus)
+        instance_result = instance.bootstrap_predict(
+            query, n_iter=1, sample_ratio=1.0, seed=1
+        )
+
+        assert centroid_result['prediction'] == "author_b"
+        assert instance_result['prediction'] == "author_a"
+        assert instance_result['distances']['author_a'] == pytest.approx((0.0, 0.0))
+        assert (
+            instance_result['distances']['author_a'][0]
+            < instance_result['distances']['author_b'][0]
+        )
+
+    @pytest.mark.parametrize(
+        "metric",
+        [
+            "burrows_delta",
+            "cosine",
+            "manhattan",
+            "euclidean",
+            "eder_delta",
+        ],
+    )
+    def test_vectorized_bootstrap_distances_match_scalar_metrics(self, metric):
+        """Vectorized rows must preserve every registered metric's semantics."""
+        from qhchina.analytics.stylometry import Stylometry
+
+        query = np.array([0.25, -0.5, 1.5])
+        vectors = np.array([
+            [0.0, 1.0, 2.0],
+            [0.25, -0.5, 1.5],
+            [-1.0, 0.5, 0.0],
+        ])
+        distance_fn = Stylometry.DISTANCE_FUNCTIONS[metric]
+
+        expected = np.array(
+            [distance_fn(query, vector) for vector in vectors]
+        )
+        actual = Stylometry._distances_to_vectors(query, vectors, metric)
+
+        np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+    def test_vectorized_cosine_distance_preserves_zero_vector_behavior(self):
+        """Zero vectors have distance one, matching cosine_distance()."""
+        from qhchina.analytics.stylometry import Stylometry
+
+        distances = Stylometry._distances_to_vectors(
+            np.zeros(3),
+            np.array([[1.0, 2.0, 3.0], [0.0, 0.0, 0.0]]),
+            "cosine",
+        )
+
+        np.testing.assert_array_equal(distances, np.ones(2))
+
 
 # =============================================================================
 # Visualization Tests
@@ -686,9 +808,44 @@ class TestStylometryVisualization:
         import matplotlib.pyplot as plt
         
         helpers.load_fonts()
-        for method in ['single', 'complete', 'average', 'ward']:
+        for method in ['single', 'complete', 'average']:
             fitted_stylo.dendrogram(method=method, show=False)
             plt.close('all')
+
+        fitted_stylo.dendrogram(
+            method='ward', distance='euclidean', show=False
+        )
+        plt.close('all')
+
+    def test_hierarchical_clustering_ward_requires_euclidean(
+        self, fitted_stylo
+    ):
+        """Ward linkage rejects a non-Euclidean configured metric."""
+        with pytest.raises(
+            ValueError, match="Ward linkage requires Euclidean distance"
+        ):
+            fitted_stylo.hierarchical_clustering(method='ward')
+
+    def test_dendrogram_ward_requires_euclidean(self, fitted_stylo):
+        """The dendrogram pathway enforces Ward's metric restriction."""
+        with pytest.raises(
+            ValueError, match="Ward linkage requires Euclidean distance"
+        ):
+            fitted_stylo.dendrogram(method='ward', show=False)
+
+    def test_hierarchical_clustering_preserves_valid_metric_combinations(
+        self, fitted_stylo
+    ):
+        """Ward+Euclidean and non-Ward+cosine remain supported."""
+        ward_linkage, labels = fitted_stylo.hierarchical_clustering(
+            method='ward', distance='euclidean'
+        )
+        average_linkage, average_labels = fitted_stylo.hierarchical_clustering(
+            method='average'
+        )
+
+        assert ward_linkage.shape == (len(labels) - 1, 4)
+        assert average_linkage.shape == (len(average_labels) - 1, 4)
     
     def test_dendrogram_invalid_method(self, fitted_stylo):
         """Test that invalid dendrogram method raises ValueError."""

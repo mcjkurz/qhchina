@@ -1182,6 +1182,9 @@ class TestTempRefWord2Vec:
             assert loaded.targets == model.targets
             assert len(loaded.vocab) == len(model.vocab)
             assert loaded.vector_size == model.vector_size
+            assert loaded.center_word_counts == model.center_word_counts
+            assert loaded.context_word_counts == model.context_word_counts
+            assert loaded.corpus_word_count == model.corpus_word_count
             
             # Check vectors are preserved
             np.testing.assert_array_equal(
@@ -1217,8 +1220,8 @@ class TestTempRefWord2Vec:
         with pytest.raises(ValueError, match="shuffle=True is not supported"):
             TempRefWord2Vec(sentences=corpora, targets=["word1"], sg=1, shuffle=True, epochs=1)
     
-    def test_tempref_base_word_count_equals_variant_sum(self):
-        """Test that base word counts equal the sum of their temporal variant counts."""
+    def test_tempref_separates_center_counts_from_context_weights(self):
+        """Synthetic base weights must not inflate actual training-token totals."""
         from qhchina.analytics.word2vec import TempRefWord2Vec
         
         corpora = {
@@ -1238,10 +1241,36 @@ class TestTempRefWord2Vec:
         )
         model.train()
         
-        # Base word count should equal sum of variants
-        base_count = model.word_counts["target"]
-        variant_sum = model.word_counts["target_period1"] + model.word_counts["target_period2"]
-        assert base_count == variant_sum
+        variant_sum = (
+            model.center_word_counts["target_period1"]
+            + model.center_word_counts["target_period2"]
+        )
+        assert "target" not in model.center_word_counts
+        assert model.context_word_counts["target"] == variant_sum
+        # Balanced sampling uses 40 tokens from each period.
+        assert model.corpus_word_count == 80
+        assert model.total_corpus_tokens == 80
+
+    def test_tempref_context_weight_uses_only_retained_variants(self):
+        """Filtered temporal variants must not influence negative sampling weights."""
+        from qhchina.analytics.word2vec import TempRefWord2Vec
+
+        model = TempRefWord2Vec(
+            sentences={
+                "period1": [["target", "common"]] * 5,
+                "period2": [["target", "common"]],
+            },
+            targets=["target"],
+            sampling_strategy="proportional",
+            min_word_count=2,
+            sg=1,
+            epochs=1,
+        )
+        model.build_vocab()
+
+        assert "target_period1" in model.vocab
+        assert "target_period2" not in model.vocab
+        assert model.context_word_counts["target"] == 5
 
 
 # =============================================================================
@@ -2047,6 +2076,88 @@ class TestTempRefWord2VecMultithreading:
 
 class TestWord2VecRobustnessFixes:
     """Regression tests for robustness hardening patches."""
+
+    def test_batch_size_cannot_exceed_compiled_capacity(self):
+        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.word2vec.utils import word2vec_c
+
+        with pytest.raises(ValueError, match="fixed capacity"):
+            Word2Vec(
+                batch_size=word2vec_c.MAX_WORDS_IN_BATCH_CAP + 1,
+                epochs=1,
+            )
+
+    def test_oversized_sentence_raises_instead_of_truncating(self):
+        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.word2vec.utils import word2vec_c
+
+        sentence = ["word"] * (word2vec_c.MAX_WORDS_IN_BATCH_CAP + 1)
+        model = Word2Vec(
+            [sentence],
+            min_word_count=1,
+            sample=0,
+            sg=1,
+            epochs=1,
+            calculate_loss=False,
+        )
+        with pytest.raises(ValueError, match="Split the sentence"):
+            model.train()
+
+    def test_training_rejects_one_shot_iterators(self):
+        from qhchina.analytics.word2vec import Word2Vec
+
+        corpus = iter([["a", "b", "c"]])
+        model = Word2Vec(corpus, min_word_count=1, sg=1, epochs=1)
+        with pytest.raises(ValueError, match="restartable"):
+            model.train()
+
+    def test_learning_rate_decay_uses_exact_raw_word_progress(self):
+        from qhchina.analytics.word2vec import Word2Vec
+
+        model = Word2Vec(
+            [["kept", "filtered"], ["kept", "filtered"]],
+            max_vocab_size=1,
+            min_word_count=1,
+            batch_size=2,
+            alpha=0.1,
+            min_alpha=0.01,
+            sample=0,
+            sg=1,
+            workers=1,
+            epochs=1,
+            calculate_loss=False,
+        )
+        observed_alphas = []
+        train_batch = model._train_batch_worker
+
+        def capture_alpha(*args):
+            observed_alphas.append(args[2])
+            return train_batch(*args)
+
+        model._train_batch_worker = capture_alpha
+        model.train()
+
+        assert observed_alphas == pytest.approx([0.1, 0.055])
+        assert model.alpha == pytest.approx(0.01)
+
+    def test_update_vocab_rejects_one_shot_iterators_before_mutation(self):
+        from qhchina.analytics.word2vec import Word2Vec
+
+        model = Word2Vec(
+            [["a", "b", "a"]],
+            min_word_count=1,
+            sg=1,
+            epochs=1,
+        )
+        model.train()
+        vocab_before = model.vocab.copy()
+        counts_before = model.word_counts.copy()
+
+        with pytest.raises(ValueError, match="restartable"):
+            model.train(iter([["new", "a"]]), update_vocab=True)
+
+        assert model.vocab == vocab_before
+        assert model.word_counts == counts_before
 
     def test_global_seed_reproducibility_with_seed_none(self):
         """Global seed should make seed=None runs reproducible."""

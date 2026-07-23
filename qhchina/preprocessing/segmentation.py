@@ -11,6 +11,10 @@ import time
 logger = logging.getLogger("qhchina.preprocessing.segmentation")
 
 
+class _LLMResponseSchemaError(ValueError):
+    """Raised when an LLM response violates the segmentation JSON contract."""
+
+
 __all__ = [
     'SegmentationWrapper',
     'SpacySegmenter',
@@ -575,6 +579,11 @@ class PKUSegmenter(SegmentationWrapper):
                  pos_tagging: bool = False,
                  **kwargs):
         super().__init__(**kwargs)
+        if self.filters['excluded_pos'] and not pos_tagging:
+            raise ValueError(
+                "PKUSegmenter configuration error: excluded_pos requires "
+                "pos_tagging=True"
+            )
         self.model_name = model_name
         self.pos_tagging = pos_tagging
         
@@ -740,6 +749,11 @@ class JiebaSegmenter(SegmentationWrapper):
                  pos_tagging: bool = False,
                  **kwargs):
         super().__init__(**kwargs)
+        if self.filters['excluded_pos'] and not pos_tagging:
+            raise ValueError(
+                "JiebaSegmenter configuration error: excluded_pos requires "
+                "pos_tagging=True"
+            )
         self.pos_tagging = pos_tagging
         
         # Try to import jieba
@@ -922,6 +936,11 @@ class BertSegmenter(SegmentationWrapper):
             kwargs['chunk_size'] = max_sequence_length
         
         super().__init__(**kwargs)
+        if self.filters['excluded_pos']:
+            raise ValueError(
+                "BertSegmenter configuration error: excluded_pos is not "
+                "supported because this backend does not produce POS tags"
+            )
         self.batch_size = batch_size
         self.remove_special_tokens = remove_special_tokens
         self.max_sequence_length = max_sequence_length
@@ -1201,11 +1220,12 @@ class LLMSegmenter(SegmentationWrapper):
     """
     
     DEFAULT_PROMPT = """
-    请将以下中文文本分词。请用JSON格式回答。
+    请将以下中文文本分词。仅返回一个JSON对象，格式必须为:
+    {{"tokens": ["词语1", "词语2"]}}
     
     示例:
     输入: "今天天气真好，我们去散步吧！"
-    输出: ["今天", "天气", "真", "好", "，", "我们", "去", "散步", "吧", "！"]
+    输出: {{"tokens": ["今天", "天气", "真", "好", "，", "我们", "去", "散步", "吧", "！"]}}
     
     输入: "{text}"
     输出:
@@ -1223,6 +1243,11 @@ class LLMSegmenter(SegmentationWrapper):
                  timeout: float = 60.0,
                  **kwargs):
         super().__init__(**kwargs)
+        if self.filters['excluded_pos']:
+            raise ValueError(
+                "LLMSegmenter configuration error: excluded_pos is not "
+                "supported because this backend does not produce POS tags"
+            )
         
         # Warn if user_dict is provided (not supported for LLM)
         if self.user_dict is not None:
@@ -1284,60 +1309,42 @@ class LLMSegmenter(SegmentationWrapper):
                     response_format={"type": "json_object"}
                 )
                 
-                # Parse the response
                 response_text = response.choices[0].message.content
-                
-                # Try to parse as JSON
                 try:
-                    # First check if response is already a list
-                    if response_text.strip().startswith('[') and response_text.strip().endswith(']'):
-                        try:
-                            tokens = json.loads(response_text)
-                            if isinstance(tokens, list):
-                                return tokens
-                        except json.JSONDecodeError as je:
-                            logger.warning(f"Response looks like a list but isn't valid JSON: {str(je)}")
-                            logger.debug(f"Response text (first 100 chars): {response_text[:100]}...")
-                    
-                    # Try to extract JSON structure from the response
-                    try:
-                        parsed_json = json.loads(response_text)
-                        
-                        # Check for common API response patterns
-                        if isinstance(parsed_json, list):
-                            return parsed_json
-                        elif 'tokens' in parsed_json:
-                            return parsed_json['tokens']
-                        elif 'words' in parsed_json:
-                            return parsed_json['words']
-                        elif 'segments' in parsed_json:
-                            return parsed_json['segments']
-                        elif 'result' in parsed_json:
-                            return parsed_json['result']
-                        elif 'results' in parsed_json:
-                            return parsed_json['results']
-                        else:
-                            # Just return the first list found in the JSON
-                            for value in parsed_json.values():
-                                if isinstance(value, list) and len(value) > 0:
-                                    return value
-                            
-                            # If we didn't find any list, log this unusual response
-                            logger.warning(f"No list found in JSON response: {parsed_json}")
-                            # Fallback to raw tokens if no list found
-                            return []
-                    except json.JSONDecodeError as je:
-                        # Show detailed error for debugging
-                        logger.error(f"JSON Decode Error: {str(je)}")
-                        logger.debug(f"Response text (first 100 chars): {response_text[:100]}...")
-                        return []
-                        
-                except Exception as e:
-                    logger.error(f"Error parsing API response: {str(e)}")
-                    logger.debug(f"Response text (first 100 chars): {response_text[:100]}...")
-                    return []
+                    parsed_json = json.loads(response_text)
+                except (json.JSONDecodeError, TypeError) as e:
+                    raise _LLMResponseSchemaError(
+                        "Malformed LLM segmentation response: expected a valid "
+                        'JSON object with schema {"tokens": ["..."]}'
+                    ) from e
+
+                if not isinstance(parsed_json, dict):
+                    raise _LLMResponseSchemaError(
+                        "Malformed LLM segmentation response: expected a "
+                        'top-level JSON object with schema {"tokens": ["..."]}'
+                    )
+                if 'tokens' not in parsed_json:
+                    raise _LLMResponseSchemaError(
+                        "Malformed LLM segmentation response: missing required "
+                        "'tokens' key"
+                    )
+
+                tokens = parsed_json['tokens']
+                if not isinstance(tokens, list):
+                    raise _LLMResponseSchemaError(
+                        "Malformed LLM segmentation response: 'tokens' must be "
+                        "a list of strings"
+                    )
+                if not all(isinstance(token, str) for token in tokens):
+                    raise _LLMResponseSchemaError(
+                        "Malformed LLM segmentation response: every item in "
+                        "'tokens' must be a string"
+                    )
+                return tokens
                     
             except Exception as e:
+                if isinstance(e, _LLMResponseSchemaError):
+                    raise
                 is_last_attempt = (attempt == self.retry_patience)
                 
                 if is_last_attempt:
@@ -1476,6 +1483,11 @@ class HanLPSegmenter(SegmentationWrapper):
         **kwargs
     ):
         super().__init__(**kwargs)
+        if self.filters['excluded_pos'] and not pos_tagging:
+            raise ValueError(
+                "HanLPSegmenter configuration error: excluded_pos requires "
+                "pos_tagging=True"
+            )
         
         try:
             import hanlp

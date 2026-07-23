@@ -105,6 +105,9 @@ DEF MAX_EXP = 6.0
 # This determines the size of stack-allocated buffers for training.
 # Batches exceeding this limit are safely truncated.
 DEF MAX_WORDS_IN_BATCH = 10240
+# Public read-only mirror used by the Python batching layer. Keeping the
+# capacity defined here makes the compiled stack allocation the source of truth.
+MAX_WORDS_IN_BATCH_CAP = MAX_WORDS_IN_BATCH
 
 # =============================================================================
 # Sigmoid Lookup Tables (read-only, initialized once at module load)
@@ -554,7 +557,7 @@ def train_batch(
         compute_loss: Track loss during training.
     
     Returns:
-        (batch_loss, examples_trained, words_processed, final_random_state)
+        (batch_loss, examples_trained, vocab_words, final_random_state)
     """
     cdef int vector_size = syn0.shape[1]
     cdef int num_sentences = len(sentences)
@@ -581,10 +584,10 @@ def train_batch(
     cdef unsigned long long next_random = random_seed
     cdef REAL_t running_loss = 0.0
     cdef long long total_examples = 0
-    cdef long long total_words = 0
+    cdef long long vocab_words = 0
     
     # Batch processing state
-    cdef int effective_words = 0
+    cdef int retained_words = 0
     cdef int effective_sentences = 0
     cdef int word_idx
     cdef int sent_global_idx
@@ -607,30 +610,30 @@ def train_batch(
                 continue
             
             word_idx = <int>PyLong_AsLong(<object>result)
-            total_words += 1
+            vocab_words += 1
             
             if use_subsampling:
                 if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
             
-            indexes[effective_words] = <UITYPE_t>word_idx
-            effective_words += 1
+            indexes[retained_words] = <UITYPE_t>word_idx
+            retained_words += 1
             
-            if effective_words >= MAX_WORDS_IN_BATCH:
+            if retained_words >= MAX_WORDS_IN_BATCH:
                 break
         
         effective_sentences += 1
-        sentence_idx[effective_sentences] = effective_words
+        sentence_idx[effective_sentences] = retained_words
         
-        if effective_words >= MAX_WORDS_IN_BATCH:
+        if retained_words >= MAX_WORDS_IN_BATCH:
             break
     
-    if effective_words > 0 and effective_sentences > 0:
+    if retained_words > 0 and effective_sentences > 0:
         if shrink_windows:
-            for i in range(effective_words):
+            for i in range(retained_words):
                 reduced_windows[i] = <ITYPE_t>(random_int32(&next_random) % window)
         else:
-            memset(reduced_windows, 0, effective_words * cython.sizeof(ITYPE_t))
+            memset(reduced_windows, 0, retained_words * cython.sizeof(ITYPE_t))
         
         with nogil:
             if _sg == 1:
@@ -653,7 +656,7 @@ def train_batch(
                     _compute_loss, &running_loss, &total_examples
                 )
     
-    return running_loss, total_examples, total_words, next_random
+    return running_loss, total_examples, vocab_words, next_random
 
 
 # =============================================================================
@@ -704,7 +707,7 @@ def train_batch_temporal(
         compute_loss: Track loss during training.
     
     Returns:
-        (batch_loss, examples_trained, words_processed, final_random_state)
+        (batch_loss, examples_trained, vocab_words, final_random_state)
     """
     cdef int vector_size = syn0.shape[1]
     cdef int num_sentences = len(sentences)
@@ -730,10 +733,10 @@ def train_batch_temporal(
     cdef unsigned long long next_random = random_seed
     cdef REAL_t running_loss = 0.0
     cdef long long total_examples = 0
-    cdef long long total_words = 0
+    cdef long long vocab_words = 0
     
     # Batch processing state
-    cdef int effective_words = 0
+    cdef int retained_words = 0
     cdef int effective_sentences = 0
     cdef int word_idx
     cdef int sent_global_idx
@@ -756,32 +759,32 @@ def train_batch_temporal(
                 continue
             
             word_idx = <int>PyLong_AsLong(<object>result)
-            total_words += 1
+            vocab_words += 1
             
             if use_subsampling:
                 if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
             
-            center_indexes[effective_words] = <UITYPE_t>word_idx
-            context_indexes[effective_words] = <UITYPE_t>temporal_map_ptr[word_idx]
+            center_indexes[retained_words] = <UITYPE_t>word_idx
+            context_indexes[retained_words] = <UITYPE_t>temporal_map_ptr[word_idx]
             
-            effective_words += 1
+            retained_words += 1
             
-            if effective_words >= MAX_WORDS_IN_BATCH:
+            if retained_words >= MAX_WORDS_IN_BATCH:
                 break
         
         effective_sentences += 1
-        sentence_idx[effective_sentences] = effective_words
+        sentence_idx[effective_sentences] = retained_words
         
-        if effective_words >= MAX_WORDS_IN_BATCH:
+        if retained_words >= MAX_WORDS_IN_BATCH:
             break
     
-    if effective_words > 0 and effective_sentences > 0:
+    if retained_words > 0 and effective_sentences > 0:
         if shrink_windows:
-            for i in range(effective_words):
+            for i in range(retained_words):
                 reduced_windows[i] = <ITYPE_t>(random_int32(&next_random) % window)
         else:
-            memset(reduced_windows, 0, effective_words * cython.sizeof(ITYPE_t))
+            memset(reduced_windows, 0, retained_words * cython.sizeof(ITYPE_t))
         
         with nogil:
             train_batch_sg_temporal(
@@ -793,7 +796,7 @@ def train_batch_temporal(
                 _compute_loss, &running_loss, &total_examples
             )
     
-    return running_loss, total_examples, total_words, next_random
+    return running_loss, total_examples, vocab_words, next_random
 
 
 cdef void train_batch_sg_temporal(
@@ -1086,7 +1089,7 @@ def train_batch_dynamic(
         compute_loss: Track loss during training
 
     Returns:
-        (batch_loss, examples_trained, words_processed, final_random_state)
+        (batch_loss, examples_trained, vocab_words, final_random_state)
     """
     cdef int vector_size = len(U_flat) // (T * vocab_size)
     cdef int num_sentences = len(sentences_with_time)
@@ -1111,10 +1114,10 @@ def train_batch_dynamic(
     cdef unsigned long long next_random = random_seed
     cdef REAL_t running_loss = 0.0
     cdef long long total_examples = 0
-    cdef long long total_words = 0
+    cdef long long vocab_words = 0
 
     # Batch processing state
-    cdef int effective_words = 0
+    cdef int retained_words = 0
     cdef int effective_sentences = 0
     cdef int word_idx, time_idx
     cdef int sent_global_idx
@@ -1153,30 +1156,30 @@ def train_batch_dynamic(
                 continue
 
             word_idx = <int>PyLong_AsLong(<object>result)
-            total_words += 1
+            vocab_words += 1
 
             if use_subsampling:
                 if sample_ints_ptr[word_idx] < random_int32(&next_random):
                     continue
 
-            indexes[effective_words] = <UITYPE_t>word_idx
-            effective_words += 1
+            indexes[retained_words] = <UITYPE_t>word_idx
+            retained_words += 1
 
-            if effective_words >= MAX_WORDS_IN_BATCH:
+            if retained_words >= MAX_WORDS_IN_BATCH:
                 break
 
         effective_sentences += 1
-        sentence_idx[effective_sentences] = effective_words
+        sentence_idx[effective_sentences] = retained_words
 
-        if effective_words >= MAX_WORDS_IN_BATCH:
+        if retained_words >= MAX_WORDS_IN_BATCH:
             break
 
-    if effective_words > 0 and effective_sentences > 0:
+    if retained_words > 0 and effective_sentences > 0:
         if shrink_windows:
-            for i in range(effective_words):
+            for i in range(retained_words):
                 reduced_windows[i] = <ITYPE_t>(random_int32(&next_random) % window)
         else:
-            memset(reduced_windows, 0, effective_words * cython.sizeof(ITYPE_t))
+            memset(reduced_windows, 0, retained_words * cython.sizeof(ITYPE_t))
 
         # Allocate dedup buffers for regularization
         if temporal_lambda > 0.0:
@@ -1219,4 +1222,4 @@ def train_batch_dynamic(
             free(touched_V_words)
             free(touched_V_times)
 
-    return running_loss, total_examples, total_words, next_random
+    return running_loss, total_examples, vocab_words, next_random

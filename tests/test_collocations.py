@@ -130,6 +130,14 @@ class TestStreamingAndBatching:
         results = find_collocates(sample_documents, target_words=["人"])
         assert isinstance(results, pd.DataFrame)
         assert len(results) > 0
+
+    def test_one_shot_iterator_rejected(self, sample_documents):
+        """Test that one-shot iterators are rejected clearly."""
+        from qhchina.analytics.collocations import find_collocates
+
+        one_shot = (doc for doc in sample_documents)
+        with pytest.raises(ValueError, match="restartable"):
+            find_collocates(one_shot, target_words=["人"])
     
     def test_batch_equivalence_window(self, sample_documents):
         """Test that small and large batch sizes produce identical results."""
@@ -879,6 +887,28 @@ class TestDeterministicStatisticsCalculations:
         # Allow some tolerance since small sample sizes can cause deviation
         assert 0.5 < filler_result["ratio_local"] < 2.0, \
             f"ratio_local for uniform 'filler' should be near 1, got {filler_result['ratio_local']}"
+
+    def test_window_method_repeated_target_tokens_produces_valid_table(self):
+        """Regression: repeated target tokens should not produce invalid cells."""
+        from qhchina.analytics.collocations import find_collocates
+
+        sentences = [
+            ["dog", "dog", "cat"],
+            ["dog", "bird"],
+            ["cat", "dog"],
+        ]
+        results = find_collocates(
+            sentences,
+            target_words="dog",
+            method="window",
+            horizon=1,
+            as_dataframe=False,
+        )
+
+        cat_result = next((r for r in results if r["collocate"] == "cat"), None)
+        assert cat_result is not None
+        assert cat_result["obs_local"] == 2
+        assert cat_result["obs_global"] == 2
 
 
 class TestDeterministicCoocMatrixCalculations:

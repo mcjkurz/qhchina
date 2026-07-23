@@ -6,6 +6,8 @@ and other assets from the qhchina-data GitHub repository.
 """
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger("qhchina.helpers.github")
@@ -54,29 +56,63 @@ def ensure_cache_dir(subdir: str) -> Path:
     return cache_dir
 
 
-def download_file(url: str, dest: Path, timeout: int = 120) -> None:
+def download_file(
+    url: str,
+    dest: Path,
+    timeout: int = 120,
+    expected_size: int | None = None,
+) -> None:
     """
-    Download a file from URL to destination path.
+    Download a file atomically from URL to destination path.
     
     Args:
         url: URL to download from
         dest: Destination path to save the file
         timeout: Request timeout in seconds (default: 120)
+        expected_size: Expected size in bytes. If provided, a mismatched
+            download is rejected before replacing the destination.
     
     Raises:
         ImportError: If requests is not installed
         requests.RequestException: If download fails
+        ValueError: If the downloaded size does not match expected_size
     """
     requests = _get_requests()
+    dest = Path(dest)
     
     response = requests.get(url, timeout=timeout, stream=True)
     if response.status_code == 404:
         raise ValueError(f"Resource not found at URL: {url}")
     response.raise_for_status()
     
-    with open(dest, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=65536):
-            f.write(chunk)
+    temp_path: Path | None = None
+    try:
+        fd, temp_name = tempfile.mkstemp(
+            dir=dest.parent,
+            prefix=f".{dest.name}.",
+            suffix=".tmp",
+        )
+        temp_path = Path(temp_name)
+        with os.fdopen(fd, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=65536):
+                if chunk:
+                    f.write(chunk)
+            f.flush()
+            os.fsync(f.fileno())
+
+        actual_size = temp_path.stat().st_size
+        if expected_size is not None and actual_size != expected_size:
+            raise ValueError(
+                f"Downloaded size mismatch for {url}: "
+                f"expected {expected_size} bytes, got {actual_size}"
+            )
+
+        os.replace(temp_path, dest)
+        temp_path = None
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
 
 
 def query_github_api(path: str, timeout: int = 30) -> list[dict]:
