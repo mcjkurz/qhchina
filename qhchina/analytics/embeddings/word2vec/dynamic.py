@@ -22,7 +22,7 @@ import numpy as np
 from collections import Counter
 from collections.abc import Iterable
 from .base import Word2Vec
-from .utils import word2vec_c, TemporalSentenceIterator, SingleCorpusTemporalIterator
+from .utils import word2vec_c, _TemporalSentenceIterator, _SingleCorpusTemporalIterator
 from ..._vector_ops import cosine_similarity
 from ....config import resolve_seed
 
@@ -495,10 +495,10 @@ class DynamicWord2Vec(Word2Vec):
         Train on a single batch with temporal information using provided work buffers.
 
         This method is called by worker threads and uses thread-private buffers.
-        The batch contains TemporalSentence objects with time_idx attribute.
+        The batch contains internal temporal sentence objects with time_idx attribute.
 
         Args:
-            batch: List of TemporalSentence objects.
+            batch: List of internal temporal sentence objects.
             sample_ints: Subsampling thresholds array.
             alpha: Learning rate for this batch.
             random_seed: Random seed for this batch.
@@ -510,8 +510,8 @@ class DynamicWord2Vec(Word2Vec):
         Returns:
             Tuple of (batch_loss, batch_examples, batch_vocab_words).
         """
-        # Extract sentences and time indices from TemporalSentence objects
-        # TemporalSentence is a list subclass, so we can use it directly as tokens
+        # Extract sentences and time indices from internal temporal sentence objects.
+        # The object is a list subclass, so we can use it directly as tokens.
         batch_with_time = [(list(sent), sent.time_idx) for sent in batch]
 
         # Flatten U and V for Cython
@@ -608,7 +608,7 @@ class DynamicWord2Vec(Word2Vec):
 
     def _train_joint(self, reset_lr: bool) -> float | None:
         """Joint training: interleaved batches from all periods with temporal regularization."""
-        self._sentences = TemporalSentenceIterator(
+        self._sentences = _TemporalSentenceIterator(
             corpora=self._corpora,
             label2idx=self.label2idx,
             token_budget=self.batch_size,
@@ -667,7 +667,7 @@ class DynamicWord2Vec(Word2Vec):
             period_tokens = sum(self.period_vocab_counts.get(label, {}).values())
             self.corpus_word_count = period_tokens
 
-            self._sentences = SingleCorpusTemporalIterator(
+            self._sentences = _SingleCorpusTemporalIterator(
                 corpus=self._corpora[label],
                 time_idx=self.label2idx[label],
                 token_limit=token_limits[label],

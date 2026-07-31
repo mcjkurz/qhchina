@@ -55,6 +55,17 @@ def project_2d(
             Default is False.
         n_neighbors (int): Number of neighbors for UMAP. Default is 15.
         min_dist (float): Minimum distance between points for UMAP. Default is 0.1.
+
+    Example:
+        import numpy as np
+        from qhchina.analytics.vectors import project_2d
+
+        vectors = {
+            "economy": np.array([0.2, 0.1, 0.4, 0.7]),
+            "trade": np.array([0.3, 0.2, 0.5, 0.6]),
+            "agriculture": np.array([0.8, 0.6, 0.1, 0.2]),
+        }
+        project_2d(vectors, method="pca", title="Semantic projection")
     """
     import matplotlib.pyplot as plt
 
@@ -143,6 +154,14 @@ def get_bias_direction(
     
     Returns:
         numpy.ndarray: The bias direction vector (normalized).
+
+    Example:
+        import numpy as np
+        from qhchina.analytics.vectors import get_bias_direction
+
+        pos = np.array([0.8, 0.2, 0.1])
+        neg = np.array([0.1, 0.7, 0.2])
+        direction = get_bias_direction((pos, neg))
     """
     if isinstance(anchors, tuple):
         anchors = [anchors]
@@ -176,6 +195,20 @@ def calculate_bias(
     
     Returns:
         numpy.ndarray: Bias scores (dot products) for each target word.
+
+    Example:
+        import numpy as np
+        from qhchina.analytics.vectors import calculate_bias
+
+        vectors = {
+            "king": np.array([0.9, 0.2, 0.1]),
+            "queen": np.array([0.8, 0.1, 0.2]),
+            "man": np.array([0.7, 0.4, 0.1]),
+            "woman": np.array([0.6, 0.2, 0.3]),
+            "doctor": np.array([0.5, 0.6, 0.2]),
+            "nurse": np.array([0.4, 0.3, 0.5]),
+        }
+        scores = calculate_bias(("man", "woman"), ["doctor", "nurse"], vectors)
     """
     # Ensure anchors is a list of tuples
     if isinstance(anchors, tuple) and len(anchors) == 2:
@@ -229,6 +262,26 @@ def project_bias(
             Default is False.
         disperse_y (bool): Whether to add random y-dispersion for 1D plots. 
             Default is False.
+
+    Example:
+        import numpy as np
+        from qhchina.analytics.vectors import project_bias
+
+        vectors = {
+            "man": np.array([0.8, 0.2, 0.1]),
+            "woman": np.array([0.5, 0.3, 0.2]),
+            "science": np.array([0.7, 0.8, 0.4]),
+            "art": np.array([0.3, 0.6, 0.9]),
+            "doctor": np.array([0.6, 0.7, 0.3]),
+            "poet": np.array([0.2, 0.5, 0.8]),
+        }
+        project_bias(
+            x=("man", "woman"),
+            y=("science", "art"),
+            targets=["doctor", "poet"],
+            word_vectors=vectors,
+            title="Bias projection",
+        )
     """
     import matplotlib.pyplot as plt
 

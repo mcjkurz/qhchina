@@ -18,7 +18,7 @@ import numpy as np
 from collections import Counter
 from collections.abc import Iterable
 from .base import Word2Vec
-from .utils import BalancedSentenceIterator, word2vec_c
+from .utils import _BalancedSentenceIterator, word2vec_c
 from ..._vector_ops import cosine_similarity
 
 logger = logging.getLogger("qhchina.analytics.embeddings.word2vec.tempref")
@@ -776,7 +776,7 @@ class TempRefWord2Vec(Word2Vec):
             self.build_vocab()
         
         # Create sentence iterator with automatic tagging
-        training_corpus = BalancedSentenceIterator(
+        training_corpus = _BalancedSentenceIterator(
             self._corpora,
             token_budget=self.batch_size,
             targets=self._target_set,

@@ -12,10 +12,6 @@ from ....config import get_rng, resolve_seed
 logger = logging.getLogger("qhchina.analytics.embeddings.word2vec")
 
 __all__ = [
-    'BalancedSentenceIterator',
-    'SingleCorpusTemporalIterator',
-    'TemporalSentence',
-    'TemporalSentenceIterator',
     'CYTHON_AVAILABLE',
     'word2vec_c',
 ]
@@ -36,7 +32,7 @@ def _count_tokens(corpus: Iterable[list[str]]) -> int:
     return sum(len(sentence) for sentence in corpus)
 
 
-class TemporalSentence(list):
+class _TemporalSentence(list):
     """A sentence (list of tokens) annotated with a time slice index.
 
     Subclasses ``list`` so it passes through ``iter_batches`` and the parent
@@ -56,11 +52,11 @@ class TemporalSentence(list):
         self.time_idx = time_idx
 
 
-class TemporalSentenceIterator:
+class _TemporalSentenceIterator:
     """Streaming iterator that interleaves sentences from multiple corpora with time metadata.
 
     Follows the same balanced/proportional sampling logic as
-    :class:`BalancedSentenceIterator` but yields :class:`TemporalSentence`
+    :class:`_BalancedSentenceIterator` but yields :class:`_TemporalSentence`
     objects (``list`` subclass with a ``time_idx`` attribute) instead of
     tagging words.  Only one budget-sized chunk is materialised at a time,
     so memory usage stays constant regardless of corpus size.
@@ -114,7 +110,7 @@ class TemporalSentenceIterator:
         self._epoch = 0
 
     def __iter__(self):
-        """Yield :class:`TemporalSentence` objects from all corpora, interleaved and shuffled."""
+        """Yield :class:`_TemporalSentence` objects from all corpora, interleaved and shuffled."""
         epoch_seed = (self._base_seed + self._epoch) if self._base_seed is not None else None
         rng = get_rng(epoch_seed)
         self._epoch += 1
@@ -135,7 +131,7 @@ class TemporalSentenceIterator:
         total_yielded = 0
 
         while True:
-            chunk: list[TemporalSentence] = []
+            chunk: list[_TemporalSentence] = []
 
             for label in self._labels:
                 if label in corpora_exhausted:
@@ -157,7 +153,7 @@ class TemporalSentenceIterator:
                         if len(sentence) > remaining:
                             sentence = sentence[:remaining]
 
-                        chunk.append(TemporalSentence(sentence, time_idx))
+                        chunk.append(_TemporalSentence(sentence, time_idx))
                         sentence_tokens = len(sentence)
                         cycle_tokens += sentence_tokens
                         tokens_yielded[label] += sentence_tokens
@@ -185,8 +181,8 @@ class TemporalSentenceIterator:
                 return
 
 
-class SingleCorpusTemporalIterator:
-    """Streaming iterator over a single corpus that yields :class:`TemporalSentence` objects.
+class _SingleCorpusTemporalIterator:
+    """Streaming iterator over a single corpus that yields :class:`_TemporalSentence` objects.
 
     Used by :class:`DynamicWord2Vec` in sequential training mode, where each
     time slice is trained independently.  Streams through the corpus without
@@ -217,11 +213,11 @@ class SingleCorpusTemporalIterator:
                     return
                 if len(sentence) > remaining:
                     sentence = sentence[:remaining]
-            yield TemporalSentence(sentence, self._time_idx)
+            yield _TemporalSentence(sentence, self._time_idx)
             tokens_yielded += len(sentence)
 
 
-class BalancedSentenceIterator:
+class _BalancedSentenceIterator:
     """
     Iterator that streams sentences from multiple corpus sources with configurable sampling.
     

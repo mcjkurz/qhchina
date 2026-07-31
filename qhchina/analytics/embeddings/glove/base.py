@@ -56,12 +56,38 @@ class GloVe(Word2Vec):
       files and trains from a streaming k-way merge without materializing the
       full sparse matrix.
 
+    Parameters:
+        sentences: Restartable iterable of tokenized sentences.
+        vector_size: Embedding dimensionality.
+        window: Symmetric context window radius.
+        min_word_count: Minimum token frequency for vocabulary inclusion.
+        max_vocab_size: Optional cap on retained vocabulary size.
+        seed: RNG seed for deterministic initialization/training order.
+        alpha: Learning rate for AdaGrad updates.
+        min_alpha: Accepted for API compatibility (not used for internal
+            GloVe decay schedule).
+        epochs: Number of full passes over co-occurrence pairs.
+        workers: Accepted for compatibility with Word2Vec API.
+        verbose: If True, logs progress and backend details.
+        calculate_loss: If True, ``train()`` returns average epoch loss.
+        mode: ``"in_memory"`` or ``"disk"`` co-occurrence backend.
+        x_max: GloVe weighting cutoff in ``f(x)``.
+        power: GloVe weighting exponent in ``f(x)``.
+        min_cooc_count: Drop co-occurrence pairs below this weight.
+        shard_sentence_count: In disk mode, flush local pair map every N
+            sentences.
+        cooc_train_chunk_size: Number of merged pairs passed per Cython
+            update chunk in disk mode.
+        max_cooc_entries_in_memory: Safety cap for local pair-map size.
+        combine_vectors: If True, expose ``(W + W_tilde)/2`` as ``self.W``;
+            otherwise expose ``W`` only.
+
     Notes:
-        - Base (single-corpus) GloVe only.
-        - ``workers`` is accepted for API consistency, but training updates are
+        * Base (single-corpus) GloVe only.
+        * ``workers`` is accepted for API consistency, but training updates are
           currently executed as one shared update stream.
-        - Vectors returned by ``get_vector``/``most_similar`` come from either
-          ``(W + W_tilde) / 2`` (default) or ``W`` only when
+        * Vectors returned by ``get_vector`` and ``most_similar`` come from
+          either ``(W + W_tilde) / 2`` (default) or ``W`` only when
           ``combine_vectors=False``.
     """
 
