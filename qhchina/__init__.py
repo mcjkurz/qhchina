@@ -60,6 +60,7 @@ from .helpers.texts import LineSentenceFile
 from .analytics import (
     Word2Vec, 
     TempRefWord2Vec, 
+    DynamicWord2Vec,
     GloVe,
     LDAGibbsSampler, 
     Stylometry,

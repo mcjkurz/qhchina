@@ -50,7 +50,7 @@ def small_model(temporal_sentences):
         workers=1,
         verbose=False,
     )
-    model.train()
+    model.train(epochs=model.epochs)
     return model
 
 
@@ -209,7 +209,7 @@ class TestTemporalRegularization:
             seed=42,
             verbose=False,
         )
-        model_reg.train()
+        model_reg.train(epochs=model_reg.epochs)
 
         # Model without regularization
         model_noreg = DynamicWord2Vec(
@@ -221,7 +221,7 @@ class TestTemporalRegularization:
             seed=42,
             verbose=False,
         )
-        model_noreg.train()
+        model_noreg.train(epochs=model_noreg.epochs)
 
         # Check drift for a common word
         word = "民"
@@ -249,7 +249,7 @@ class TestTemporalRegularization:
         )
 
         # Should train without errors
-        model.train()
+        model.train(epochs=model.epochs)
         assert model.U is not None
         assert model.V is not None
 
@@ -513,7 +513,7 @@ class TestIntegration:
             sampling_strategy="balanced",
             verbose=False,
         )
-        loss = model.train()
+        loss = model.train(epochs=model.epochs)
 
         assert model.U is not None
         assert model.V is not None
@@ -530,7 +530,7 @@ class TestIntegration:
             sampling_strategy="proportional",
             verbose=False,
         )
-        loss = model.train()
+        loss = model.train(epochs=model.epochs)
 
         assert model.U is not None
         assert model.V is not None
@@ -550,7 +550,7 @@ class TestIntegration:
         )
 
         initial_alpha = model.alpha
-        model.train()
+        model.train(epochs=model.epochs)
         final_alpha = model.alpha
 
         # Alpha should have decayed
@@ -573,7 +573,7 @@ class TestIntegration:
             temporal_lambda=0.05,
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
 
         assert model.num_time_slices == 4
         assert len(model.labels) == 4
@@ -600,7 +600,7 @@ class TestIntegration:
 
         # Should raise error during vocab building
         with pytest.raises(ValueError):
-            model.train()
+            model.train(epochs=model.epochs)
 
     def test_sequential_training(self, temporal_sentences):
         """Test sequential training mode produces valid embeddings."""
@@ -612,7 +612,7 @@ class TestIntegration:
             epochs=3,
             verbose=False,
         )
-        loss = model.train()
+        loss = model.train(epochs=model.epochs)
 
         assert model.U is not None
         assert model.V is not None
@@ -635,7 +635,7 @@ class TestIntegration:
             epochs=3,
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "seq.npy")
@@ -658,7 +658,7 @@ class TestIntegration:
             seed=42,
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
 
         assert model.U is not None
 
@@ -673,7 +673,7 @@ class TestIntegration:
             epochs=3,
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
         assert model.U is not None
 
     def test_invalid_training_mode(self):
@@ -701,7 +701,7 @@ class TestIntegration:
             epochs=3,
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
 
         assert model.num_time_slices == 3
         if "李" in model.vocab:

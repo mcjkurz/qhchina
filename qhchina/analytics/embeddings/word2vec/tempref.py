@@ -19,7 +19,7 @@ from collections import Counter
 from collections.abc import Iterable
 from .base import Word2Vec
 from .utils import BalancedSentenceIterator, word2vec_c
-from ...vectors import cosine_similarity
+from ..._vector_ops import cosine_similarity
 
 logger = logging.getLogger("qhchina.analytics.embeddings.word2vec.tempref")
 
@@ -191,7 +191,7 @@ class TempRefWord2Vec(Word2Vec):
             vector_size=100,
             sg=1
         )
-        model.train()
+        model.train(epochs=5)
         
         # Streaming from text files:
         from qhchina.analytics import TempRefWord2Vec, LineSentenceFile
@@ -205,7 +205,7 @@ class TempRefWord2Vec(Word2Vec):
             vector_size=100,
             sg=1
         )
-        model.train()
+        model.train(epochs=5)
         
         # Analyze semantic change
         changes = model.calculate_semantic_change("民")
@@ -266,9 +266,10 @@ class TempRefWord2Vec(Word2Vec):
         if not sentences:
             raise ValueError("sentences cannot be empty")
         
-        # Check sg=1 requirement
-        if kwargs.get('sg') != 1:
+        # TempRefWord2Vec is Skip-gram only. Allow omission, reject explicit CBOW.
+        if 'sg' in kwargs and kwargs['sg'] != 1:
             raise NotImplementedError("TempRefWord2Vec only supports Skip-gram (sg=1)")
+        kwargs['sg'] = 1
         
         # Validate targets
         if not targets:
@@ -323,6 +324,128 @@ class TempRefWord2Vec(Word2Vec):
         
         # Initialize parent (without auto-training)
         super().__init__(**kwargs)
+
+    def _set_training_corpora(
+        self,
+        sentences: dict[str, Iterable[list[str]]] | None,
+    ) -> None:
+        """Attach corpora for training, validating period labels and structure."""
+        if sentences is None:
+            if self._corpora is None:
+                raise ValueError(
+                    "No corpora available for training. "
+                    "Pass sentences={label: corpus} to train(), especially for models loaded from disk."
+                )
+            return
+
+        if not isinstance(sentences, dict):
+            raise TypeError(
+                f"sentences must be a dictionary mapping labels to corpora, "
+                f"got {type(sentences).__name__}"
+            )
+        if not sentences:
+            raise ValueError("sentences cannot be empty")
+
+        incoming_labels = list(sentences.keys())
+        if self.labels and incoming_labels != self.labels:
+            raise ValueError(
+                "sentences labels must exactly match the model labels and order. "
+                f"Expected {self.labels}, got {incoming_labels}."
+            )
+
+        self._corpora = {label: corpus for label, corpus in sentences.items()}
+
+    def _refresh_counts_for_current_vocab(self) -> None:
+        """Recompute training statistics for attached corpora with fixed vocabulary.
+
+        This is used when a trained model receives new corpora in ``train()``.
+        Vocabulary is kept unchanged; counts are refreshed so subsampling and
+        negative-sampling weights match the supplied corpora.
+        """
+        token_counts = {}
+        for label, corpus in self._corpora.items():
+            if hasattr(corpus, 'token_count'):
+                token_counts[label] = corpus.token_count
+            else:
+                token_counts[label] = sum(len(sent) for sent in corpus)
+
+        if self._sampling_strategy == "balanced":
+            min_count = min(token_counts.values())
+            token_limits = {label: min_count for label in token_counts}
+        else:
+            token_limits = token_counts
+
+        period_counts = {}
+        observed_center_counts = Counter()
+        total_tokens = 0
+
+        for label, corpus in self._corpora.items():
+            period_counter = Counter()
+            tokens_counted = 0
+            suffix = "_" + label
+            token_limit = token_limits[label]
+
+            for sentence in corpus:
+                remaining = token_limit - tokens_counted
+                if remaining <= 0:
+                    break
+                if len(sentence) > word2vec_c.MAX_WORDS_IN_BATCH_CAP:
+                    raise ValueError(
+                        f"A sentence in period '{label}' contains {len(sentence):,} words, "
+                        f"exceeding the compiled limit of "
+                        f"{word2vec_c.MAX_WORDS_IN_BATCH_CAP:,}. "
+                        "Split the sentence before training."
+                    )
+                if len(sentence) > remaining:
+                    sentence = sentence[:remaining]
+
+                tagged_sentence = [
+                    tok + suffix if tok in self._target_set else tok
+                    for tok in sentence
+                ]
+                period_counter.update(tagged_sentence)
+                tokens_counted += len(sentence)
+
+            period_counts[label] = period_counter
+            observed_center_counts.update(period_counter)
+            total_tokens += tokens_counted
+
+        filtered_center_counts = Counter(
+            {
+                word: count
+                for word, count in observed_center_counts.items()
+                if word in self.vocab
+            }
+        )
+        if not filtered_center_counts:
+            raise ValueError(
+                "No in-vocabulary tokens found in supplied corpora. "
+                "The model vocabulary is fixed for TempRefWord2Vec continuation training."
+            )
+
+        self.period_vocab_counts = period_counts
+        self.center_word_counts = filtered_center_counts
+        self.word_counts = self.center_word_counts.copy()
+        self.total_corpus_tokens = total_tokens
+        self.corpus_word_count = sum(self.center_word_counts.values())
+
+        context_word_counts = Counter(
+            {
+                word: self.center_word_counts.get(word, 0)
+                for word in self.index2word
+                if word not in self.reverse_temporal_map
+            }
+        )
+        for base_word, variants in self.temporal_word_map.items():
+            if base_word not in self.vocab:
+                continue
+            base_count = sum(
+                self.center_word_counts.get(variant, 0)
+                for variant in variants
+                if variant in self.vocab
+            )
+            context_word_counts[base_word] = base_count
+        self.context_word_counts = context_word_counts
     
     def build_vocab(self, sentences: Iterable[list[str]] | None = None) -> None:
         """
@@ -608,7 +731,13 @@ class TempRefWord2Vec(Word2Vec):
         )
         return batch_loss, batch_examples, batch_vocab_words
     
-    def train(self) -> float | None:
+    def train(
+        self,
+        sentences: dict[str, Iterable[list[str]]] | None = None,
+        epochs: int | None = None,
+        update_vocab: bool = False,
+        reset_lr: bool = True,
+    ) -> float | None:
         """
         Train the TempRefWord2Vec model.
         
@@ -619,9 +748,29 @@ class TempRefWord2Vec(Word2Vec):
         All training configuration (epochs, batch_size, alpha, min_alpha, etc.) is read
         from instance attributes set during initialization via ``**kwargs``.
         
+        Args:
+            sentences: Optional replacement corpora mapping period labels to corpora.
+                Required for models loaded from disk, which do not persist corpora.
+            epochs: Number of epochs. If None, uses ``self.epochs`` from model
+                initialization.
+            update_vocab: Not supported for TempRefWord2Vec. Vocabulary remains fixed.
+            reset_lr: If True (default), reset learning rate to initial ``alpha``.
+
         Returns:
             Final loss value if calculate_loss is True, None otherwise.
         """
+        self._set_training_corpora(sentences)
+        run_epochs = self.epochs if epochs is None else epochs
+        if run_epochs is None:
+            raise ValueError("epochs must be specified either at init or in train()")
+        if update_vocab:
+            raise NotImplementedError(
+                "TempRefWord2Vec update_vocab=True is not supported. "
+                "Initialize a new model to change vocabulary."
+            )
+        if sentences is not None and self.vocab:
+            self._refresh_counts_for_current_vocab()
+
         # Build vocabulary if not already built
         if not self.vocab:
             self.build_vocab()
@@ -640,7 +789,7 @@ class TempRefWord2Vec(Word2Vec):
         # yielded by balanced iterator. This is acceptable - subsampling and negative
         # sampling use the correct vocabulary-based counts.
         self._sentences = training_corpus
-        return super().train()
+        return super().train(epochs=run_epochs, reset_lr=reset_lr)
 
     def calculate_semantic_change(
         self,
@@ -816,6 +965,14 @@ class TempRefWord2Vec(Word2Vec):
             'ns_exponent': self.ns_exponent,
             'cbow_mean': self.cbow_mean,
             'sg': self.sg,
+            'seed': self.seed,
+            'alpha': self.alpha,
+            'min_alpha': self.min_alpha,
+            'epochs': self.epochs,
+            'batch_size': self.batch_size,
+            'workers': self.workers,
+            'calculate_loss': self.calculate_loss,
+            'shuffle': self.shuffle,
             'sample': self.sample,
             'shrink_windows': self.shrink_windows,
             'max_vocab_size': self.max_vocab_size,
@@ -900,6 +1057,14 @@ class TempRefWord2Vec(Word2Vec):
             ns_exponent=model_data['ns_exponent'],
             cbow_mean=model_data['cbow_mean'],
             sg=model_data['sg'],
+            seed=model_data.get('seed'),
+            alpha=model_data.get('alpha', 0.025),
+            min_alpha=model_data.get('min_alpha'),
+            epochs=model_data.get('epochs'),
+            batch_size=model_data.get('batch_size', 10240),
+            workers=model_data.get('workers', 1),
+            calculate_loss=model_data.get('calculate_loss', True),
+            shuffle=model_data.get('shuffle'),
             sample=sample,
             shrink_windows=shrink_windows,
             max_vocab_size=max_vocab_size,

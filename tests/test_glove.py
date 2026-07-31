@@ -23,7 +23,7 @@ class TestGloVeBasic:
             mode="in_memory",
             verbose=False,
         )
-        loss = model.train()
+        loss = model.train(epochs=model.epochs)
         assert isinstance(loss, float)
         assert len(model.vocab) > 0
         assert model.W.shape[1] == 20
@@ -42,7 +42,7 @@ class TestGloVeBasic:
             shard_sentence_count=2,
             verbose=False,
         )
-        loss = model.train()
+        loss = model.train(epochs=model.epochs)
         assert isinstance(loss, float)
         assert model.W.shape[1] == 16
 
@@ -59,6 +59,31 @@ class TestGloVeBasic:
         model = GloVe(vector_size=10, min_word_count=1, epochs=1)
         with pytest.raises(ValueError, match="restartable"):
             model.train(sentences=sentences)
+
+    def test_train_requires_epochs_somewhere(self, sample_documents):
+        from qhchina.analytics.embeddings import GloVe
+
+        model = GloVe(
+            sentences=sample_documents,
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            epochs=1,
+            mode="in_memory",
+        )
+        # Allowed because epochs is set on the model.
+        model.train()
+
+        model_no_epochs = GloVe(
+            vector_size=10,
+            window=2,
+            min_word_count=1,
+            epochs=1,
+            mode="in_memory",
+        )
+        model_no_epochs.epochs = None
+        with pytest.raises(ValueError, match="epochs must be specified either at init or in train"):
+            model_no_epochs.train(sentences=sample_documents)
 
     def test_disk_mode_streams_with_memmap_shards(self, sample_documents, monkeypatch):
         from qhchina.analytics.embeddings import GloVe
@@ -86,7 +111,7 @@ class TestGloVeBasic:
             max_cooc_entries_in_memory=4,
             verbose=False,
         )
-        loss = model.train()
+        loss = model.train(epochs=model.epochs)
         assert isinstance(loss, float)
         assert "r" in mmap_calls
 
@@ -106,7 +131,7 @@ class TestGloVeVectors:
             mode="in_memory",
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
         return model
 
     def test_get_vector(self, trained_glove):
@@ -143,7 +168,7 @@ class TestGloVePersistence:
             mode="in_memory",
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
 
         with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as handle:
             path = handle.name
@@ -170,7 +195,7 @@ class TestGloVePersistence:
             mode="in_memory",
             verbose=False,
         )
-        model.train()
+        model.train(epochs=model.epochs)
 
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as handle:
             path = handle.name
@@ -200,8 +225,8 @@ class TestGloVeReproducibility:
         )
         model_a = GloVe(**kwargs)
         model_b = GloVe(**kwargs)
-        model_a.train()
-        model_b.train()
+        model_a.train(epochs=model_a.epochs)
+        model_b.train(epochs=model_b.epochs)
         np.testing.assert_allclose(model_a.W, model_b.W, rtol=1e-6, atol=1e-6)
 
     def test_mode_parity_shapes(self, sample_documents):
@@ -218,8 +243,8 @@ class TestGloVeReproducibility:
         )
         mem_model = GloVe(**common, mode="in_memory")
         disk_model = GloVe(**common, mode="disk", shard_sentence_count=2)
-        mem_model.train()
-        disk_model.train()
+        mem_model.train(epochs=mem_model.epochs)
+        disk_model.train(epochs=disk_model.epochs)
 
         assert mem_model.W.shape == disk_model.W.shape
         assert mem_model.W.dtype == np.float32

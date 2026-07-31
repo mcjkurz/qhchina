@@ -23,7 +23,7 @@ from collections import Counter
 from collections.abc import Iterable
 from .base import Word2Vec
 from .utils import word2vec_c, TemporalSentenceIterator, SingleCorpusTemporalIterator
-from ...vectors import cosine_similarity
+from ..._vector_ops import cosine_similarity
 from ....config import resolve_seed
 
 logger = logging.getLogger("qhchina.analytics.embeddings.word2vec.dynamic")
@@ -147,7 +147,7 @@ class DynamicWord2Vec(Word2Vec):
             window=5,
             epochs=5,
         )
-        model.train()
+        model.train(epochs=5)
 
         # Query embeddings per period
         vec = model.get_vector("economy", time_label="2000s")
@@ -159,7 +159,7 @@ class DynamicWord2Vec(Word2Vec):
             training_mode="sequential",
             epochs=5,
         )
-        model.train()
+        model.train(epochs=5)
     """
 
     def __init__(
@@ -254,6 +254,96 @@ class DynamicWord2Vec(Word2Vec):
                 logger.info("Sequential training: each slice initialises from the previous")
 
         super().__init__(**kwargs)
+
+    def _set_training_corpora(
+        self,
+        sentences: dict[str, Iterable[list[str]]] | None,
+    ) -> None:
+        """Attach corpora for training, validating period labels and structure."""
+        if sentences is None:
+            if self._corpora is None:
+                raise ValueError(
+                    "No corpora available for training. "
+                    "Pass sentences={label: corpus} to train(), especially for models loaded from disk."
+                )
+            return
+
+        if not isinstance(sentences, dict):
+            raise TypeError(
+                f"sentences must be a dictionary mapping labels to corpora, "
+                f"got {type(sentences).__name__}"
+            )
+        if not sentences:
+            raise ValueError("sentences cannot be empty")
+
+        incoming_labels = list(sentences.keys())
+        if self.labels and incoming_labels != self.labels:
+            raise ValueError(
+                "sentences labels must exactly match the model labels and order. "
+                f"Expected {self.labels}, got {incoming_labels}."
+            )
+
+        self._corpora = {label: corpus for label, corpus in sentences.items()}
+
+    def _refresh_counts_for_current_vocab(self) -> None:
+        """Recompute training statistics for attached corpora with fixed vocabulary.
+
+        This is used when a trained model receives new corpora in ``train()``.
+        Vocabulary is kept unchanged; counts are refreshed so subsampling and
+        negative-sampling weights match the supplied corpora.
+        """
+        token_counts = {}
+        for label, corpus in self._corpora.items():
+            if hasattr(corpus, 'token_count'):
+                token_counts[label] = corpus.token_count
+            else:
+                token_counts[label] = sum(len(sent) for sent in corpus)
+
+        if self._sampling_strategy == "balanced":
+            min_count = min(token_counts.values())
+            token_limits = {label: min_count for label in token_counts}
+        else:
+            token_limits = token_counts
+
+        period_counts = {}
+        observed_counts = Counter()
+        total_tokens = 0
+
+        for label, corpus in self._corpora.items():
+            period_counter = Counter()
+            tokens_counted = 0
+            token_limit = token_limits[label]
+
+            for sentence in corpus:
+                remaining = token_limit - tokens_counted
+                if remaining <= 0:
+                    break
+                if len(sentence) > remaining:
+                    sentence = sentence[:remaining]
+                period_counter.update(sentence)
+                tokens_counted += len(sentence)
+
+            period_counts[label] = period_counter
+            observed_counts.update(period_counter)
+            total_tokens += tokens_counted
+
+        filtered_counts = Counter(
+            {
+                word: count
+                for word, count in observed_counts.items()
+                if word in self.vocab
+            }
+        )
+        if not filtered_counts:
+            raise ValueError(
+                "No in-vocabulary tokens found in supplied corpora. "
+                "The model vocabulary is fixed for DynamicWord2Vec continuation training."
+            )
+
+        self.period_vocab_counts = period_counts
+        self.word_counts = filtered_counts
+        self.total_corpus_tokens = total_tokens
+        self.corpus_word_count = sum(self.word_counts.values())
 
     def build_vocab(self, sentences: Iterable[list[str]] | None = None) -> None:
         """
@@ -456,15 +546,43 @@ class DynamicWord2Vec(Word2Vec):
         )
         return batch_loss, batch_examples, batch_vocab_words
 
-    def train(self) -> float | None:
+    def train(
+        self,
+        sentences: dict[str, Iterable[list[str]]] | None = None,
+        epochs: int | None = None,
+        update_vocab: bool = False,
+        reset_lr: bool = True,
+    ) -> float | None:
         """
         Train the DynamicWord2Vec model.
 
         Dispatches to joint or sequential training based on ``training_mode``.
 
+        Args:
+            sentences: Optional replacement corpora mapping period labels to corpora.
+                Required for models loaded from disk, which do not persist corpora.
+            epochs: Number of epochs. If None, uses ``self.epochs`` from model
+                initialization.
+            update_vocab: Not supported for DynamicWord2Vec. Vocabulary remains fixed.
+            reset_lr: If True (default), reset learning rate to initial ``alpha``.
+
         Returns:
             Final loss value if calculate_loss is True, None otherwise.
         """
+        self._set_training_corpora(sentences)
+        if update_vocab:
+            raise NotImplementedError(
+                "DynamicWord2Vec update_vocab=True is not supported. "
+                "Initialize a new model to change vocabulary."
+            )
+        if sentences is not None and self.vocab:
+            self._refresh_counts_for_current_vocab()
+
+        run_epochs = self.epochs if epochs is None else epochs
+        if run_epochs is None:
+            raise ValueError("epochs must be specified either at init or in train()")
+        self.epochs = run_epochs
+
         if not self.vocab:
             self.build_vocab()
 
@@ -484,11 +602,11 @@ class DynamicWord2Vec(Word2Vec):
         self._build_alias_table()
 
         if self.training_mode == "sequential":
-            return self._train_sequential()
+            return self._train_sequential(reset_lr=reset_lr)
         else:
-            return self._train_joint()
+            return self._train_joint(reset_lr=reset_lr)
 
-    def _train_joint(self) -> float | None:
+    def _train_joint(self, reset_lr: bool) -> float | None:
         """Joint training: interleaved batches from all periods with temporal regularization."""
         self._sentences = TemporalSentenceIterator(
             corpora=self._corpora,
@@ -498,14 +616,14 @@ class DynamicWord2Vec(Word2Vec):
             strategy=self._sampling_strategy,
         )
 
-        result = super().train()
+        result = super().train(epochs=self.epochs, reset_lr=reset_lr)
 
         if self.procrustes_align:
             self._align_procrustes()
 
         return result
 
-    def _train_sequential(self) -> float | None:
+    def _train_sequential(self, reset_lr: bool) -> float | None:
         """Sequential training: train each slice in order, initialising from the previous.
 
         Each time slice is trained independently using the parent's training
@@ -555,7 +673,7 @@ class DynamicWord2Vec(Word2Vec):
                 token_limit=token_limits[label],
             )
 
-            result = super().train()
+            result = super().train(epochs=self.epochs, reset_lr=reset_lr)
 
             if result is not None:
                 total_loss += result * period_tokens
@@ -927,6 +1045,14 @@ class DynamicWord2Vec(Word2Vec):
             'ns_exponent': self.ns_exponent,
             'cbow_mean': self.cbow_mean,
             'sg': self.sg,
+            'seed': self.seed,
+            'alpha': self.alpha,
+            'min_alpha': self.min_alpha,
+            'epochs': self.epochs,
+            'batch_size': self.batch_size,
+            'workers': self.workers,
+            'calculate_loss': self.calculate_loss,
+            'shuffle': self.shuffle,
             'sample': self.sample,
             'shrink_windows': self.shrink_windows,
             'max_vocab_size': self.max_vocab_size,
@@ -1007,6 +1133,14 @@ class DynamicWord2Vec(Word2Vec):
             ns_exponent=model_data['ns_exponent'],
             cbow_mean=model_data['cbow_mean'],
             sg=model_data['sg'],
+            seed=model_data.get('seed'),
+            alpha=model_data.get('alpha', 0.025),
+            min_alpha=model_data.get('min_alpha'),
+            epochs=model_data.get('epochs'),
+            batch_size=model_data.get('batch_size', 10240),
+            workers=model_data.get('workers', 1),
+            calculate_loss=model_data.get('calculate_loss', True),
+            shuffle=model_data.get('shuffle'),
             sample=sample,
             shrink_windows=shrink_windows,
             max_vocab_size=max_vocab_size,

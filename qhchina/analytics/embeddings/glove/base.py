@@ -26,7 +26,7 @@ from collections.abc import Iterable
 import numpy as np
 
 from ....config import resolve_seed
-from ...vectors import cosine_similarity
+from ..._vector_ops import cosine_similarity
 from ..word2vec.base import Word2Vec
 
 try:
@@ -526,7 +526,8 @@ class GloVe(Word2Vec):
 
         Args:
             sentences: Optional restartable corpus override.
-            epochs: Optional epoch override.
+            epochs: Number of epochs. If None, uses ``self.epochs`` from model
+                initialization.
             update_vocab: Not implemented for GloVe (raises when requested on
                 initialized vocabulary).
             reset_lr: If True, reset ``alpha`` to constructor value.

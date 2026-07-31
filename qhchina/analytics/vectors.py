@@ -1,7 +1,11 @@
-import matplotlib.pyplot as plt
 import numpy as np
-from typing import Any, Callable
-from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
+from typing import Any
+from ._vector_ops import (
+    cosine_similarity,
+    cosine_distance,
+    most_similar,
+    align_vectors,
+)
 
 
 __all__ = [
@@ -52,6 +56,8 @@ def project_2d(
         n_neighbors (int): Number of neighbors for UMAP. Default is 15.
         min_dist (float): Minimum distance between points for UMAP. Default is 0.1.
     """
+    import matplotlib.pyplot as plt
+
     # Ensure labels match the number of vectors if provided
     if labels is not None:
         if len(labels) != len(vectors):
@@ -224,6 +230,8 @@ def project_bias(
         disperse_y (bool): Whether to add random y-dispersion for 1D plots. 
             Default is False.
     """
+    import matplotlib.pyplot as plt
+
     # Input validation
     if isinstance(x, tuple) and len(x) == 2:
         x = [x]
@@ -312,151 +320,3 @@ def project_bias(
     if filename:
         plt.savefig(filename, bbox_inches='tight', dpi=300)
     plt.show()
-
-def cosine_similarity(
-    v1: np.ndarray | list[float], 
-    v2: np.ndarray | list[float]
-) -> float | np.ndarray:
-    """
-    Compute the cosine similarity between vectors.
-    
-    If v1 and v2 are single vectors, computes similarity between them.
-    If either is a matrix of vectors, uses sklearn's implementation for efficiency.
-    Returns 0.0 if either vector has zero norm (to avoid division by zero).
-    
-    Args:
-        v1 (numpy.ndarray or list): First vector or matrix of vectors.
-        v2 (numpy.ndarray or list): Second vector or matrix of vectors.
-    
-    Returns:
-        float or numpy.ndarray: Cosine similarity score(s). For single vectors, 
-            returns a float in range [-1, 1]. For matrices, returns a 2D 
-            similarity matrix.
-    """
-    # Convert inputs to numpy arrays if they aren't already
-    v1 = np.asarray(v1)
-    v2 = np.asarray(v2)
-    
-    # Handle single vector case
-    if v1.ndim == 1 and v2.ndim == 1:
-        norm1 = np.linalg.norm(v1)
-        norm2 = np.linalg.norm(v2)
-        # Handle zero vectors - return 0 similarity
-        if norm1 < 1e-10 or norm2 < 1e-10:
-            return 0.0
-        return np.dot(v1, v2) / (norm1 * norm2)
-    
-    # For matrix case, use sklearn's implementation
-    return sklearn_cosine_similarity(v1, v2)
-
-
-def cosine_distance(
-    v1: np.ndarray | list[float], 
-    v2: np.ndarray | list[float]
-) -> float | np.ndarray:
-    """
-    Compute the cosine distance between vectors (1 - cosine_similarity).
-    
-    Cosine distance is a dissimilarity measure where 0 means identical vectors
-    and 2 means opposite vectors.
-    
-    Args:
-        v1 (numpy.ndarray or list): First vector or matrix of vectors.
-        v2 (numpy.ndarray or list): Second vector or matrix of vectors.
-    
-    Returns:
-        float or numpy.ndarray: Cosine distance score(s). For single vectors, 
-            returns a float in range [0, 2]. For matrices, returns a 2D 
-            distance matrix.
-    """
-    return 1.0 - cosine_similarity(v1, v2)
-
-def most_similar(
-    target_vector: np.ndarray, 
-    vectors: list[np.ndarray] | np.ndarray, 
-    labels: list[str] | None = None, 
-    metric: str | Callable[[np.ndarray, np.ndarray], float] = 'cosine', 
-    top_n: int | None = None
-) -> list[tuple[str | int, float]]:
-    """
-    Find the most similar vectors to a target vector using the specified similarity metric.
-    
-    Args:
-        target_vector (numpy.ndarray): The reference vector to compare against.
-        vectors (list or numpy.ndarray): List of vectors to compare with the target.
-        labels (list, optional): Labels corresponding to the vectors. If provided, 
-            returns (label, score) pairs.
-        metric (str or callable): Similarity metric to use. Can be 'cosine' or a 
-            callable that takes two vectors. Default is 'cosine'.
-        top_n (int, optional): Number of top results to return. If None, returns 
-            all results.
-    
-    Returns:
-        list: List of (label, score) or (index, score) tuples sorted by similarity 
-            score in descending order.
-    """
-    if not isinstance(vectors, np.ndarray):
-        vectors = np.array(vectors)
-    
-    if callable(metric):
-        similarity_func = metric
-    elif metric == 'cosine':
-        similarity_func = None
-    else:
-        raise ValueError("metric must be 'cosine' or a callable function")
-    
-    if similarity_func is None:
-        target_2d = np.asarray(target_vector).reshape(1, -1)
-        similarities = sklearn_cosine_similarity(target_2d, vectors).ravel().tolist()
-    else:
-        similarities = [similarity_func(target_vector, vec) for vec in vectors]
-    
-    # Create pairs of (index/label, similarity)
-    if labels:
-        if len(labels) != len(vectors):
-            raise ValueError("Number of labels must match number of vectors")
-        pairs = list(zip(labels, similarities))
-    else:
-        pairs = list(enumerate(similarities))
-    
-    # Sort by similarity in descending order
-    sorted_pairs = sorted(pairs, key=lambda x: x[1], reverse=True)
-    
-    # Return top_n results if specified
-    if top_n is not None:
-        return sorted_pairs[:top_n]
-    return sorted_pairs
-
-def align_vectors(
-    source_vectors: np.ndarray, 
-    target_vectors: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Align source vectors with target vectors using Procrustes analysis.
-    
-    Args:
-        source_vectors: numpy array of vectors to be aligned
-        target_vectors: numpy array of vectors to align to
-        
-    Returns:
-        Tuple of (aligned_vectors, transformation_matrix)
-        - aligned_vectors: The aligned source vectors
-        - transformation_matrix: The orthogonal transformation matrix that can be used to align other vectors
-    """
-    # Center the vectors
-    source_centered = source_vectors - np.mean(source_vectors, axis=0)
-    target_centered = target_vectors - np.mean(target_vectors, axis=0)
-    
-    # Compute the covariance matrix
-    covariance = np.dot(target_centered.T, source_centered)
-    
-    # Compute SVD
-    U, _, Vt = np.linalg.svd(covariance)
-    
-    # Compute the rotation matrix
-    rotation = np.dot(U, Vt)
-    
-    # Apply the rotation to the source vectors
-    aligned_vectors = np.dot(source_vectors, rotation.T)
-    
-    return aligned_vectors, rotation

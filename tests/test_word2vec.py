@@ -70,7 +70,7 @@ class TestWord2VecBasic:
             seed=42,
             epochs=2
         )
-        model.train()
+        model.train(epochs=1)
         
         # Check vocabulary was built
         assert len(model.vocab) > 0
@@ -89,7 +89,7 @@ class TestWord2VecBasic:
             seed=42,
             epochs=2
         )
-        model.train()
+        model.train(epochs=1)
         
         assert len(model.vocab) > 0
     
@@ -994,8 +994,8 @@ class TestWord2VecIncrementalTraining:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
     
-    def test_backward_compatibility_train_no_args(self, larger_documents):
-        """Test that train() with no arguments works (backward compatibility)."""
+    def test_train_uses_init_epochs_when_not_passed(self, larger_documents):
+        """train() should use epochs from initialization when omitted."""
         from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
@@ -1007,9 +1007,7 @@ class TestWord2VecIncrementalTraining:
             epochs=2
         )
         
-        # Original usage: no arguments to train()
         model.train()
-        
         assert len(model.vocab) > 0
     
     def test_no_sentences_raises_error(self):
@@ -2345,4 +2343,254 @@ class TestWord2VecRobustnessFixes:
 
         with pytest.raises(NotImplementedError, match="load_vectors.*not supported.*DynamicWord2Vec"):
             DynamicWord2Vec.load_vectors("/tmp/test.bin")
+
+    def test_tempref_defaults_to_skipgram_when_sg_not_passed(self):
+        """TempRefWord2Vec should default to Skip-gram instead of requiring explicit sg=1."""
+        from qhchina.analytics.embeddings import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 10,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            seed=42,
+            epochs=1,
+        )
+        assert model.sg == 1
+
+    def test_tempref_loaded_model_requires_corpora_for_retraining(self):
+        """Loaded TempRef models should fail with a clear error when no corpora are attached."""
+        from qhchina.analytics.embeddings import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 10,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            sg=1,
+            seed=42,
+            epochs=1,
+        )
+        model.train(epochs=1)
+
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            model.save(temp_path)
+            loaded = TempRefWord2Vec.load(temp_path)
+            with pytest.raises(ValueError, match="No corpora available for training"):
+                loaded.train(epochs=1)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_tempref_loaded_model_can_retrain_when_corpora_passed(self):
+        """Loaded TempRef models should retrain when compatible corpora are provided."""
+        from qhchina.analytics.embeddings import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 10,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            sg=1,
+            seed=42,
+            epochs=1,
+        )
+        model.train(epochs=1)
+
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            model.save(temp_path)
+            loaded = TempRefWord2Vec.load(temp_path)
+            loss = loaded.train(sentences=corpora, epochs=1)
+            assert loss is None or isinstance(loss, float)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_dynamic_loaded_model_requires_corpora_for_retraining(self):
+        """Loaded Dynamic models should fail with a clear error when no corpora are attached."""
+        from qhchina.analytics.embeddings import DynamicWord2Vec
+
+        corpora = {
+            "slice1": [["a", "b", "c"]] * 10,
+            "slice2": [["a", "b", "d"]] * 10,
+        }
+        model = DynamicWord2Vec(
+            sentences=corpora,
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            seed=42,
+            epochs=1,
+        )
+        model.train(epochs=1)
+
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            model.save(temp_path)
+            loaded = DynamicWord2Vec.load(temp_path)
+            with pytest.raises(ValueError, match="No corpora available for training"):
+                loaded.train(epochs=1)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_dynamic_loaded_model_can_retrain_when_corpora_passed(self):
+        """Loaded Dynamic models should retrain when compatible corpora are provided."""
+        from qhchina.analytics.embeddings import DynamicWord2Vec
+
+        corpora = {
+            "slice1": [["a", "b", "c"]] * 10,
+            "slice2": [["a", "b", "d"]] * 10,
+        }
+        model = DynamicWord2Vec(
+            sentences=corpora,
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            seed=42,
+            epochs=1,
+        )
+        model.train(epochs=1)
+
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            model.save(temp_path)
+            loaded = DynamicWord2Vec.load(temp_path)
+            loss = loaded.train(sentences=corpora, epochs=1)
+            assert loss is None or isinstance(loss, float)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_package_root_exports_dynamic_word2vec(self):
+        """qhchina package root should expose DynamicWord2Vec for public API parity."""
+        import qhchina
+
+        assert hasattr(qhchina, "DynamicWord2Vec")
+
+    def test_tempref_update_vocab_not_supported(self):
+        """TempRefWord2Vec should reject update_vocab=True explicitly."""
+        from qhchina.analytics.embeddings import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 10,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            sg=1,
+            seed=42,
+            epochs=1,
+        )
+        model.train(epochs=1)
+
+        with pytest.raises(NotImplementedError, match="update_vocab=True is not supported"):
+            model.train(sentences=corpora, epochs=1, update_vocab=True)
+
+    def test_dynamic_update_vocab_not_supported(self):
+        """DynamicWord2Vec should reject update_vocab=True explicitly."""
+        from qhchina.analytics.embeddings import DynamicWord2Vec
+
+        corpora = {
+            "slice1": [["a", "b", "c"]] * 10,
+            "slice2": [["a", "b", "d"]] * 10,
+        }
+        model = DynamicWord2Vec(
+            sentences=corpora,
+            vector_size=8,
+            window=2,
+            min_word_count=1,
+            negative=2,
+            seed=42,
+            epochs=1,
+        )
+        model.train(epochs=1)
+
+        with pytest.raises(NotImplementedError, match="update_vocab=True is not supported"):
+            model.train(sentences=corpora, epochs=1, update_vocab=True)
+
+    def test_train_requires_epochs_somewhere_word2vec(self):
+        """Word2Vec.train() should fail only when epochs is missing everywhere."""
+        from qhchina.analytics.embeddings import Word2Vec
+
+        model = Word2Vec(
+            [["a", "b", "a"]],
+            min_word_count=1,
+            sg=1,
+            epochs=1,
+        )
+        model.epochs = None
+        with pytest.raises(ValueError, match="epochs must be specified either at init or in train"):
+            model.train()
+
+    def test_train_requires_epochs_somewhere_tempref(self):
+        """TempRefWord2Vec.train() should fail only when epochs is missing everywhere."""
+        from qhchina.analytics.embeddings import TempRefWord2Vec
+
+        corpora = {
+            "period1": [["target", "x"]] * 10,
+            "period2": [["target", "y"]] * 10,
+        }
+        model = TempRefWord2Vec(
+            sentences=corpora,
+            targets=["target"],
+            min_word_count=1,
+            sg=1,
+            epochs=1,
+        )
+        model.epochs = None
+        with pytest.raises(ValueError, match="epochs must be specified either at init or in train"):
+            model.train(sentences=corpora)
+
+    def test_train_requires_epochs_somewhere_dynamic(self):
+        """DynamicWord2Vec.train() should fail only when epochs is missing everywhere."""
+        from qhchina.analytics.embeddings import DynamicWord2Vec
+
+        corpora = {
+            "slice1": [["a", "b", "c"]] * 10,
+            "slice2": [["a", "b", "d"]] * 10,
+        }
+        model = DynamicWord2Vec(
+            sentences=corpora,
+            min_word_count=1,
+            epochs=1,
+        )
+        model.epochs = None
+        with pytest.raises(ValueError, match="epochs must be specified either at init or in train"):
+            model.train(sentences=corpora)
 

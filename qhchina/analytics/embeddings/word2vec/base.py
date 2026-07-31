@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterable
 from queue import Queue
 from tqdm.auto import tqdm
 import time
-from ...vectors import cosine_similarity
+from ..._vector_ops import cosine_similarity
 from .utils import word2vec_c
 from ....config import get_rng, resolve_seed
 from ....helpers.texts import iter_batches
@@ -79,13 +79,13 @@ class Word2Vec:
         # From a list of tokenized sentences
         sentences = [['我', '喜欢', '学习'], ['他', '喜欢', '运动']]
         model = Word2Vec(sentences, vector_size=100, window=5, min_word_count=1, epochs=5)
-        model.train()
+        model.train(epochs=5)
         
         # From a text file (memory-efficient for large corpora)
         # File format: one sentence per line, tokens separated by spaces
         sentences = LineSentenceFile("corpus.txt")
         model = Word2Vec(sentences, vector_size=100, epochs=5)
-        model.train()
+        model.train(epochs=5)
         
         # Get word vector
         vector = model['喜欢']
@@ -930,7 +930,8 @@ class Word2Vec:
         Args:
             sentences: Iterable of tokenized sentences. If None, uses sentences
                 provided at initialization.
-            epochs: Number of training epochs. If None, uses epochs from initialization.
+            epochs: Number of training epochs. If None, uses ``self.epochs`` from
+                model initialization.
             update_vocab: If True, expand vocabulary with new words from sentences.
                 New words are initialized using the mean of existing embeddings
                 (Hewitt 2021) to preserve the pretrained distribution. Only
@@ -948,7 +949,7 @@ class Word2Vec:
         Example:
             # Initial training
             model = Word2Vec(sentences, epochs=5)
-            model.train()
+            model.train(epochs=5)
             
             # Continue training on same data
             model.train(epochs=3, reset_lr=False)
@@ -971,7 +972,6 @@ class Word2Vec:
                 "Use a list or LineSentenceFile instead of a one-shot iterator."
             )
         
-        # Resolve epochs
         if epochs is None:
             epochs = self.epochs
         if epochs is None:
