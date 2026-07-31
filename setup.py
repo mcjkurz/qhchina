@@ -54,6 +54,13 @@ extensions = [
         extra_compile_args=extra_compile_args,
     ),
     Extension(
+        "qhchina.analytics.cython_ext.glove",
+        sources=["qhchina/analytics/cython_ext/glove.pyx"],
+        include_dirs=[numpy.get_include()],
+        language="c",
+        extra_compile_args=extra_compile_args,
+    ),
+    Extension(
         "qhchina.analytics.cython_ext.collocations",
         sources=["qhchina/analytics/cython_ext/collocations.pyx"],
         include_dirs=[numpy.get_include()],

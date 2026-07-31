@@ -7,9 +7,9 @@ Provides balanced batch sampling for temporal training and Cython extension acce
 import logging
 import numpy as np
 from collections.abc import Iterable
-from ...config import get_rng, resolve_seed
+from ....config import get_rng, resolve_seed
 
-logger = logging.getLogger("qhchina.analytics.word2vec")
+logger = logging.getLogger("qhchina.analytics.embeddings.word2vec")
 
 __all__ = [
     'BalancedSentenceIterator',
@@ -22,7 +22,7 @@ __all__ = [
 
 # Cython extension - required for Word2Vec
 try:
-    from ..cython_ext import word2vec as word2vec_c
+    from ...cython_ext import word2vec as word2vec_c
     CYTHON_AVAILABLE = True
 except ImportError:
     raise ImportError(

@@ -1,21 +1,22 @@
 """
-Word2Vec sub-package for learning word embeddings from text.
+Embeddings sub-package for learning word vectors from text.
 
-Provides three model variants:
+Provides model variants:
 - Word2Vec: Standard CBOW/Skip-gram word embeddings.
 - TempRefWord2Vec: Temporal Referencing for tracking semantic change.
 - DynamicWord2Vec: Time-sliced embeddings with temporal regularization.
+- GloVe: Global vectors trained from weighted co-occurrence statistics.
 
 Also exports utility classes for temporal sentence iteration.
 
 Example:
-    from qhchina.analytics.word2vec import Word2Vec, TempRefWord2Vec, DynamicWord2Vec
+    from qhchina.analytics.embeddings import Word2Vec, TempRefWord2Vec, DynamicWord2Vec, GloVe
 """
 
-from .base import Word2Vec
-from .tempref import TempRefWord2Vec
-from .dynamic import DynamicWord2Vec
-from .utils import (
+from .word2vec import (
+    Word2Vec,
+    TempRefWord2Vec,
+    DynamicWord2Vec,
     BalancedSentenceIterator,
     SingleCorpusTemporalIterator,
     TemporalSentence,
@@ -23,11 +24,13 @@ from .utils import (
     CYTHON_AVAILABLE,
     word2vec_c,
 )
+from .glove import GloVe
 
 __all__ = [
     'Word2Vec',
     'TempRefWord2Vec',
     'DynamicWord2Vec',
+    'GloVe',
     'BalancedSentenceIterator',
     'SingleCorpusTemporalIterator',
     'TemporalSentence',

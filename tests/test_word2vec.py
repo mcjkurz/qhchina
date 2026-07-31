@@ -1,5 +1,5 @@
 """
-Tests for qhchina.analytics.word2vec module.
+Tests for qhchina.analytics.embeddings module.
 """
 import pytest
 import pickle
@@ -44,7 +44,7 @@ class TestWord2VecBasic:
     
     def test_word2vec_init(self):
         """Test Word2Vec initialization."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             vector_size=50,
@@ -58,7 +58,7 @@ class TestWord2VecBasic:
     
     def test_word2vec_train_skipgram_python(self, larger_documents):
         """Test Skip-gram training with Python implementation."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -77,7 +77,7 @@ class TestWord2VecBasic:
     
     def test_word2vec_train_cbow_python(self, larger_documents):
         """Test CBOW training with Python implementation."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -95,7 +95,7 @@ class TestWord2VecBasic:
     
     def test_word2vec_train_cython(self, larger_documents):
         """Test training with Cython implementation."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -119,7 +119,7 @@ class TestWord2VecVectors:
     @pytest.fixture
     def trained_model(self, larger_documents):
         """Pre-trained model for vector tests."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -191,7 +191,7 @@ class TestWord2VecSaveLoad:
     
     def test_save_load(self, larger_documents):
         """Test saving and loading a model."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -235,7 +235,7 @@ class TestWord2VecTraining:
     
     def test_vocabulary_built(self, larger_documents):
         """Test that vocabulary is correctly built during training."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -253,7 +253,7 @@ class TestWord2VecTraining:
     
     def test_vector_dimensions(self, larger_documents):
         """Test that trained vectors have correct dimensions."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         vector_size = 25
         model = Word2Vec(
@@ -281,7 +281,7 @@ class TestWord2VecBoundaryValues:
     
     def test_window_size_one(self, larger_documents):
         """Test Word2Vec with window=1."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -297,7 +297,7 @@ class TestWord2VecBoundaryValues:
     
     def test_vector_size_one(self, larger_documents):
         """Test Word2Vec with vector_size=1."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -315,7 +315,7 @@ class TestWord2VecBoundaryValues:
     
     def test_negative_one(self, larger_documents):
         """Test Word2Vec with negative=1 (single negative sample)."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -332,7 +332,7 @@ class TestWord2VecBoundaryValues:
     
     def test_min_word_count_one(self, sample_documents):
         """Test Word2Vec with min_word_count=1 (keep all words)."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             sample_documents,
@@ -349,7 +349,7 @@ class TestWord2VecBoundaryValues:
     
     def test_single_epoch(self, larger_documents):
         """Test Word2Vec with epochs=1."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -365,7 +365,7 @@ class TestWord2VecBoundaryValues:
     
     def test_max_vocab_size(self, larger_documents):
         """Test Word2Vec with max_vocab_size."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -382,7 +382,7 @@ class TestWord2VecBoundaryValues:
     
     def test_sample_disabled(self, larger_documents):
         """Test Word2Vec with sample=0 (subsampling disabled)."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -399,7 +399,7 @@ class TestWord2VecBoundaryValues:
     
     def test_shrink_windows_disabled(self, larger_documents):
         """Test Word2Vec with shrink_windows=False."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -424,7 +424,7 @@ class TestWord2VecEdgeCases:
     
     def test_empty_sentences_raises_error(self):
         """Test that empty sentences raises ValueError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec([], min_word_count=1, epochs=1)
         
@@ -433,7 +433,7 @@ class TestWord2VecEdgeCases:
     
     def test_all_empty_sentences(self):
         """Test handling of all empty sentences."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec([[], [], []], min_word_count=1, epochs=1)
         
@@ -442,7 +442,7 @@ class TestWord2VecEdgeCases:
     
     def test_no_sentences_raises_error(self):
         """Test that calling train() without sentences raises ValueError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(min_word_count=1, epochs=1)
         
@@ -451,7 +451,7 @@ class TestWord2VecEdgeCases:
     
     def test_all_words_filtered(self):
         """Test when all words are below min_word_count."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Each word appears only once
         sentences = [["a", "b", "c"], ["d", "e", "f"]]
@@ -464,7 +464,7 @@ class TestWord2VecEdgeCases:
     
     def test_get_vector_oov(self, larger_documents):
         """Test that OOV words raise KeyError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -480,7 +480,7 @@ class TestWord2VecEdgeCases:
     
     def test_getitem_oov(self, larger_documents):
         """Test that [] access for OOV words raises KeyError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -496,7 +496,7 @@ class TestWord2VecEdgeCases:
     
     def test_similarity_oov(self, larger_documents):
         """Test similarity with OOV word raises KeyError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -514,7 +514,7 @@ class TestWord2VecEdgeCases:
     
     def test_single_sentence_corpus(self):
         """Test training on a single sentence."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Single sentence with repeated words
         sentences = [["a", "b", "a", "b", "a", "c", "b", "c"]]
@@ -532,7 +532,7 @@ class TestWord2VecEdgeCases:
     
     def test_very_short_sentences(self):
         """Test training on very short sentences."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Very short sentences
         sentences = [["a"], ["b"], ["a", "b"], ["c"]]
@@ -559,7 +559,7 @@ class TestWord2VecTrainingModes:
     
     def test_skipgram_vs_cbow_different_results(self, larger_documents):
         """Test that Skip-gram and CBOW produce different vectors."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model_sg = Word2Vec(
             larger_documents,
@@ -599,7 +599,7 @@ class TestWord2VecTrainingModes:
     
     def test_cbow_mean_vs_sum(self, larger_documents):
         """Test CBOW with mean vs sum aggregation."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model_mean = Word2Vec(
             larger_documents,
@@ -638,7 +638,7 @@ class TestWord2VecExportImport:
     
     def test_export_word2vec_binary(self, larger_documents):
         """Test export to word2vec binary format."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -677,7 +677,7 @@ class TestWord2VecExportImport:
     
     def test_export_word2vec_text(self, larger_documents):
         """Test export to word2vec text format."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -712,7 +712,7 @@ class TestWord2VecExportImport:
     
     def test_export_glove_format(self, larger_documents):
         """Test export to GloVe format."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -747,7 +747,7 @@ class TestWord2VecExportImport:
     
     def test_loaded_model_supports_similarity(self, larger_documents):
         """Test that loaded models support similarity queries."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -777,7 +777,7 @@ class TestWord2VecExportImport:
     
     def test_export_invalid_format_raises(self, larger_documents):
         """Test that invalid format raises ValueError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -794,7 +794,7 @@ class TestWord2VecExportImport:
     
     def test_load_invalid_format_raises(self):
         """Test that loading with invalid format raises ValueError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         with pytest.raises(ValueError, match="Unknown format"):
             Word2Vec.load_vectors("/tmp/test.txt", format="invalid_format")
@@ -809,7 +809,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_train_with_sentences_argument(self, larger_documents):
         """Test that train() accepts sentences argument."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             vector_size=20,
@@ -827,7 +827,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_train_with_epochs_argument(self, larger_documents):
         """Test that train() accepts epochs argument."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -849,7 +849,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_update_vocab_expands_vocabulary(self, sample_documents):
         """Test that update_vocab=True expands the vocabulary."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Initial training with some documents
         initial_docs = sample_documents[:3]
@@ -879,7 +879,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_update_vocab_preserves_existing_words(self, sample_documents):
         """Test that update_vocab preserves existing word vectors."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             sample_documents,
@@ -907,7 +907,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_reset_lr_true_resets_learning_rate(self, larger_documents):
         """Test that reset_lr=True resets learning rate to initial alpha."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -933,7 +933,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_reset_lr_false_continues_from_current(self, larger_documents):
         """Test that reset_lr=False continues from current alpha."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -959,7 +959,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_train_on_loaded_model(self, larger_documents):
         """Test training on a model loaded from external format."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Train and export
         model = Word2Vec(
@@ -996,7 +996,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_backward_compatibility_train_no_args(self, larger_documents):
         """Test that train() with no arguments works (backward compatibility)."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1014,7 +1014,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_no_sentences_raises_error(self):
         """Test that train() without sentences raises ValueError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             vector_size=20,
@@ -1029,7 +1029,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_expand_vocab_on_empty_model_raises(self):
         """Test that _expand_vocab on empty model raises ValueError."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             vector_size=20,
@@ -1044,7 +1044,7 @@ class TestWord2VecIncrementalTraining:
     
     def test_new_words_initialized_with_mean(self, sample_documents):
         """Test that new words are initialized near the mean of existing vectors."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             sample_documents,
@@ -1078,7 +1078,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_with_line_sentence_file(self, song_ming_corpora):
         """Test TempRefWord2Vec with LineSentenceFile corpora."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
         from collections import Counter
         
         # Find frequent common words
@@ -1122,7 +1122,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_with_in_memory_lists(self):
         """Test TempRefWord2Vec with in-memory sentence lists."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3", "context"]] * 100,
@@ -1152,7 +1152,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_save_load(self):
         """Test saving and loading TempRefWord2Vec model."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3"]] * 50,
@@ -1197,7 +1197,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_input_validation(self):
         """Test that invalid inputs raise appropriate errors."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2"]] * 10,
@@ -1222,7 +1222,7 @@ class TestTempRefWord2Vec:
     
     def test_tempref_separates_center_counts_from_context_weights(self):
         """Synthetic base weights must not inflate actual training-token totals."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
         
         corpora = {
             "period1": [["target", "context1"]] * 30,
@@ -1253,7 +1253,7 @@ class TestTempRefWord2Vec:
 
     def test_tempref_context_weight_uses_only_retained_variants(self):
         """Filtered temporal variants must not influence negative sampling weights."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
 
         model = TempRefWord2Vec(
             sentences={
@@ -1286,7 +1286,7 @@ class TestWord2VecConsistency:
         Both implementations should produce vectors that, while not identical
         (due to different RNG paths), are similar in their learned relationships.
         """
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Common parameters
         params = dict(
@@ -1317,7 +1317,7 @@ class TestWord2VecConsistency:
     
     def test_cbow_training(self, larger_documents):
         """Test that CBOW training produces valid results."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         params = dict(
             vector_size=30,
@@ -1343,7 +1343,7 @@ class TestWord2VecConsistency:
         Two models trained with identical parameters and seed should produce
         exactly the same vectors.
         """
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         params = dict(
             vector_size=20,
@@ -1375,7 +1375,7 @@ class TestWord2VecConsistency:
     
     def test_different_seeds_produce_different_results(self, larger_documents):
         """Test that different seeds produce different vectors."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         params = dict(
             vector_size=20,
@@ -1417,7 +1417,7 @@ class TestWord2VecLearning:
         
         This verifies the model is computing loss during training.
         """
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1443,7 +1443,7 @@ class TestWord2VecLearning:
     
     def test_loss_decreases_within_epoch_cython(self, larger_documents):
         """Test that loss decreases during training with Cython."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1469,7 +1469,7 @@ class TestWord2VecLearning:
     
     def test_learning_rate_decay(self, larger_documents):
         """Test that learning rate decays from alpha to min_alpha during training."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         start_alpha = 0.05
         end_alpha = 0.001
@@ -1500,7 +1500,7 @@ class TestWord2VecLearning:
     
     def test_no_learning_rate_decay_when_min_alpha_not_set(self, larger_documents):
         """Test that learning rate stays constant when min_alpha is not set."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         start_alpha = 0.025
         
@@ -1524,7 +1524,7 @@ class TestWord2VecLearning:
     
     def test_vectors_change_after_training(self, larger_documents):
         """Test that word vectors actually change from initialization after training."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1561,7 +1561,7 @@ class TestWord2VecVectorQuality:
     
     def test_normalized_vectors_have_unit_length(self, larger_documents):
         """Test that normalized vectors have unit length."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1585,7 +1585,7 @@ class TestWord2VecVectorQuality:
     
     def test_unnormalized_vectors_preserve_magnitude(self, larger_documents):
         """Test that unnormalized vectors preserve their learned magnitude."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1609,7 +1609,7 @@ class TestWord2VecVectorQuality:
     
     def test_similarity_is_symmetric(self, larger_documents):
         """Test that similarity(a, b) == similarity(b, a)."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1635,7 +1635,7 @@ class TestWord2VecVectorQuality:
     
     def test_self_similarity_is_one(self, larger_documents):
         """Test that similarity of a word with itself is 1.0."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1656,7 +1656,7 @@ class TestWord2VecVectorQuality:
     
     def test_most_similar_returns_sorted_results(self, larger_documents):
         """Test that most_similar returns results sorted by similarity (descending)."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1683,7 +1683,7 @@ class TestWord2VecVectorQuality:
     
     def test_most_similar_excludes_query_word(self, larger_documents):
         """Test that most_similar doesn't include the query word itself."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1708,7 +1708,7 @@ class TestWord2VecVectorQuality:
 
     def test_most_similar_with_vector(self, larger_documents):
         """Test that most_similar accepts a vector as input."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1746,7 +1746,7 @@ class TestWord2VecVectorQuality:
     
     def test_most_similar_vector_arithmetic(self, larger_documents):
         """Test vector arithmetic with most_similar (e.g., king - man + woman)."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1799,7 +1799,7 @@ class TestWord2VecStress:
         
         This tests memory handling and potential overflow issues.
         """
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Create a corpus with many unique words
         vocab_size = 1000
@@ -1831,7 +1831,7 @@ class TestWord2VecStress:
     
     def test_long_sentences(self, larger_documents):
         """Test Word2Vec with longer sentences."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         # Create long sentences
         long_sentences = [
@@ -1856,7 +1856,7 @@ class TestWord2VecStress:
     
     def test_many_epochs(self, sample_documents):
         """Test training for many epochs."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             sample_documents,
@@ -1887,7 +1887,7 @@ class TestWord2VecAlphaHandling:
     
     def test_alpha_none_uses_default(self, sample_documents):
         """Test that alpha=None triggers the default learning rate."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             sample_documents,
@@ -1908,7 +1908,7 @@ class TestWord2VecAlphaHandling:
     
     def test_alpha_zero_does_not_trigger_default(self, sample_documents):
         """Test that alpha=0.0 is respected and does NOT trigger the default."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             sentences=sample_documents,
@@ -1932,7 +1932,7 @@ class TestWord2VecMultithreading:
     
     def test_workers_one_trains_successfully(self, larger_documents):
         """Test that workers=1 (pipelined) training works correctly."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1959,7 +1959,7 @@ class TestWord2VecMultithreading:
     
     def test_workers_multiple_trains_successfully(self, larger_documents):
         """Test that workers>1 (parallel Hogwild) training works correctly."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -1986,7 +1986,7 @@ class TestWord2VecMultithreading:
     
     def test_workers_cbow_mode(self, larger_documents):
         """Test multithreading works with CBOW mode."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -2006,7 +2006,7 @@ class TestWord2VecMultithreading:
     
     def test_workers_invalid_raises_error(self):
         """Test that workers<1 raises an error."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         with pytest.raises(ValueError, match="workers must be at least 1"):
             Word2Vec(
@@ -2017,7 +2017,7 @@ class TestWord2VecMultithreading:
     
     def test_workers_learning_rate_decay(self, larger_documents):
         """Test that learning rate decay works with multithreading."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
         
         model = Word2Vec(
             larger_documents,
@@ -2043,7 +2043,7 @@ class TestTempRefWord2VecMultithreading:
     
     def test_tempref_multithreading(self):
         """Test TempRefWord2Vec with multiple workers produces valid results."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
         
         corpora = {
             "period1": [["word1", "word2", "word3"]] * 50,
@@ -2078,8 +2078,8 @@ class TestWord2VecRobustnessFixes:
     """Regression tests for robustness hardening patches."""
 
     def test_batch_size_cannot_exceed_compiled_capacity(self):
-        from qhchina.analytics.word2vec import Word2Vec
-        from qhchina.analytics.word2vec.utils import word2vec_c
+        from qhchina.analytics.embeddings import Word2Vec
+        from qhchina.analytics.embeddings.word2vec.utils import word2vec_c
 
         with pytest.raises(ValueError, match="fixed capacity"):
             Word2Vec(
@@ -2088,8 +2088,8 @@ class TestWord2VecRobustnessFixes:
             )
 
     def test_oversized_sentence_raises_instead_of_truncating(self):
-        from qhchina.analytics.word2vec import Word2Vec
-        from qhchina.analytics.word2vec.utils import word2vec_c
+        from qhchina.analytics.embeddings import Word2Vec
+        from qhchina.analytics.embeddings.word2vec.utils import word2vec_c
 
         sentence = ["word"] * (word2vec_c.MAX_WORDS_IN_BATCH_CAP + 1)
         model = Word2Vec(
@@ -2104,7 +2104,7 @@ class TestWord2VecRobustnessFixes:
             model.train()
 
     def test_training_rejects_one_shot_iterators(self):
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
 
         corpus = iter([["a", "b", "c"]])
         model = Word2Vec(corpus, min_word_count=1, sg=1, epochs=1)
@@ -2112,7 +2112,7 @@ class TestWord2VecRobustnessFixes:
             model.train()
 
     def test_learning_rate_decay_uses_exact_raw_word_progress(self):
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
 
         model = Word2Vec(
             [["kept", "filtered"], ["kept", "filtered"]],
@@ -2141,7 +2141,7 @@ class TestWord2VecRobustnessFixes:
         assert model.alpha == pytest.approx(0.01)
 
     def test_update_vocab_rejects_one_shot_iterators_before_mutation(self):
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
 
         model = Word2Vec(
             [["a", "b", "a"]],
@@ -2162,7 +2162,7 @@ class TestWord2VecRobustnessFixes:
     def test_global_seed_reproducibility_with_seed_none(self):
         """Global seed should make seed=None runs reproducible."""
         from qhchina import set_random_seed
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
 
         # Use unique token frequencies to avoid tie-order effects in vocab mapping.
         sentences = [
@@ -2207,14 +2207,14 @@ class TestWord2VecRobustnessFixes:
     )
     def test_invalid_hyperparameters_raise(self, kwargs, msg):
         """Invalid core hyperparameters should fail fast."""
-        from qhchina.analytics.word2vec import Word2Vec
+        from qhchina.analytics.embeddings import Word2Vec
 
         with pytest.raises(ValueError, match=msg):
             Word2Vec([["a", "b"]], **kwargs)
 
     def test_tempref_sampling_strategy_persists_save_load(self):
         """TempRefWord2Vec must preserve sampling strategy on load."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
 
         corpora = {
             "period1": [["target", "x"]] * 20,
@@ -2248,7 +2248,7 @@ class TestWord2VecRobustnessFixes:
 
     def test_tempref_load_requires_sampling_strategy_field(self):
         """Loading should fail for model files missing _sampling_strategy."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
 
         corpora = {
             "period1": [["target", "x"]] * 10,
@@ -2287,7 +2287,7 @@ class TestWord2VecRobustnessFixes:
 
     def test_tempref_export_raises_not_implemented(self):
         """TempRefWord2Vec.export() should raise NotImplementedError."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
 
         corpora = {
             "period1": [["target", "x"]] * 10,
@@ -2312,14 +2312,14 @@ class TestWord2VecRobustnessFixes:
 
     def test_tempref_load_vectors_raises_not_implemented(self):
         """TempRefWord2Vec.load_vectors() should raise NotImplementedError."""
-        from qhchina.analytics.word2vec import TempRefWord2Vec
+        from qhchina.analytics.embeddings import TempRefWord2Vec
 
         with pytest.raises(NotImplementedError, match="load_vectors.*not supported.*TempRefWord2Vec"):
             TempRefWord2Vec.load_vectors("/tmp/test.bin")
 
     def test_dynamic_export_raises_not_implemented(self):
         """DynamicWord2Vec.export() should raise NotImplementedError."""
-        from qhchina.analytics.word2vec import DynamicWord2Vec
+        from qhchina.analytics.embeddings import DynamicWord2Vec
 
         corpora = {
             "slice1": [["a", "b", "c"]] * 10,
@@ -2341,7 +2341,7 @@ class TestWord2VecRobustnessFixes:
 
     def test_dynamic_load_vectors_raises_not_implemented(self):
         """DynamicWord2Vec.load_vectors() should raise NotImplementedError."""
-        from qhchina.analytics.word2vec import DynamicWord2Vec
+        from qhchina.analytics.embeddings import DynamicWord2Vec
 
         with pytest.raises(NotImplementedError, match="load_vectors.*not supported.*DynamicWord2Vec"):
             DynamicWord2Vec.load_vectors("/tmp/test.bin")

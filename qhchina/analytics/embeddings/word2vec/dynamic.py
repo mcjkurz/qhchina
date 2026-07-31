@@ -23,10 +23,10 @@ from collections import Counter
 from collections.abc import Iterable
 from .base import Word2Vec
 from .utils import word2vec_c, TemporalSentenceIterator, SingleCorpusTemporalIterator
-from ..vectors import cosine_similarity
-from ...config import resolve_seed
+from ...vectors import cosine_similarity
+from ....config import resolve_seed
 
-logger = logging.getLogger("qhchina.analytics.dynamic_word2vec")
+logger = logging.getLogger("qhchina.analytics.embeddings.word2vec.dynamic")
 
 __all__ = [
     'DynamicWord2Vec',

@@ -26,12 +26,12 @@ from collections.abc import Callable, Iterable
 from queue import Queue
 from tqdm.auto import tqdm
 import time
-from ..vectors import cosine_similarity
+from ...vectors import cosine_similarity
 from .utils import word2vec_c
-from ...config import get_rng, resolve_seed
-from ...helpers.texts import iter_batches
+from ....config import get_rng, resolve_seed
+from ....helpers.texts import iter_batches
 
-logger = logging.getLogger("qhchina.analytics.word2vec")
+logger = logging.getLogger("qhchina.analytics.embeddings.word2vec")
 
 
 class Word2Vec:

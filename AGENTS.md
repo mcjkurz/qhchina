@@ -8,7 +8,7 @@
 |-----------|---------|
 | `qhchina/` | Main package |
 | `qhchina/analytics/` | Core analytics (LDA, Word2Vec, stylometry, collocations) |
-| `qhchina/analytics/word2vec/` | Word2Vec models (base, temporal referencing, dynamic) |
+| `qhchina/analytics/embeddings/` | Word2Vec models (base, temporal referencing, dynamic) |
 | `qhchina/analytics/cython_ext/` | Cython extensions (`.pyx`) for performance |
 | `qhchina/preprocessing/` | Text segmentation (spaCy, Jieba, BERT, LLM backends) |
 | `qhchina/helpers/` | Utilities (fonts, text loading, stopwords) |
@@ -16,9 +16,10 @@
 
 ## Key Classes
 
-- **`Word2Vec`** (`analytics/word2vec/word2vec_base.py`): Word embeddings with CBOW/Skip-gram.
-- **`TempRefWord2Vec`** (`analytics/word2vec/word2vec_tempref.py`): Temporal semantic change analysis.
-- **`DynamicWord2Vec`** (`analytics/word2vec/word2vec_dynamic.py`): Time-sliced diachronic embeddings.
+- **`Word2Vec`** (`analytics/embeddings/word2vec/base.py`): Word embeddings with CBOW/Skip-gram.
+- **`TempRefWord2Vec`** (`analytics/embeddings/word2vec/tempref.py`): Temporal semantic change analysis.
+- **`DynamicWord2Vec`** (`analytics/embeddings/word2vec/dynamic.py`): Time-sliced diachronic embeddings.
+- **`GloVe`** (`analytics/embeddings/glove/base.py`): Global co-occurrence-based word embeddings.
 - **`LDAGibbsSampler`** (`analytics/topicmodels.py`): Topic modeling with Gibbs sampling.
 - **`Stylometry`** (`analytics/stylometry.py`): Authorship attribution, corpus comparison.
 - **`SegmentationWrapper`** (`preprocessing/segmentation.py`): Chinese text segmentation.
@@ -61,7 +62,7 @@ Uses modern syntax: `int | None`, `list[str]`, `TYPE_CHECKING` for conditional i
 ## Build System
 
 - `pyproject.toml`: Package metadata, dependencies (numpy, scipy, scikit-learn, pandas)
-- `setup.py`: Cython extension compilation (3 extensions: lda_sampler, word2vec, collocations)
+- `setup.py`: Cython extension compilation (lda_sampler, word2vec, glove, collocations, statistics, textreuse)
 - Python 3.11+ required
 
 ## Test Data

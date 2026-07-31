@@ -19,9 +19,9 @@ from collections import Counter
 from collections.abc import Iterable
 from .base import Word2Vec
 from .utils import BalancedSentenceIterator, word2vec_c
-from ..vectors import cosine_similarity
+from ...vectors import cosine_similarity
 
-logger = logging.getLogger("qhchina.analytics.tempref_word2vec")
+logger = logging.getLogger("qhchina.analytics.embeddings.word2vec.tempref")
 
 __all__ = [
     'TempRefWord2Vec',
