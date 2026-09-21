@@ -342,6 +342,72 @@ class TestFindCollocates:
         assert isinstance(results, pd.DataFrame)
 
 
+class TestPooledTargets:
+    """Tests for find_collocates(pooled=True)."""
+
+    @pytest.fixture(params=["cython", "python"])
+    def backend(self, request, monkeypatch):
+        from qhchina.analytics import collocations
+        if request.param == "cython":
+            if not collocations.CYTHON_AVAILABLE:
+                pytest.skip("Cython extension not available")
+        else:
+            monkeypatch.setattr(collocations, "CYTHON_AVAILABLE", False)
+        return request.param
+
+    @staticmethod
+    def _relabel(docs, targets, label="POOL"):
+        return [[label if t in targets else t for t in d] for d in docs]
+
+    @pytest.mark.parametrize("method,kwargs", [("window", {"horizon": 3}), ("sentence", {})])
+    def test_equals_prerelabeled_corpus(self, larger_documents, backend, method, kwargs):
+        from qhchina.analytics.collocations import find_collocates
+        targets = ["人", "不"]
+        pooled = find_collocates(larger_documents, targets, method=method,
+                                 pooled=True, **kwargs)
+        manual = find_collocates(self._relabel(larger_documents, set(targets)), "POOL",
+                                 method=method, **kwargs)
+        assert not pooled.empty
+        cols = ["collocate", "obs_local", "exp_local", "obs_global", "p_value"]
+        a = pooled[cols].sort_values("collocate").reset_index(drop=True)
+        b = manual[cols].sort_values("collocate").reset_index(drop=True)
+        pd.testing.assert_frame_equal(a, b)
+
+    def test_single_target_is_noop(self, larger_documents, backend):
+        from qhchina.analytics.collocations import find_collocates
+        a = find_collocates(larger_documents, ["人"], pooled=True)
+        b = find_collocates(larger_documents, ["人"], pooled=False)
+        pd.testing.assert_frame_equal(a.reset_index(drop=True), b.reset_index(drop=True))
+
+    def test_single_target_label_and_no_target_collocates(self, larger_documents, backend):
+        from qhchina.analytics.collocations import find_collocates
+        res = find_collocates(larger_documents, ["人", "不"], pooled=True)
+        assert set(res["target"]) == {"pooled"}
+        assert not {"人", "不"} & set(res["collocate"])
+
+    def test_not_sum_of_individual_results(self, larger_documents, backend):
+        from qhchina.analytics.collocations import find_collocates
+        docs = larger_documents
+        pooled = find_collocates(docs, ["人", "不"], pooled=True).set_index("collocate")
+        sep = find_collocates(docs, ["人", "不"], pooled=False)
+        summed = sep.groupby("collocate")["obs_local"].sum()
+        common = pooled.index.intersection(summed.index)
+        # Shared contexts are counted once when pooled, so never more than the sum.
+        assert (pooled.loc[common, "obs_local"] <= summed.loc[common]).all()
+        assert (pooled.loc[common, "obs_local"] < summed.loc[common]).any()
+
+    def test_partial_missing_target(self, sample_documents, backend):
+        from qhchina.analytics.collocations import find_collocates
+        present = sample_documents[0][0]
+        res = find_collocates(sample_documents, [present, "不存在的词"], pooled=True)
+        assert set(res["target"]) <= {"pooled"}
+
+    def test_invalid_pooled_raises(self, sample_documents):
+        from qhchina.analytics.collocations import find_collocates
+        with pytest.raises(ValueError, match="pooled"):
+            find_collocates(sample_documents, ["a", "b"], pooled="yes")
+
+
 class TestCoocMatrix:
     """Tests for the cooc_matrix function."""
     

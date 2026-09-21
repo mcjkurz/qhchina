@@ -327,6 +327,27 @@ class FilterOptions(TypedDict, total=False):
     max_obs_global: int
 
 
+def _pool_mapping(target_words, pool_label):
+    """Return {target: pool_label} for pooling, or None when pooling is off."""
+    if pool_label is None:
+        return None
+    return {t: pool_label for t in target_words}
+
+
+def _pool_targets_in_vocab(word2idx, present_targets, pool_label):
+    """
+    Merge several targets into one by pointing them at a shared vocab index.
+
+    Mutates *word2idx* so every present target maps to the same index; the
+    Cython counters then treat them as a single node token with no extra
+    per-token cost. Returns ``([pool_label], target_indices)``.
+    """
+    pooled_idx = word2idx[present_targets[0]]
+    for w in present_targets:
+        word2idx[w] = pooled_idx
+    return [pool_label], np.array([pooled_idx], dtype=np.int32)
+
+
 def _assemble_results_batch(targets, candidates, a, b, c, d, alternative='greater'):
     """
     Build collocation result dicts with batch Fisher p-values.
@@ -418,7 +439,7 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
 
 def _calculate_collocations_window_cython(
     sentences, target_words, horizon=5, alternative='greater',
-    batch_words=100_000, max_sentence_length=256,
+    batch_words=100_000, max_sentence_length=256, pool_label=None,
 ):
     """
     Cython-accelerated window-based collocation counting (two-pass, streaming).
@@ -436,6 +457,8 @@ def _calculate_collocations_window_cython(
         alternative: Alternative hypothesis for Fisher's exact test.
         batch_words: Target token count per batch.
         max_sentence_length: Truncate longer sentences. None disables.
+        pool_label: If set, all *target_words* are merged into one pooled target
+            reported under this label. None keeps targets separate.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -457,7 +480,12 @@ def _calculate_collocations_window_cython(
     target_words_filtered = [w for w in target_words if w in word2idx]
     if not target_words_filtered:
         return []
-    target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
+    if pool_label is not None:
+        target_words_filtered, target_indices = _pool_targets_in_vocab(
+            word2idx, target_words_filtered, pool_label
+        )
+    else:
+        target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
     n_targets = len(target_indices)
     
     # Pre-allocate accumulators
@@ -504,7 +532,7 @@ def _calculate_collocations_window_cython(
 
 def _calculate_collocations_window_python(
     sentences, target_words, horizon=5, alternative='greater',
-    batch_words=100_000, max_sentence_length=256,
+    batch_words=100_000, max_sentence_length=256, pool_label=None,
 ):
     """
     Pure Python window-based collocation counting (streaming, single-pass).
@@ -522,6 +550,8 @@ def _calculate_collocations_window_python(
         alternative: Alternative hypothesis for Fisher's exact test.
         batch_words: Target token count per batch.
         max_sentence_length: Truncate longer sentences. None disables.
+        pool_label: If set, all *target_words* are merged into one pooled target
+            reported under this label. None keeps targets separate.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -531,6 +561,9 @@ def _calculate_collocations_window_python(
     else:
         left_horizon, right_horizon = horizon[1], horizon[0]
     
+    canon = _pool_mapping(target_words, pool_label)
+    if canon is not None:
+        target_words = [pool_label]
     total_tokens = 0
     target_set = set(target_words)
     T_count = {target: 0 for target in target_words}
@@ -539,6 +572,8 @@ def _calculate_collocations_window_python(
 
     for batch in iter_batches(sentences, batch_words, max_sentence_length):
         for sentence in batch:
+            if canon is not None:
+                sentence = [canon.get(t, t) for t in sentence]
             for i, token in enumerate(sentence):
                 total_tokens += 1
                 token_counter[token] += 1
@@ -564,7 +599,7 @@ def _calculate_collocations_window_python(
 
 def _calculate_collocations_sentence_cython(
     sentences, target_words, alternative='greater',
-    batch_words=100_000, max_sentence_length=256,
+    batch_words=100_000, max_sentence_length=256, pool_label=None,
 ):
     """
     Cython-accelerated sentence-based collocation counting (two-pass, streaming).
@@ -578,6 +613,8 @@ def _calculate_collocations_sentence_cython(
         alternative: Alternative hypothesis for Fisher's exact test.
         batch_words: Target token count per batch.
         max_sentence_length: Truncate longer sentences. None disables.
+        pool_label: If set, all *target_words* are merged into one pooled target
+            reported under this label. None keeps targets separate.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -592,7 +629,12 @@ def _calculate_collocations_sentence_cython(
     target_words_filtered = [w for w in target_words if w in word2idx]
     if not target_words_filtered:
         return []
-    target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
+    if pool_label is not None:
+        target_words_filtered, target_indices = _pool_targets_in_vocab(
+            word2idx, target_words_filtered, pool_label
+        )
+    else:
+        target_indices = np.array([word2idx[w] for w in target_words_filtered], dtype=np.int32)
     n_targets = len(target_indices)
     
     # Pre-allocate accumulators
@@ -637,7 +679,7 @@ def _calculate_collocations_sentence_cython(
 
 def _calculate_collocations_sentence_python(
     sentences, target_words, alternative='greater',
-    batch_words=100_000, max_sentence_length=256,
+    batch_words=100_000, max_sentence_length=256, pool_label=None,
 ):
     """
     Pure Python sentence-based collocation counting (streaming, single-pass).
@@ -651,10 +693,15 @@ def _calculate_collocations_sentence_python(
         alternative: Alternative hypothesis for Fisher's exact test.
         batch_words: Target token count per batch.
         max_sentence_length: Truncate longer sentences. None disables.
+        pool_label: If set, all *target_words* are merged into one pooled target
+            reported under this label. None keeps targets separate.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
     """
+    canon = _pool_mapping(target_words, pool_label)
+    if canon is not None:
+        target_words = [pool_label]
     total_sentences = 0
     candidate_in_sentences = {target: Counter() for target in target_words}
     sentences_with_token = defaultdict(int)
@@ -662,6 +709,8 @@ def _calculate_collocations_sentence_python(
     for batch in iter_batches(sentences, batch_words, max_sentence_length):
         for sentence in batch:
             total_sentences += 1
+            if canon is not None:
+                sentence = [canon.get(t, t) for t in sentence]
             unique_tokens = set(sentence)
             for token in unique_tokens:
                 sentences_with_token[token] += 1
@@ -685,6 +734,7 @@ def find_collocates(
     alternative: str = 'greater',
     sort_by: str = 'obs_local',
     ascending: bool = False,
+    pooled: bool = False,
     batch_words: int = 100_000,
 ) -> list[dict] | pd.DataFrame:
     """
@@ -699,6 +749,7 @@ def find_collocates(
         sentences (Iterable[list[str]]): Restartable iterable of tokenized
             sentences (each sentence a list of string tokens).
         target_words (str | list[str]): Target word(s) to find collocates for.
+            By default each target is analysed separately (see ``pooled``).
         method (str): Method to use for calculating collocations. Either 'window' or 
             'sentence'. 'window' uses a sliding window of specified horizon around each 
             token. In window mode, contingency tables follow Evert (2008):
@@ -714,9 +765,20 @@ def find_collocates(
               (2, 3) finds collocates 2 words left and 3 words right of target.
             - None: Uses default of 5 for 'window' method
         filters (FilterOptions | None): Dictionary of filters to apply to results.
-            All filters (except ``max_adjusted_p``) are applied BEFORE multiple testing 
-            correction, defining the "family" of hypotheses being tested. This maximizes 
-            statistical power by not correcting for collocates that were never of interest.
+            Filters are **post-hoc**: they run only AFTER all counts and statistics
+            (``obs_local``, ``exp_local``, ``obs_global``, contingency tables, p-values)
+            have been computed on the full, unfiltered corpus, and they only remove rows
+            from the finished result. They never change the counts or p-values of the
+            collocates that remain. In particular, ``stopwords`` are NOT removed from the
+            corpus: they still occupy window positions and count toward totals, they are
+            merely hidden from the output. To exclude words from the counting itself,
+            remove them from ``sentences`` beforehand. Likewise ``min_obs_global`` etc.
+            are result filters, not vocabulary cutoffs.
+            
+            Order of operations: all filters except ``max_adjusted_p`` are applied BEFORE
+            multiple testing correction, defining the "family" of hypotheses being tested
+            (so they reduce the number of tests). ``max_adjusted_p`` is applied AFTER the
+            correction.
             
             Available filters:
             
@@ -731,13 +793,14 @@ def find_collocates(
             - 'min_ratio_local': float - Minimum local frequency ratio (obs/exp)
             - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
             - 'max_p': float - Maximum raw p-value threshold
-            - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction,
-              applied after correction is computed)
+            - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction;
+              the only filter applied after the correction is computed)
             
         correction (str, optional): Multiple testing correction method. When set,
             an ``adjusted_p_value`` column is added to the results. The correction
-            is applied AFTER all other filters, so only collocates that pass those
-            filters count toward the number of tests.
+            is applied after the (post-hoc) result filters, so only collocates that pass
+            those filters count toward the number of tests. The raw counts and p-values
+            themselves are unaffected by the filters.
             
             - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
               error rate).
@@ -753,6 +816,15 @@ def find_collocates(
             observed differs from expected).
         sort_by (str): Field to sort results by. Default is 'obs_local'.
         ascending (bool): Sort direction. Default is False (descending).
+        pooled (bool): If True and more than one target word is given, all targets are
+            merged into a single pooled target BEFORE counting, as if every occurrence of
+            any target were the same word. Each context (window position or sentence)
+            is counted once even if several targets occur in it, and the other targets
+            never appear as collocates. In window mode, all target tokens are also
+            excluded from the sample space (Evert 2008). Results contain a single
+            ``target`` value, 'pooled'. This is not the same as summing the per-target
+            results, which would double-count shared contexts. With a single target it
+            has no effect. Default is False (targets analysed separately).
         batch_words (int): Target number of tokens per processing batch. Larger values
             use more memory but reduce per-batch overhead. Default is 100,000.
     
@@ -779,6 +851,8 @@ def find_collocates(
         raise ValueError("sort_by must be a string")
     if not isinstance(ascending, bool):
         raise ValueError("ascending must be a boolean")
+    if not isinstance(pooled, bool):
+        raise ValueError("pooled must be a boolean")
     valid_sort_keys = {
         "target", "collocate", "exp_local", "obs_local",
         "ratio_local", "obs_global", "p_value", "adjusted_p_value",
@@ -794,6 +868,12 @@ def find_collocates(
     
     if not target_words:
         raise ValueError("target_words cannot be empty")
+    
+    # Internal label used while counting; joined targets make a clash with a real
+    # corpus token practically impossible. Renamed to 'pooled' in the output.
+    pool_label = None
+    if pooled and len(target_words) > 1:
+        pool_label = "\0".join(sorted(target_words))
     
     if method not in ['window', 'sentence']:
         raise ValueError(f"Invalid method: {method}. Valid methods are 'window' and 'sentence'.")
@@ -857,6 +937,7 @@ def find_collocates(
         alternative=alternative,
         batch_words=batch_words,
         max_sentence_length=max_sentence_length,
+        pool_label=pool_label,
     )
     
     if CYTHON_AVAILABLE:
@@ -879,11 +960,16 @@ def find_collocates(
                 sentences, target_words, **backend_kwargs
             )
 
+    if pool_label is not None:
+        for r in results:
+            r["target"] = "pooled"
+
     # =========================================================================
-    # STAGE 1: Apply all filters BEFORE multiple testing correction
-    # All user-specified filters define the "family" of hypotheses being tested.
-    # This maximizes statistical power by not correcting for collocates that
-    # were never of interest in the first place.
+    # STAGE 1: Apply result filters BEFORE multiple testing correction
+    # Filters are post-hoc: counts and p-values above were computed on the full
+    # corpus and are not affected. Filters only drop rows, and the surviving rows
+    # define the "family" of hypotheses being tested, which maximizes statistical
+    # power by not correcting for collocates that were never of interest.
     # =========================================================================
     if filters:
         # Validate and extract filter values upfront
