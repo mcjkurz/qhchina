@@ -145,11 +145,11 @@ class TestStreamingAndBatching:
         
         results_big = find_collocates(
             sample_documents, target_words=["人"], method='window',
-            batch_words=999_999, as_dataframe=False, sort_by='collocate', ascending=True
+            batch_words=999_999, return_type="list", sort_by='collocate', ascending=True
         )
         results_small = find_collocates(
             sample_documents, target_words=["人"], method='window',
-            batch_words=10, as_dataframe=False, sort_by='collocate', ascending=True
+            batch_words=10, return_type="list", sort_by='collocate', ascending=True
         )
         
         assert len(results_big) == len(results_small)
@@ -166,11 +166,11 @@ class TestStreamingAndBatching:
         
         results_big = find_collocates(
             sample_documents, target_words=["人"], method='sentence',
-            batch_words=999_999, as_dataframe=False, sort_by='collocate', ascending=True
+            batch_words=999_999, return_type="list", sort_by='collocate', ascending=True
         )
         results_small = find_collocates(
             sample_documents, target_words=["人"], method='sentence',
-            batch_words=10, as_dataframe=False, sort_by='collocate', ascending=True
+            batch_words=10, return_type="list", sort_by='collocate', ascending=True
         )
         
         assert len(results_big) == len(results_small)
@@ -194,17 +194,17 @@ class TestStreamingAndBatching:
 
 
 class TestFindCollocatesOutputFormats:
-    """Tests for output format options."""
+    """Tests for return type options."""
     
-    def test_as_dataframe_false_returns_list(self, sample_documents):
-        """Test that as_dataframe=False returns a list."""
+    def test_output_list_returns_list(self, sample_documents):
+        """Test that return_type='list' returns a list."""
         from qhchina.analytics.collocations import find_collocates
         
         results = find_collocates(
             sample_documents,
             target_words=["人"],
             method="window",
-            as_dataframe=False
+            return_type="list"
         )
         
         assert isinstance(results, list)
@@ -212,6 +212,26 @@ class TestFindCollocatesOutputFormats:
             assert isinstance(results[0], dict)
             assert "target" in results[0]
             assert "collocate" in results[0]
+
+    def test_output_dataframe_returns_dataframe(self, sample_documents):
+        """Test that return_type='dataframe' returns a DataFrame."""
+        from qhchina.analytics.collocations import find_collocates
+
+        results = find_collocates(
+            sample_documents,
+            target_words=["人"],
+            method="window",
+            return_type="dataframe",
+        )
+        assert isinstance(results, pd.DataFrame)
+
+    @pytest.mark.parametrize("bad_return_type", ["weird", "out.parquet", "outfile", None])
+    def test_invalid_return_type_raises_value_error(self, sample_documents, bad_return_type):
+        """Test that invalid return_type values raise ValueError."""
+        from qhchina.analytics.collocations import find_collocates
+
+        with pytest.raises(ValueError, match="return_type|Invalid return_type"):
+            find_collocates(sample_documents, target_words=["人"], return_type=bad_return_type)
     
     def test_alternative_parameter_less(self, larger_documents):
         """Test alternative='less' for Fisher's exact test."""
@@ -647,7 +667,7 @@ class TestDeterministicWindowCalculations:
             target_words="TARGET", 
             method="window",
             horizon=(0, 3),
-            as_dataframe=False
+            return_type="list"
         )
         
         collocates = {r["collocate"] for r in results}
@@ -677,7 +697,7 @@ class TestDeterministicWindowCalculations:
             target_words="TARGET",
             method="window",
             horizon=(3, 0),
-            as_dataframe=False
+            return_type="list"
         )
         
         collocates = {r["collocate"] for r in results}
@@ -707,7 +727,7 @@ class TestDeterministicWindowCalculations:
             target_words="TARGET",
             method="window",
             horizon=2,
-            as_dataframe=False
+            return_type="list"
         )
         
         collocates = {r["collocate"] for r in results}
@@ -731,7 +751,7 @@ class TestDeterministicWindowCalculations:
             target_words="TARGET",
             method="window",
             horizon=(2, 3),
-            as_dataframe=False
+            return_type="list"
         )
         
         collocates = {r["collocate"] for r in results}
@@ -759,7 +779,7 @@ class TestDeterministicWindowCalculations:
             target_words="TARGET",
             method="window",
             horizon=(5, 2),  # Ask for 5 left, but there are none
-            as_dataframe=False
+            return_type="list"
         )
         
         collocates = {r["collocate"] for r in results}
@@ -785,7 +805,7 @@ class TestDeterministicWindowCalculations:
             target_words="TARGET",
             method="window",
             horizon=1,
-            as_dataframe=False
+            return_type="list"
         )
         
         # Find the result for "neighbor"
@@ -810,7 +830,7 @@ class TestDeterministicWindowCalculations:
             target_words="TARGET",
             method="window",
             horizon=1,  # Only 1 position on each side
-            as_dataframe=False
+            return_type="list"
         )
         
         collocates = {r["collocate"] for r in results}
@@ -857,7 +877,7 @@ class TestDeterministicStatisticsCalculations:
             sentences,
             target_words="dog",
             method="sentence",
-            as_dataframe=False
+            return_type="list"
         )
         
         cat_result = next((r for r in results if r["collocate"] == "cat"), None)
@@ -902,7 +922,7 @@ class TestDeterministicStatisticsCalculations:
             target_words="dog",
             method="window",
             horizon=1,
-            as_dataframe=False
+            return_type="list"
         )
         
         cat_result = next((r for r in results if r["collocate"] == "cat"), None)
@@ -943,7 +963,7 @@ class TestDeterministicStatisticsCalculations:
             target_words="dog",
             method="window",
             horizon=2,
-            as_dataframe=False
+            return_type="list"
         )
         
         filler_result = next((r for r in results if r["collocate"] == "filler"), None)
@@ -968,7 +988,7 @@ class TestDeterministicStatisticsCalculations:
             target_words="dog",
             method="window",
             horizon=1,
-            as_dataframe=False,
+            return_type="list",
         )
 
         cat_result = next((r for r in results if r["collocate"] == "cat"), None)
@@ -1498,7 +1518,7 @@ class TestFindCollocatesCorrection:
             larger_documents,
             target_words=["我"],
             correction='bonferroni',
-            as_dataframe=True
+            return_type="dataframe"
         )
         
         assert 'adjusted_p_value' in result.columns
@@ -1516,7 +1536,7 @@ class TestFindCollocatesCorrection:
             larger_documents,
             target_words=["我"],
             correction='fdr_bh',
-            as_dataframe=True
+            return_type="dataframe"
         )
         
         assert 'adjusted_p_value' in result.columns
@@ -1530,7 +1550,7 @@ class TestFindCollocatesCorrection:
         result = find_collocates(
             larger_documents,
             target_words=["我"],
-            as_dataframe=True
+            return_type="dataframe"
         )
         
         assert 'adjusted_p_value' not in result.columns
@@ -1555,7 +1575,7 @@ class TestFindCollocatesCorrection:
             target_words=["我"],
             correction='bonferroni',
             filters={'max_p': 0.05},
-            as_dataframe=True
+            return_type="dataframe"
         )
         
         if len(result) > 0:
@@ -1570,7 +1590,7 @@ class TestFindCollocatesCorrection:
             target_words=["我"],
             correction='bonferroni',
             filters={'max_adjusted_p': 0.05},
-            as_dataframe=True
+            return_type="dataframe"
         )
         
         if len(result) > 0:
@@ -1588,14 +1608,14 @@ class TestFindCollocatesCorrection:
             )
     
     def test_correction_with_list_output(self, larger_documents):
-        """Test correction works when as_dataframe=False."""
+        """Test correction works when return_type='list'."""
         from qhchina.analytics.collocations import find_collocates
         
         result = find_collocates(
             larger_documents,
             target_words=["我"],
             correction='fdr_bh',
-            as_dataframe=False
+            return_type="list"
         )
         
         assert isinstance(result, list)
@@ -1611,7 +1631,7 @@ class TestFindCollocatesCorrection:
             target_words=["我"],
             method='sentence',
             correction='bonferroni',
-            as_dataframe=True
+            return_type="dataframe"
         )
         
         if len(result) > 0:
@@ -1681,7 +1701,7 @@ class TestKwic:
 
     def test_kwic_as_list(self, sample_documents):
         from qhchina.analytics.collocations import kwic
-        result = kwic(sample_documents, '也', as_dataframe=False)
+        result = kwic(sample_documents, '也', return_type="list")
         assert isinstance(result, list)
         if result:
             assert 'left' in result[0]
@@ -1825,7 +1845,7 @@ class TestCompareCollocates:
         corpus_a = sample_documents[:3]
         corpus_b = sample_documents[2:]
         result = compare_collocates(corpus_a, corpus_b, target_words='也',
-                                    min_obs=1, as_dataframe=False)
+                                    min_obs=1, return_type="list")
         assert isinstance(result, list)
 
     def test_compare_empty_corpora(self):

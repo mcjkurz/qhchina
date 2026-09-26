@@ -248,7 +248,7 @@ class TestCompareCorpora:
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             method='fisher',
-            as_dataframe=True
+            output="dataframe"
         )
         
         # Should return DataFrame with expected columns
@@ -276,7 +276,7 @@ class TestCompareCorpora:
                 'max_p': 0.05,
                 'min_word_length': 1
             },
-            as_dataframe=True
+            output="dataframe"
         )
         
         # Results should only include words passing filters.
@@ -296,7 +296,7 @@ class TestCompareCorpora:
             corpus_a,
             corpus_b,
             filters={'min_count': 5},
-            as_dataframe=True,
+            output="dataframe",
         )
 
         assert set(result['word']) == {"both"}
@@ -321,7 +321,7 @@ class TestCompareCorpora:
             corpus_a,
             corpus_b,
             filters={'min_count': min_count},
-            as_dataframe=True,
+            output="dataframe",
         )
 
         assert set(result['word']) == expected
@@ -335,7 +335,7 @@ class TestCompareCorpora:
                 corpusA=song_ming_flat['song'],
                 corpusB=song_ming_flat['ming'],
                 method=method,
-                as_dataframe=True
+                output="dataframe"
             )
             
             assert len(result) > 0
@@ -349,7 +349,7 @@ class TestCompareCorpora:
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             method='fisher',
-            as_dataframe=False
+            output="list"
         )
         
         assert isinstance(result, list)
@@ -359,6 +359,21 @@ class TestCompareCorpora:
         if len(result) > 0:
             assert 'word' in result[0]
             assert 'p_value' in result[0]
+
+    def test_compare_corpora_file_output_csv(self, song_ming_flat, tmp_path):
+        """Test file output writes CSV and still returns DataFrame."""
+        from qhchina.analytics.stylometry import compare_corpora
+
+        out_path = tmp_path / "compare_corpora.csv"
+        result = compare_corpora(
+            corpusA=song_ming_flat['song'],
+            corpusB=song_ming_flat['ming'],
+            method='fisher',
+            output=str(out_path),
+        )
+
+        assert isinstance(result, pd.DataFrame)
+        assert out_path.exists()
     
     def test_compare_corpora_stopwords_filter(self, song_ming_flat):
         """Test filtering with stopwords."""
@@ -370,7 +385,7 @@ class TestCompareCorpora:
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             filters={'stopwords': stopwords},
-            as_dataframe=True
+            output="dataframe"
         )
         
         # Stopwords should not be in results
@@ -386,7 +401,7 @@ class TestCompareCorpora:
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             filters={'min_count': 3, 'max_p': 0.01},
-            as_dataframe=True
+            output="dataframe"
         )
         
         # Should find some significant differences between dynasty histories
@@ -417,7 +432,7 @@ class TestCompareCorpora:
             corpusA=corpus_a(),
             corpusB=corpus_b(),
             method='fisher',
-            as_dataframe=True
+            output="dataframe"
         )
 
         assert len(result) > 0
@@ -480,7 +495,7 @@ class TestStylometryEdgeCases:
         
         # Empty corpora should raise error
         with pytest.raises(ValueError, match="empty"):
-            compare_corpora([], [], as_dataframe=True)
+            compare_corpora([], [], output="dataframe")
 
 
 # =============================================================================
@@ -994,7 +1009,7 @@ class TestCompareCorporaCorrection:
             corpusB=song_ming_flat['ming'],
             method='fisher',
             correction='bonferroni',
-            as_dataframe=True
+            output="dataframe"
         )
         
         assert 'adjusted_p_value' in result.columns
@@ -1013,7 +1028,7 @@ class TestCompareCorporaCorrection:
             corpusB=song_ming_flat['ming'],
             method='fisher',
             correction='fdr_bh',
-            as_dataframe=True
+            output="dataframe"
         )
         
         assert 'adjusted_p_value' in result.columns
@@ -1030,7 +1045,7 @@ class TestCompareCorporaCorrection:
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             method='fisher',
-            as_dataframe=True
+            output="dataframe"
         )
         
         assert 'adjusted_p_value' not in result.columns
@@ -1044,7 +1059,7 @@ class TestCompareCorporaCorrection:
             corpusB=song_ming_flat['ming'],
             method='fisher',
             correction=None,
-            as_dataframe=True
+            output="dataframe"
         )
         
         assert 'adjusted_p_value' not in result.columns
@@ -1068,13 +1083,13 @@ class TestCompareCorporaCorrection:
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             correction='bonferroni',
-            as_dataframe=True
+            output="dataframe"
         )
         result_fdr = compare_corpora(
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             correction='fdr_bh',
-            as_dataframe=True
+            output="dataframe"
         )
         
         # Merge on word to compare
@@ -1093,7 +1108,7 @@ class TestCompareCorporaCorrection:
             corpusB=song_ming_flat['ming'],
             correction=None,
             filters={'max_p': 0.05},
-            as_dataframe=True
+            output="dataframe"
         )
         
         if len(result) > 0:
@@ -1121,7 +1136,7 @@ class TestCompareCorporaCorrection:
             corpusB=song_ming_flat['ming'],
             correction='bonferroni',
             filters={'max_adjusted_p': 0.05},
-            as_dataframe=True
+            output="dataframe"
         )
         
         if len(result) > 0:
@@ -1151,14 +1166,14 @@ class TestCompareCorporaCorrection:
             )
     
     def test_correction_with_list_output(self, song_ming_flat):
-        """Test correction works when as_dataframe=False."""
+        """Test correction works when output='list'."""
         from qhchina.analytics.stylometry import compare_corpora
         
         result = compare_corpora(
             corpusA=song_ming_flat['song'],
             corpusB=song_ming_flat['ming'],
             correction='fdr_bh',
-            as_dataframe=False
+            output="list"
         )
         
         assert isinstance(result, list)
@@ -1223,7 +1238,7 @@ class TestCompareCorporaLogLikelihood:
         from qhchina.analytics import compare_corpora
         corpus_a = sample_documents[:3]
         corpus_b = sample_documents[2:]
-        result = compare_corpora(corpus_a, corpus_b, method='log_likelihood', as_dataframe=False)
+        result = compare_corpora(corpus_a, corpus_b, method='log_likelihood', output="list")
         assert isinstance(result, list)
         if result:
             assert 'statistic' in result[0]

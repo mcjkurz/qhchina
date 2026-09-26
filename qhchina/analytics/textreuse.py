@@ -14,6 +14,7 @@ Requires Cython extensions to be compiled (see setup.py).
 """
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -28,6 +29,42 @@ __all__ = [
 ]
 
 _RESULT_COLUMNS = ['doc_a', 'doc_b', 'pos_a', 'pos_b', 'length', 'similarity', 'passage_a', 'passage_b']
+_SUPPORTED_TABULAR_EXPORT_SUFFIXES = {".csv", ".tsv", ".txt", ".json"}
+
+
+def _resolve_tabular_output(output: str | None) -> tuple[str, Path | None]:
+    """Resolve tabular output mode and optional output path."""
+    if output is None or output == "dataframe":
+        return "dataframe", None
+    if output == "list":
+        return "list", None
+    if not isinstance(output, str):
+        raise ValueError("output must be 'dataframe', 'list', or a file path string")
+
+    path = Path(output)
+    suffix = path.suffix.lower()
+    if not suffix:
+        raise ValueError(
+            "File output path must include an extension. "
+            "Supported extensions are: .csv, .tsv, .txt, .json"
+        )
+    if suffix not in _SUPPORTED_TABULAR_EXPORT_SUFFIXES:
+        raise ValueError(
+            f"Unsupported output file extension '{suffix}'. "
+            "Supported extensions are: .csv, .tsv, .txt, .json"
+        )
+    return "file", path
+
+
+def _write_tabular_output(df: pd.DataFrame, output_path: Path) -> None:
+    """Write a tabular DataFrame to disk based on file extension."""
+    suffix = output_path.suffix.lower()
+    if suffix == ".csv":
+        df.to_csv(output_path, index=False)
+    elif suffix in {".tsv", ".txt"}:
+        df.to_csv(output_path, sep="\t", index=False)
+    elif suffix == ".json":
+        df.to_json(output_path, orient="records", force_ascii=False, indent=2)
 
 
 def _validate_documents(documents):
@@ -73,7 +110,7 @@ def find_shared_sequences(
     min_length: int = 10,
     min_similarity: float = 0.8,
     within_documents: bool = False,
-    as_dataframe: bool = True,
+    output: str | None = "dataframe",
     _max_gap: int | None = None,
     _max_distance: int | None = None,
 ) -> pd.DataFrame | list[dict]:
@@ -101,7 +138,12 @@ def find_shared_sequences(
         within_documents (bool): If True, also detect repeated passages
             within a single document. If False (default), only compare
             distinct document pairs.
-        as_dataframe (bool): If True, return a pandas DataFrame. Default True.
+        output (str | None): Output mode.
+            - ``"dataframe"`` (default): return a pandas DataFrame.
+            - ``"list"``: return a ``list[dict]``.
+            - File path ending in ``.csv``, ``.tsv``, ``.txt``, or ``.json``:
+              write the results to that file and return a pandas DataFrame.
+            - ``None``: alias for ``"dataframe"``.
         _max_gap (int | None): Maximum gap (in token positions)
             between consecutive seeds to still merge them into one passage.
             Defaults to ``n + 1``.  Why: a single substitution destroys
@@ -145,6 +187,8 @@ def find_shared_sequences(
         ...         ["天地", "玄黄", "宇宙", "洪荒", "寒来", "暑往"]]
         >>> find_shared_sequences(docs, n=2, min_length=3)
     """
+    output_mode, output_path = _resolve_tabular_output(output)
+
     if n < 1:
         raise ValueError(f"n must be >= 1, got {n}")
     if min_length < 1:
@@ -158,7 +202,12 @@ def find_shared_sequences(
     docs = _validate_documents(documents)
 
     if not docs:
-        return pd.DataFrame(columns=_RESULT_COLUMNS) if as_dataframe else []
+        if output_mode == "list":
+            return []
+        empty_df = pd.DataFrame(columns=_RESULT_COLUMNS)
+        if output_mode == "file":
+            _write_tabular_output(empty_df, output_path)
+        return empty_df
 
     token_vocab = _build_token_vocab(docs)
     encoded = _encode_docs(docs, token_vocab)
@@ -166,7 +215,12 @@ def find_shared_sequences(
     ngram_ids, doc_ids, positions = fingerprint_documents(encoded, n)
 
     if len(ngram_ids) == 0:
-        return pd.DataFrame(columns=_RESULT_COLUMNS) if as_dataframe else []
+        if output_mode == "list":
+            return []
+        empty_df = pd.DataFrame(columns=_RESULT_COLUMNS)
+        if output_mode == "file":
+            _write_tabular_output(empty_df, output_path)
+        return empty_df
 
     candidate_pairs = find_candidate_pairs(
         ngram_ids, doc_ids, positions, within_documents
@@ -203,6 +257,10 @@ def find_shared_sequences(
 
     results.sort(key=lambda r: (-r['similarity'], -r['length']))
 
-    if as_dataframe:
-        return pd.DataFrame(results, columns=_RESULT_COLUMNS) if results else pd.DataFrame(columns=_RESULT_COLUMNS)
-    return results
+    if output_mode == "list":
+        return results
+
+    df = pd.DataFrame(results, columns=_RESULT_COLUMNS) if results else pd.DataFrame(columns=_RESULT_COLUMNS)
+    if output_mode == "file":
+        _write_tabular_output(df, output_path)
+    return df

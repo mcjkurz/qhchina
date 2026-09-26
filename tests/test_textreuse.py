@@ -47,11 +47,25 @@ class TestFindSharedSequences:
         from qhchina.analytics.textreuse import find_shared_sequences
         docs = [list("天地玄黄宇宙洪荒"), list("天地玄黄宇宙洪荒")]
         result = find_shared_sequences(docs, n=3, min_length=3,
-                                       min_similarity=0.8, as_dataframe=False)
+                                       min_similarity=0.8, output="list")
         assert isinstance(result, list)
         if result:
             assert 'similarity' in result[0]
             assert 'passage_a' in result[0]
+
+    def test_file_output_csv(self, tmp_path):
+        from qhchina.analytics.textreuse import find_shared_sequences
+        docs = [list("天地玄黄宇宙洪荒"), list("天地玄黄宇宙洪荒")]
+        out_path = tmp_path / "reuse.csv"
+        result = find_shared_sequences(docs, n=3, min_length=3, output=str(out_path))
+        assert isinstance(result, pd.DataFrame)
+        assert out_path.exists()
+
+    def test_invalid_output_raises(self):
+        from qhchina.analytics.textreuse import find_shared_sequences
+        docs = [list("天地玄黄宇宙洪荒"), list("天地玄黄宇宙洪荒")]
+        with pytest.raises(ValueError, match="output|extension|File output path"):
+            find_shared_sequences(docs, output="reuse.parquet")
 
     def test_output_columns(self):
         from qhchina.analytics.textreuse import find_shared_sequences

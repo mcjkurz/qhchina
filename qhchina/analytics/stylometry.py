@@ -19,6 +19,7 @@ import warnings
 from collections import Counter
 from collections.abc import Iterable
 from itertools import chain
+from pathlib import Path
 from typing import Any, Callable
 import numpy as np
 import pandas as pd
@@ -46,6 +47,44 @@ __all__ = [
     'type_token_ratio',
     'mattr',
 ]
+
+
+_SUPPORTED_TABULAR_EXPORT_SUFFIXES = {".csv", ".tsv", ".txt", ".json"}
+
+
+def _resolve_tabular_output(output: str | None) -> tuple[str, Path | None]:
+    """Resolve tabular output mode and optional output path."""
+    if output is None or output == "dataframe":
+        return "dataframe", None
+    if output == "list":
+        return "list", None
+    if not isinstance(output, str):
+        raise ValueError("output must be 'dataframe', 'list', or a file path string")
+
+    path = Path(output)
+    suffix = path.suffix.lower()
+    if not suffix:
+        raise ValueError(
+            "File output path must include an extension. "
+            "Supported extensions are: .csv, .tsv, .txt, .json"
+        )
+    if suffix not in _SUPPORTED_TABULAR_EXPORT_SUFFIXES:
+        raise ValueError(
+            f"Unsupported output file extension '{suffix}'. "
+            "Supported extensions are: .csv, .tsv, .txt, .json"
+        )
+    return "file", path
+
+
+def _write_tabular_output(df: pd.DataFrame, output_path: Path) -> None:
+    """Write a tabular DataFrame to disk based on file extension."""
+    suffix = output_path.suffix.lower()
+    if suffix == ".csv":
+        df.to_csv(output_path, index=False)
+    elif suffix in {".tsv", ".txt"}:
+        df.to_csv(output_path, sep="\t", index=False)
+    elif suffix == ".json":
+        df.to_json(output_path, orient="records", force_ascii=False, indent=2)
 
 
 # =============================================================================
@@ -2357,7 +2396,7 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
                     method: str = 'fisher', 
                     filters: dict | None = None,
                     correction: str | None = None,
-                    as_dataframe: bool = True,
+                    output: str | None = "dataframe",
                     sort_by: str = 'rel_ratio',
                     ascending: bool = False) -> pd.DataFrame | list[dict]:
     """
@@ -2414,7 +2453,12 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate,
               recommended for corpus comparison).
             - None: No correction (default).
-        as_dataframe (bool): Whether to return a pandas DataFrame.
+        output (str | None): Output mode.
+            - ``"dataframe"`` (default): return a pandas DataFrame.
+            - ``"list"``: return a ``list[dict]``.
+            - File path ending in ``.csv``, ``.tsv``, ``.txt``, or ``.json``:
+              write the results to that file and return a pandas DataFrame.
+            - ``None``: alias for ``"dataframe"``.
         sort_by (str): Field to sort results by. Default is 'rel_ratio'.
         ascending (bool): Sort direction. Default is False (descending).
     
@@ -2476,6 +2520,8 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
         )
         results.to_csv("results.csv", index=False)
     """
+    output_mode, output_path = _resolve_tabular_output(output)
+
     # Validate correction parameter
     if correction is not None and correction not in VALID_CORRECTIONS:
         raise ValueError(
@@ -2597,18 +2643,21 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             b_list.append(b)
     
     if not kept_words:
-        if as_dataframe:
-            cols = [
-                "word", "abs_freqA", "abs_freqB",
-                "rel_freqA", "rel_freqB", "rel_ratio",
-            ]
-            if method != 'fisher':
-                cols.append("statistic")
-            cols.append("p_value")
-            if correction is not None:
-                cols.append("adjusted_p_value")
-            return pd.DataFrame(columns=cols)
-        return []
+        cols = [
+            "word", "abs_freqA", "abs_freqB",
+            "rel_freqA", "rel_freqB", "rel_ratio",
+        ]
+        if method != 'fisher':
+            cols.append("statistic")
+        cols.append("p_value")
+        if correction is not None:
+            cols.append("adjusted_p_value")
+        if output_mode == "list":
+            return []
+        empty_df = pd.DataFrame(columns=cols)
+        if output_mode == "file":
+            _write_tabular_output(empty_df, output_path)
+        return empty_df
     
     a_arr = np.asarray(a_list, dtype=np.int64)
     b_arr = np.asarray(b_list, dtype=np.int64)
@@ -2677,25 +2726,6 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             if stat_values is not None:
                 stat_values = stat_values[indices]
     
-    if as_dataframe:
-        data = {
-            "word": kept_words,
-            "abs_freqA": a_arr,
-            "abs_freqB": b_arr,
-            "rel_freqA": relA,
-            "rel_freqB": relB,
-            "rel_ratio": ratio,
-        }
-        if stat_values is not None:
-            data["statistic"] = stat_values
-        data["p_value"] = pvals
-        if p_adj is not None:
-            data["adjusted_p_value"] = p_adj
-        results = pd.DataFrame(data)
-        if sort_by in results.columns:
-            results = results.sort_values(sort_by, ascending=ascending, kind="mergesort").reset_index(drop=True)
-        return results
-    
     out = []
     for i, w in enumerate(kept_words):
         entry = {
@@ -2713,4 +2743,12 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
             entry["adjusted_p_value"] = float(p_adj[i])
         out.append(entry)
     out.sort(key=lambda r: r[sort_by], reverse=not ascending)
-    return out
+    if output_mode == "list":
+        return out
+
+    results = pd.DataFrame(out)
+    if sort_by in results.columns:
+        results = results.sort_values(sort_by, ascending=ascending, kind="mergesort").reset_index(drop=True)
+    if output_mode == "file":
+        _write_tabular_output(results, output_path)
+    return results

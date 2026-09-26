@@ -39,6 +39,21 @@ except ImportError:
     logger.warning("Cython extensions not available; using slower Python fallback.")
 
 
+_VALID_RETURN_TYPES = {"dataframe", "list"}
+
+
+def _resolve_return_type(return_type: str) -> str:
+    """Validate and normalize return type."""
+    if not isinstance(return_type, str):
+        raise ValueError("return_type must be 'dataframe' or 'list'")
+    if return_type not in _VALID_RETURN_TYPES:
+        raise ValueError(
+            f"Invalid return_type '{return_type}'. "
+            f"Valid options are: {_VALID_RETURN_TYPES}"
+        )
+    return return_type
+
+
 class CoocMatrix:
     """
     Co-occurrence matrix with numpy-like indexing by word or index.
@@ -729,7 +744,7 @@ def find_collocates(
     horizon: int | tuple | None = None, 
     filters: FilterOptions | None = None, 
     correction: str | None = None,
-    as_dataframe: bool = True,
+    return_type: str = "dataframe",
     max_sentence_length: int | None = 256,
     alternative: str = 'greater',
     sort_by: str = 'obs_local',
@@ -765,48 +780,66 @@ def find_collocates(
               (2, 3) finds collocates 2 words left and 3 words right of target.
             - None: Uses default of 5 for 'window' method
         filters (FilterOptions | None): Dictionary of filters to apply to results.
-            Filters are **post-hoc**: they run only AFTER all counts and statistics
-            (``obs_local``, ``exp_local``, ``obs_global``, contingency tables, p-values)
-            have been computed on the full, unfiltered corpus, and they only remove rows
-            from the finished result. They never change the counts or p-values of the
-            collocates that remain. In particular, ``stopwords`` are NOT removed from the
-            corpus: they still occupy window positions and count toward totals, they are
-            merely hidden from the output. To exclude words from the counting itself,
-            remove them from ``sentences`` beforehand. Likewise ``min_obs_global`` etc.
-            are result filters, not vocabulary cutoffs.
+            Filters are applied after all counts and raw statistics (``obs_local``,
+            ``exp_local``, ``obs_global``, ``ratio_local``, contingency tables,
+            ``p_value``) have been computed on the full, unfiltered corpus, and they only
+            remove rows from the finished result. They never change these values for the
+            collocates that remain. The one value they can affect is ``adjusted_p_value``
+            (see ``correction``). In particular, ``stopwords`` are not removed from the corpus:
+            they still occupy window positions and count toward totals, and are only
+            hidden from the output. To exclude words from the counting itself, remove
+            them from ``sentences`` beforehand. Likewise, ``min_obs_global`` and the
+            other ``*_global`` filters are result filters, not vocabulary cutoffs.
             
-            Order of operations: all filters except ``max_adjusted_p`` are applied BEFORE
-            multiple testing correction, defining the "family" of hypotheses being tested
-            (so they reduce the number of tests). ``max_adjusted_p`` is applied AFTER the
-            correction.
+            Order of operations: (1) counts and raw p-values are computed for all
+            collocates; (2) every filter except ``max_adjusted_p`` removes rows;
+            (3) the multiple testing correction, if requested, is computed on the rows
+            that remain; (4) ``max_adjusted_p`` removes rows based on the adjusted
+            p-values.
             
             Available filters:
             
             - 'stopwords': list[str] - Words to exclude from results
             - 'min_word_length': int - Minimum character length for collocates
-            - 'min_obs_local': int - Minimum observed local frequency
-            - 'max_obs_local': int - Maximum observed local frequency
-            - 'min_obs_global': int - Minimum global frequency
-            - 'max_obs_global': int - Maximum global frequency
-            - 'min_exp_local': float - Minimum expected local frequency
-            - 'max_exp_local': float - Maximum expected local frequency
-            - 'min_ratio_local': float - Minimum local frequency ratio (obs/exp)
-            - 'max_ratio_local': float - Maximum local frequency ratio (obs/exp)
+            - 'min_obs_local': int - Minimum observed local co-occurrence count.
+              In ``method='window'``, this is the number of target-centered window
+              positions where the collocate is observed. In ``method='sentence'``,
+              this is the number of sentences containing both target and collocate.
+            - 'max_obs_local': int - Maximum observed local co-occurrence count
+              (same unit definitions as ``min_obs_local``).
+            - 'min_obs_global': int - Minimum global frequency of the collocate.
+              In ``method='window'``, this is total token count in the corpus.
+              In ``method='sentence'``, this is sentence frequency (number of
+              sentences containing the collocate at least once).
+            - 'max_obs_global': int - Maximum global frequency of the collocate
+              (same unit definitions as ``min_obs_global``).
+            - 'min_exp_local': float - Minimum expected local count under the same
+              contingency table definition used by the selected method.
+            - 'max_exp_local': float - Maximum expected local count under the same
+              method-specific contingency table definition.
+            - 'min_ratio_local': float - Minimum local association strength
+              ``obs_local / exp_local``.
+            - 'max_ratio_local': float - Maximum local association strength
+              ``obs_local / exp_local``.
             - 'max_p': float - Maximum raw p-value threshold
             - 'max_adjusted_p': float - Maximum adjusted p-value (requires correction;
               the only filter applied after the correction is computed)
             
         correction (str, optional): Multiple testing correction method. When set,
             an ``adjusted_p_value`` column is added to the results. The correction
-            is applied after the (post-hoc) result filters, so only collocates that pass
-            those filters count toward the number of tests. The raw counts and p-values
-            themselves are unaffected by the filters.
+            is computed after the filters (except ``max_adjusted_p``) have removed rows,
+            and only on the rows that remain, so the number of tests is the number of
+            collocates that passed the filters. The same collocate can therefore get a
+            different ``adjusted_p_value`` with different filters, while ``p_value`` and
+            the counts stay the same.
             
             - 'bonferroni': Bonferroni correction (conservative, controls family-wise 
               error rate).
             - 'fdr_bh': Benjamini-Hochberg procedure (controls false discovery rate).
             - None: No correction (default).
-        as_dataframe (bool): If True, return results as a pandas DataFrame. Default is True.
+        return_type (str): Return type.
+            - ``"dataframe"`` (default): return a pandas DataFrame.
+            - ``"list"``: return a ``list[dict]``.
         max_sentence_length (int | None): Maximum sentence length. Longer sentences 
             are truncated to avoid memory bloat from outliers. Set to None for no limit.
             Default is 256.
@@ -817,7 +850,7 @@ def find_collocates(
         sort_by (str): Field to sort results by. Default is 'obs_local'.
         ascending (bool): Sort direction. Default is False (descending).
         pooled (bool): If True and more than one target word is given, all targets are
-            merged into a single pooled target BEFORE counting, as if every occurrence of
+            merged into a single pooled target before counting, as if every occurrence of
             any target were the same word. Each context (window position or sentence)
             is counted once even if several targets occur in it, and the other targets
             never appear as collocates. In window mode, all target tokens are also
@@ -833,15 +866,49 @@ def find_collocates(
         
             - **target** (str): The target word.
             - **collocate** (str): The co-occurring word.
-            - **obs_local** (int): Observed co-occurrence count (contexts where both appear).
-            - **exp_local** (float): Expected co-occurrence count under independence.
+            - **obs_local** (int): Observed local co-occurrence count.
+              In ``method='window'``, counts target-centered window positions where
+              the collocate appears. In ``method='sentence'``, counts sentences that
+              contain both words.
+            - **exp_local** (float): Expected local co-occurrence count under
+              independence, computed from the method-specific contingency table.
             - **ratio_local** (float): Ratio of observed to expected (obs_local / exp_local).
               Values > 1 indicate attraction, < 1 indicate repulsion.
-            - **obs_global** (int): Total occurrences of the collocate in the corpus.
+            - **obs_global** (int): Global collocate frequency. In
+              ``method='window'``, token frequency; in ``method='sentence'``,
+              sentence frequency.
             - **p_value** (float): P-value from Fisher's exact test.
             - **adjusted_p_value** (float, optional): Present only if ``correction`` is set.
+
+    Example:
+        >>> from qhchina.analytics import find_collocates
+        >>> sentences = [
+        ...     ["宋代", "经济", "繁荣", "人民", "安居"],
+        ...     ["朝廷", "推行", "赋税", "改革", "人民", "受益"],
+        ...     ["赋税", "制度", "调整", "朝廷", "关注", "民生"],
+        ...     ["人民", "议论", "朝廷", "新政"],
+        ... ]
+        >>> df = find_collocates(
+        ...     sentences=sentences,
+        ...     target_words=["人民", "朝廷", "赋税"],
+        ...     method="window",
+        ...     horizon=2,
+        ...     correction="fdr_bh",
+        ...     filters={"min_obs_local": 1},
+        ...     return_type="dataframe",
+        ... )
+        >>> df[["target", "collocate", "obs_local", "p_value"]].head()
+        >>> rows = find_collocates(
+        ...     sentences=sentences,
+        ...     target_words="人民",
+        ...     method="sentence",
+        ...     return_type="list",
+        ... )
+        >>> rows[:2]
     """
     # Validate parameters that don't require data access
+    return_type = _resolve_return_type(return_type)
+
     if correction is not None and correction not in VALID_CORRECTIONS:
         raise ValueError(
             f"Unknown correction method '{correction}'. "
@@ -965,11 +1032,11 @@ def find_collocates(
             r["target"] = "pooled"
 
     # =========================================================================
-    # STAGE 1: Apply result filters BEFORE multiple testing correction
-    # Filters are post-hoc: counts and p-values above were computed on the full
-    # corpus and are not affected. Filters only drop rows, and the surviving rows
-    # define the "family" of hypotheses being tested, which maximizes statistical
-    # power by not correcting for collocates that were never of interest.
+    # STAGE 1: Apply result filters before multiple testing correction
+    # Counts and raw p-values above were computed on the full corpus and are not
+    # affected by filters, which only drop rows. Because the correction (stage 2)
+    # runs on the surviving rows only, filters do change the adjusted p-values:
+    # fewer rows means fewer tests to correct for.
     # =========================================================================
     if filters:
         # Validate and extract filter values upfront
@@ -1080,13 +1147,15 @@ def find_collocates(
             raise ValueError("max_adjusted_p filter requires a correction method to be set")
         results = [result for result in results if result["adjusted_p_value"] <= max_adj_p]
 
-    if as_dataframe:
-        results = pd.DataFrame(results)
-        if sort_by in results.columns:
-            results = results.sort_values(sort_by, ascending=ascending, kind="mergesort")
-    else:
-        results = sorted(results, key=lambda r: r[sort_by], reverse=not ascending)
-    return results
+    records = sorted(results, key=lambda r: r[sort_by], reverse=not ascending)
+    if return_type == "list":
+        return records
+
+    df = pd.DataFrame(records)
+    if sort_by in df.columns:
+        df = df.sort_values(sort_by, ascending=ascending, kind="mergesort")
+
+    return df
 
 def cooc_matrix(
     documents: Iterable[list[str]], 
@@ -1511,7 +1580,7 @@ def kwic(
     horizon: int = 10,
     sort_by: str = 'right',
     separator: str = '',
-    as_dataframe: bool = True,
+    return_type: str = "dataframe",
     max_results: int | None = None,
     max_sentence_length: int | None = 256,
 ) -> pd.DataFrame | list[dict]:
@@ -1539,7 +1608,9 @@ def kwic(
         separator (str): String used to join context tokens for display columns.
             Default ``""`` (direct concatenation). Use
             ``" "`` for space-segmented text.
-        as_dataframe (bool): If True, return a pandas DataFrame. Default True.
+        return_type (str): Return type.
+            - ``"dataframe"`` (default): return a pandas DataFrame.
+            - ``"list"``: return a ``list[dict]``.
         max_results (int | None): Maximum number of concordance lines to
             return. None for no limit. Default None.
         max_sentence_length (int | None): Truncate sentences longer than this.
@@ -1558,9 +1629,25 @@ def kwic(
     
     Example:
         >>> from qhchina.analytics import kwic
-        >>> sentences = [["天", "下", "大", "乱"], ["天", "命", "不", "可", "违"]]
-        >>> kwic(sentences, "天", horizon=3)
+        >>> sentences = [
+        ...     ["天", "下", "大", "乱", "民", "不", "聊", "生"],
+        ...     ["天", "命", "不", "可", "违"],
+        ...     ["王", "者", "以", "天", "下", "为", "公"],
+        ... ]
+        >>> kwic_df = kwic(
+        ...     sentences,
+        ...     target=["天", "天下"],
+        ...     horizon=2,
+        ...     sort_by="right",
+        ...     separator="",
+        ...     return_type="dataframe",
+        ... )
+        >>> kwic_df[["left", "node", "right"]].head()
+        >>> kwic_rows = kwic(sentences, target="天", horizon=1, return_type="list")
+        >>> kwic_rows[:2]
     """
+    return_type = _resolve_return_type(return_type)
+
     valid_sorts = {'right', 'left', 'position'}
     if sort_by not in valid_sorts:
         raise ValueError(f"sort_by must be one of {valid_sorts}, got '{sort_by}'")
@@ -1614,9 +1701,11 @@ def kwic(
     elif sort_by == 'position':
         results.sort(key=lambda r: (r['doc_index'], r['position']))
     
-    if as_dataframe:
-        return pd.DataFrame(results, columns=output_cols) if results else pd.DataFrame(columns=output_cols)
-    return results
+    if return_type == "list":
+        return results
+
+    df = pd.DataFrame(results, columns=output_cols) if results else pd.DataFrame(columns=output_cols)
+    return df
 
 
 def compare_collocates(
@@ -1627,7 +1716,7 @@ def compare_collocates(
     horizon: int | tuple | None = None,
     min_obs: int = 5,
     stable_threshold: float = 0.1,
-    as_dataframe: bool = True,
+    return_type: str = "dataframe",
     **kwargs,
 ) -> pd.DataFrame | list[dict]:
     """
@@ -1653,7 +1742,9 @@ def compare_collocates(
         stable_threshold (float): Minimum absolute ``log_ratio_change`` for a
             collocate to be classified as ``'strengthened'`` or ``'weakened'``
             rather than ``'stable'``. Default 0.1.
-        as_dataframe (bool): If True, return a pandas DataFrame. Default True.
+        return_type (str): Return type.
+            - ``"dataframe"`` (default): return a pandas DataFrame.
+            - ``"list"``: return a ``list[dict]``.
         **kwargs: Additional keyword arguments passed to ``find_collocates``
             (e.g., ``alternative``, ``batch_words``, ``max_sentence_length``).
     
@@ -1673,11 +1764,40 @@ def compare_collocates(
             - **status** (str): One of ``'strengthened'``, ``'weakened'``,
               ``'appeared'`` (only in B), ``'disappeared'`` (only in A),
               or ``'stable'``.
+
+    Example:
+        >>> from qhchina.analytics import compare_collocates
+        >>> corpus_a = [
+        ...     ["朝廷", "整顿", "赋税", "制度", "人民", "负担"],
+        ...     ["人民", "议论", "赋税", "偏重"],
+        ...     ["朝廷", "强调", "财政", "稳定"],
+        ... ]
+        >>> corpus_b = [
+        ...     ["朝廷", "改革", "赋税", "制度", "人民", "受益"],
+        ...     ["人民", "支持", "新政", "朝廷"],
+        ...     ["赋税", "趋于", "公平", "民生", "改善"],
+        ... ]
+        >>> cmp_df = compare_collocates(
+        ...     corpus_a,
+        ...     corpus_b,
+        ...     target_words=["朝廷", "赋税"],
+        ...     method="window",
+        ...     horizon=2,
+        ...     min_obs=1,
+        ...     return_type="dataframe",
+        ... )
+        >>> cmp_df[["target", "collocate", "ratio_a", "ratio_b", "status"]].head()
+        >>> cmp_rows = compare_collocates(
+        ...     corpus_a, corpus_b, target_words="赋税", min_obs=1, return_type="list"
+        ... )
+        >>> cmp_rows[:2]
     """
+    return_type = _resolve_return_type(return_type)
+
     colloc_kwargs = dict(
         method=method,
         horizon=horizon,
-        as_dataframe=True,
+        return_type="dataframe",
         sort_by='obs_local',
         ascending=False,
         **kwargs,
@@ -1691,7 +1811,10 @@ def compare_collocates(
             'target', 'collocate', 'ratio_a', 'ratio_b', 'log_ratio_change',
             'obs_a', 'obs_b', 'p_value_a', 'p_value_b', 'status',
         ]
-        return pd.DataFrame(columns=cols) if as_dataframe else []
+        if return_type == "list":
+            return []
+        empty_df = pd.DataFrame(columns=cols)
+        return empty_df
     
     merged = pd.merge(
         df_a[['target', 'collocate', 'ratio_local', 'obs_local', 'p_value']],
@@ -1737,8 +1860,6 @@ def compare_collocates(
     choices = ['appeared', 'disappeared', 'strengthened', 'weakened']
     merged['status'] = np.select(conditions, choices, default='stable')
     
-    sort_key = merged['log_ratio_change'].abs()
-    sort_key = sort_key.fillna(float('inf'))
     merged = merged.sort_values(
         by='log_ratio_change', key=lambda s: s.abs().fillna(float('inf')),
         ascending=False,
@@ -1750,6 +1871,6 @@ def compare_collocates(
     ]
     merged = merged[output_cols]
     
-    if as_dataframe:
-        return merged
-    return merged.to_dict('records')
+    if return_type == "list":
+        return merged.to_dict('records')
+    return merged
