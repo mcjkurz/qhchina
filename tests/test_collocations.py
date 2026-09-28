@@ -997,6 +997,143 @@ class TestDeterministicStatisticsCalculations:
         assert cat_result["obs_global"] == 2
 
 
+class TestAssociationMeasures:
+    """Tests for the optional ``measures`` argument of find_collocates."""
+
+    # Sentence method, target 'dog' (10 sentences, dog in 5):
+    # - 'cat' (attracted): a=3, b=2, c=1, d=4, E11=5*4/10=2.0
+    # - 'the' (repelled):  a=3, b=2, c=5, d=0, E11=5*8/10=4.0
+    SENTENCES = [
+        ["dog", "cat", "the"],
+        ["dog", "cat", "the"],
+        ["dog", "cat"],
+        ["dog", "the"],
+        ["dog", "x"],
+        ["cat", "the"],
+        ["the"],
+        ["the"],
+        ["the"],
+        ["the"],
+    ]
+    BASE_COLUMNS = [
+        "target", "collocate", "exp_local", "obs_local",
+        "ratio_local", "obs_global", "p_value",
+    ]
+
+    @pytest.fixture(params=["cython", "python"])
+    def backend(self, request, monkeypatch):
+        from qhchina.analytics import collocations
+        if request.param == "cython":
+            if not collocations.CYTHON_AVAILABLE:
+                pytest.skip("Cython extension not available")
+        else:
+            monkeypatch.setattr(collocations, "CYTHON_AVAILABLE", False)
+        return request.param
+
+    @staticmethod
+    def _expected(a, b, c, d):
+        """Reference implementation of every measure for a single table."""
+        import math
+        N = a + b + c + d
+        R1, R2, C1, C2 = a + b, c + d, a + c, b + d
+        E11 = R1 * C1 / N
+        E = [[R1 * C1 / N, R1 * C2 / N], [R2 * C1 / N, R2 * C2 / N]]
+        O = [[a, b], [c, d]]
+        g2 = 2 * sum(
+            O[i][j] * math.log(O[i][j] / E[i][j])
+            for i in range(2) for j in range(2) if O[i][j] > 0
+        )
+        sign = math.copysign(1.0, a - E11) if a != E11 else 0.0
+        dice = 2 * a / (R1 + C1)
+        return {
+            "mi": math.log2(a / E11),
+            "mi3": math.log2(a ** 3 / E11),
+            "local_mi": a * math.log2(a / E11),
+            "t_score": (a - E11) / math.sqrt(a),
+            "z_score": (a - E11) / math.sqrt(E11),
+            "simple_ll": sign * 2 * (a * math.log(a / E11) - (a - E11)),
+            "log_likelihood": sign * g2,
+            "dice": dice,
+            "log_dice": 14 + math.log2(dice),
+            "log_odds_ratio": math.log((a + .5) * (d + .5) / ((b + .5) * (c + .5))),
+            "delta_p": a / R1 - c / R2,
+        }
+
+    def _rows(self, **kwargs):
+        from qhchina.analytics.collocations import find_collocates
+        results = find_collocates(
+            self.SENTENCES, "dog", method="sentence", return_type="list", **kwargs
+        )
+        return {r["collocate"]: r for r in results}
+
+    @pytest.mark.parametrize("collocate,table", [("cat", (3, 2, 1, 4)), ("the", (3, 2, 5, 0))])
+    def test_values_match_formulas(self, backend, collocate, table):
+        row = self._rows(measures="all")[collocate]
+        for name, value in self._expected(*table).items():
+            assert row[name] == pytest.approx(value), name
+
+    def test_signs_attraction_and_repulsion(self, backend):
+        rows = self._rows(measures="all")
+        for name in ["mi", "t_score", "z_score", "simple_ll", "log_likelihood", "delta_p"]:
+            assert rows["cat"][name] > 0, name
+            assert rows["the"][name] < 0, name
+
+    def test_no_measures_keeps_default_columns(self, backend):
+        from qhchina.analytics.collocations import find_collocates
+        df = find_collocates(self.SENTENCES, "dog", method="sentence")
+        assert list(df.columns) == self.BASE_COLUMNS
+
+    def test_aliases_and_order(self, backend):
+        from qhchina.analytics.collocations import find_collocates
+        df = find_collocates(
+            self.SENTENCES, "dog", method="sentence",
+            measures=["logDice", "t-score", "MI", "log_dice"],
+        )
+        assert list(df.columns) == self.BASE_COLUMNS + ["log_dice", "t_score", "mi"]
+
+    def test_unknown_measure_raises(self):
+        from qhchina.analytics.collocations import find_collocates
+        with pytest.raises(ValueError, match="Unknown measure"):
+            find_collocates(self.SENTENCES, "dog", method="sentence", measures=["nope"])
+        with pytest.raises(ValueError, match="measures must be"):
+            find_collocates(self.SENTENCES, "dog", method="sentence", measures=5)
+
+    @pytest.mark.parametrize("return_type", ["list", "dataframe"])
+    def test_sort_by_measure_adds_column(self, backend, return_type):
+        from qhchina.analytics.collocations import find_collocates
+        out = find_collocates(
+            self.SENTENCES, "dog", method="sentence",
+            sort_by="logDice", return_type=return_type,
+        )
+        values = [r["log_dice"] for r in out] if return_type == "list" else list(out["log_dice"])
+        assert values == sorted(values, reverse=True)
+
+    def test_measures_with_correction_and_pooled(self, backend, larger_documents):
+        from qhchina.analytics.collocations import find_collocates
+        df = find_collocates(
+            larger_documents, ["人", "不"], horizon=3, pooled=True,
+            correction="fdr_bh", measures=["t_score", "log_likelihood"],
+        )
+        assert not df.empty
+        assert list(df.columns)[-3:] == ["t_score", "log_likelihood", "adjusted_p_value"]
+        assert np.isfinite(df[["t_score", "log_likelihood"]].to_numpy()).all()
+
+    @pytest.mark.parametrize("method,kwargs", [("window", {"horizon": 3}), ("sentence", {})])
+    def test_python_cython_measures_match(self, larger_documents, monkeypatch, method, kwargs):
+        from qhchina.analytics import collocations
+        if not collocations.CYTHON_AVAILABLE:
+            pytest.skip("Cython extension not available")
+        run = lambda: collocations.find_collocates(
+            larger_documents, ["人"], method=method, measures="all",
+            sort_by="collocate", ascending=True, **kwargs,
+        ).reset_index(drop=True)
+        cy = run()
+        monkeypatch.setattr(collocations, "CYTHON_AVAILABLE", False)
+        py = run()
+        assert not cy.empty
+        pd.testing.assert_frame_equal(cy, py)
+
+
 class TestDeterministicCoocMatrixCalculations:
     """
     Deterministic tests that verify co-occurrence matrix window calculations.

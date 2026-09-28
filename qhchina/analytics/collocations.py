@@ -363,21 +363,118 @@ def _pool_targets_in_vocab(word2idx, present_targets, pool_label):
     return [pool_label], np.array([pooled_idx], dtype=np.int32)
 
 
-def _assemble_results_batch(targets, candidates, a, b, c, d, alternative='greater'):
+def _g2_term(O, E):
+    """Elementwise ``O * ln(O / E)`` with the convention ``0 * ln 0 = 0``."""
+    valid = (O > 0) & (E > 0)
+    return np.where(valid, O * np.log(np.where(valid, O, 1.0) / np.where(valid, E, 1.0)), 0.0)
+
+
+def _log_likelihood(t):
+    """Signed (one-sided) full log-likelihood G² over all four cells."""
+    E12 = t["R1"] * t["C2"] / t["N"]
+    E21 = t["R2"] * t["C1"] / t["N"]
+    E22 = t["R2"] * t["C2"] / t["N"]
+    g2 = 2.0 * (
+        _g2_term(t["O11"], t["E11"]) + _g2_term(t["O12"], E12)
+        + _g2_term(t["O21"], E21) + _g2_term(t["O22"], E22)
+    )
+    return np.sign(t["O11"] - t["E11"]) * np.maximum(g2, 0.0)
+
+
+def _dice(t):
+    return 2.0 * t["O11"] / (t["R1"] + t["C1"])
+
+
+# Association measures in Evert (2008) notation. Each takes a dict of float64
+# contingency-table arrays (O11, O12, O21, O22, E11, R1, R2, C1, C2, N) and
+# returns one value per target-collocate pair.
+_ASSOCIATION_MEASURES = {
+    "mi": lambda t: np.log2(t["O11"] / t["E11"]),
+    "mi3": lambda t: np.log2(t["O11"] ** 3 / t["E11"]),
+    "local_mi": lambda t: t["O11"] * np.log2(t["O11"] / t["E11"]),
+    "t_score": lambda t: (t["O11"] - t["E11"]) / np.sqrt(t["O11"]),
+    "z_score": lambda t: (t["O11"] - t["E11"]) / np.sqrt(t["E11"]),
+    "simple_ll": lambda t: np.sign(t["O11"] - t["E11"]) * 2.0 * (
+        t["O11"] * np.log(t["O11"] / t["E11"]) - (t["O11"] - t["E11"])
+    ),
+    "log_likelihood": _log_likelihood,
+    "dice": _dice,
+    "log_dice": lambda t: 14.0 + np.log2(_dice(t)),
+    "log_odds_ratio": lambda t: np.log(
+        (t["O11"] + 0.5) * (t["O22"] + 0.5) / ((t["O12"] + 0.5) * (t["O21"] + 0.5))
+    ),
+    "delta_p": lambda t: t["O11"] / t["R1"] - np.where(
+        t["R2"] > 0, t["O21"] / np.where(t["R2"] > 0, t["R2"], 1.0), 0.0
+    ),
+}
+
+_MEASURE_ALIASES = {
+    "pmi": "mi",
+    "logdice": "log_dice",
+    "ll": "log_likelihood",
+    "g2": "log_likelihood",
+    "simplell": "simple_ll",
+    "t": "t_score",
+    "tscore": "t_score",
+    "z": "z_score",
+    "zscore": "z_score",
+    "localmi": "local_mi",
+    "odds_ratio": "log_odds_ratio",
+    "deltap": "delta_p",
+}
+
+
+def _normalize_measure_name(name: str) -> str:
+    """Map a user-supplied measure name (e.g. 'logDice', 't-score') to its canonical key."""
+    key = name.strip().lower().replace("-", "_").replace(" ", "_")
+    return _MEASURE_ALIASES.get(key, key)
+
+
+def _resolve_measures(measures: str | list[str] | None) -> list[str]:
+    """Validate and normalize the ``measures`` argument into a list of canonical keys."""
+    if measures is None:
+        return []
+    if isinstance(measures, str):
+        measures = [measures]
+    if not isinstance(measures, (list, tuple, set)):
+        raise ValueError("measures must be a string, a list of strings, or None")
+    resolved = []
+    for name in measures:
+        if not isinstance(name, str):
+            raise ValueError(f"Measure names must be strings, got {type(name).__name__}")
+        if name.strip().lower() == "all":
+            candidates = list(_ASSOCIATION_MEASURES)
+        else:
+            candidates = [_normalize_measure_name(name)]
+        for key in candidates:
+            if key not in _ASSOCIATION_MEASURES:
+                raise ValueError(
+                    f"Unknown measure '{name}'. Valid measures are: "
+                    f"{sorted(_ASSOCIATION_MEASURES)} (or 'all')"
+                )
+            if key not in resolved:
+                resolved.append(key)
+    return resolved
+
+
+def _assemble_results_batch(targets, candidates, a, b, c, d, alternative='greater', measures=None):
     """
     Build collocation result dicts with batch Fisher p-values.
 
-    All inputs except *alternative* are parallel sequences of the same length.
+    All inputs except *alternative* and *measures* are parallel sequences of the same length.
 
     Args:
         targets: list[str] — target word per pair.
         candidates: list[str] — collocate word per pair.
         a, b, c, d: array-like int — contingency-table cells.
         alternative: str — Fisher alternative hypothesis.
+        measures: list[str] | None — canonical keys of ``_ASSOCIATION_MEASURES``
+            to add as extra fields.
 
     Returns:
         list[dict]: One dict per pair with keys target, collocate,
-        exp_local, obs_local, ratio_local, obs_global, p_value.
+        exp_local, obs_local, ratio_local, obs_global, p_value, followed by
+        one key per requested measure.
     """
     a_arr = np.ascontiguousarray(a, dtype=np.int64)
     b_arr = np.ascontiguousarray(b, dtype=np.int64)
@@ -393,8 +490,22 @@ def _assemble_results_batch(targets, candidates, a, b, c, d, alternative='greate
         expected = np.where(N_arr > 0, R1 * C1 / N_arr, 0.0)
         ratio = np.where(expected > 0, a_arr / expected, 0.0)
 
-    return [
-        {
+        measure_values = {}
+        if measures:
+            O12 = b_arr.astype(np.float64)
+            O21 = c_arr.astype(np.float64)
+            O22 = d_arr.astype(np.float64)
+            cells = {
+                "O11": a_arr.astype(np.float64), "O12": O12, "O21": O21, "O22": O22,
+                "E11": expected, "R1": R1, "R2": O21 + O22,
+                "C1": C1, "C2": O12 + O22, "N": N_arr,
+            }
+            for name in measures:
+                measure_values[name] = _ASSOCIATION_MEASURES[name](cells)
+
+    results = []
+    for i in range(len(targets)):
+        row = {
             "target": targets[i],
             "collocate": candidates[i],
             "exp_local": expected[i],
@@ -403,11 +514,13 @@ def _assemble_results_batch(targets, candidates, a, b, c, d, alternative='greate
             "obs_global": int(C1[i]),
             "p_value": pvals[i],
         }
-        for i in range(len(targets))
-    ]
+        for name, values in measure_values.items():
+            row[name] = float(values[i])
+        results.append(row)
+    return results
 
 
-def _build_results_from_counts(target_words, target_counts, candidate_counts, global_counts, total, alternative='greater', method='window'):
+def _build_results_from_counts(target_words, target_counts, candidate_counts, global_counts, total, alternative='greater', method='window', measures=None):
     """
     Build collocation result dicts from Python-accumulated counts.
 
@@ -421,6 +534,7 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
         total: Total tokens (window) or sentences (sentence method).
         alternative: Alternative hypothesis for Fisher's exact test.
         method: 'window' or 'sentence' (affects *d* cell calculation).
+        measures: Canonical association-measure keys to add to each result.
 
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -449,12 +563,13 @@ def _build_results_from_counts(target_words, target_counts, candidate_counts, gl
     if not targets_list:
         return []
     return _assemble_results_batch(targets_list, candidates_list,
-                                   a_list, b_list, c_list, d_list, alternative)
+                                   a_list, b_list, c_list, d_list, alternative, measures)
 
 
 def _calculate_collocations_window_cython(
     sentences, target_words, horizon=5, alternative='greater',
     batch_words=100_000, max_sentence_length=256, pool_label=None,
+    measures=None,
 ):
     """
     Cython-accelerated window-based collocation counting (two-pass, streaming).
@@ -474,6 +589,7 @@ def _calculate_collocations_window_cython(
         max_sentence_length: Truncate longer sentences. None disables.
         pool_label: If set, all *target_words* are merged into one pooled target
             reported under this label. None keeps targets separate.
+        measures: Canonical association-measure keys to add to each result.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -542,12 +658,13 @@ def _calculate_collocations_window_cython(
     if not targets_list:
         return []
     return _assemble_results_batch(targets_list, candidates_list,
-                                   a_list, b_list, c_list, d_list, alternative)
+                                   a_list, b_list, c_list, d_list, alternative, measures)
 
 
 def _calculate_collocations_window_python(
     sentences, target_words, horizon=5, alternative='greater',
     batch_words=100_000, max_sentence_length=256, pool_label=None,
+    measures=None,
 ):
     """
     Pure Python window-based collocation counting (streaming, single-pass).
@@ -567,6 +684,7 @@ def _calculate_collocations_window_python(
         max_sentence_length: Truncate longer sentences. None disables.
         pool_label: If set, all *target_words* are merged into one pooled target
             reported under this label. None keeps targets separate.
+        measures: Canonical association-measure keys to add to each result.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -608,13 +726,15 @@ def _calculate_collocations_window_python(
                                 candidate_in_context[word][token] += 1
 
     return _build_results_from_counts(
-        target_words, T_count, candidate_in_context, token_counter, total_tokens, alternative, method='window'
+        target_words, T_count, candidate_in_context, token_counter, total_tokens, alternative, method='window',
+        measures=measures,
     )
 
 
 def _calculate_collocations_sentence_cython(
     sentences, target_words, alternative='greater',
     batch_words=100_000, max_sentence_length=256, pool_label=None,
+    measures=None,
 ):
     """
     Cython-accelerated sentence-based collocation counting (two-pass, streaming).
@@ -630,6 +750,7 @@ def _calculate_collocations_sentence_cython(
         max_sentence_length: Truncate longer sentences. None disables.
         pool_label: If set, all *target_words* are merged into one pooled target
             reported under this label. None keeps targets separate.
+        measures: Canonical association-measure keys to add to each result.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -689,12 +810,13 @@ def _calculate_collocations_sentence_cython(
     if not targets_list:
         return []
     return _assemble_results_batch(targets_list, candidates_list,
-                                   a_list, b_list, c_list, d_list, alternative)
+                                   a_list, b_list, c_list, d_list, alternative, measures)
 
 
 def _calculate_collocations_sentence_python(
     sentences, target_words, alternative='greater',
     batch_words=100_000, max_sentence_length=256, pool_label=None,
+    measures=None,
 ):
     """
     Pure Python sentence-based collocation counting (streaming, single-pass).
@@ -710,6 +832,7 @@ def _calculate_collocations_sentence_python(
         max_sentence_length: Truncate longer sentences. None disables.
         pool_label: If set, all *target_words* are merged into one pooled target
             reported under this label. None keeps targets separate.
+        measures: Canonical association-measure keys to add to each result.
     
     Returns:
         list[dict]: Collocation statistics per target-collocate pair.
@@ -734,7 +857,8 @@ def _calculate_collocations_sentence_python(
                     candidate_in_sentences[target].update(unique_tokens)
 
     return _build_results_from_counts(
-        target_words, sentences_with_token, candidate_in_sentences, sentences_with_token, total_sentences, alternative, method='sentence'
+        target_words, sentences_with_token, candidate_in_sentences, sentences_with_token, total_sentences, alternative, method='sentence',
+        measures=measures,
     )
 
 def find_collocates(
@@ -751,6 +875,7 @@ def find_collocates(
     ascending: bool = False,
     pooled: bool = False,
     batch_words: int = 100_000,
+    measures: str | list[str] | None = None,
 ) -> list[dict] | pd.DataFrame:
     """
     Find collocates for target words in a corpus of sentences.
@@ -847,7 +972,9 @@ def find_collocates(
             'greater' (test if observed co-occurrence is greater than expected, default),
             'less' (test if observed is less than expected), or 'two-sided' (test if 
             observed differs from expected).
-        sort_by (str): Field to sort results by. Default is 'obs_local'.
+        sort_by (str): Field to sort results by. Default is 'obs_local'. Any
+            association measure (see ``measures``) is also accepted; if it was not
+            requested in ``measures``, it is computed and added automatically.
         ascending (bool): Sort direction. Default is False (descending).
         pooled (bool): If True and more than one target word is given, all targets are
             merged into a single pooled target before counting, as if every occurrence of
@@ -860,7 +987,60 @@ def find_collocates(
             has no effect. Default is False (targets analysed separately).
         batch_words (int): Target number of tokens per processing batch. Larger values
             use more memory but reduce per-batch overhead. Default is 100,000.
-    
+        measures (str | list[str] | None): Association measures to add as extra
+            columns, one per measure, after ``p_value``. Pass a list of names, a
+            single name, or ``'all'``. Names are case-insensitive and hyphens are
+            accepted (``'logDice'``, ``'t-score'``, ``'MI'`` all work). Default None
+            (no extra columns).
+
+            All measures are computed from the same contingency table as ``p_value``,
+            using Evert's (2008) notation: O11 = ``obs_local``, E11 = ``exp_local``,
+            R1 = size of the target's context, C1 = ``obs_global``, N = sample size.
+
+            - 'mi': Pointwise mutual information, ``log2(O11 / E11)``. Measures
+              how much more often the pair occurs than expected. Strongly favours
+              rare pairs: a collocate seen once or twice can get a very high score.
+            - 'mi3': ``log2(O11³ / E11)``. MI with more weight on the observed
+              count, which dampens the rare-pair bias. A heuristic: its values
+              have no fixed interpretation (Evert 2008).
+            - 'local_mi': ``O11 · log2(O11 / E11)``. MI weighted by frequency,
+              favours frequent, strongly associated pairs.
+            - 't_score': ``(O11 − E11) / √O11``. Favours frequent collocates
+              and is often topped by function words. Good for spotting common
+              patterns, poor at finding rare but tight ones.
+            - 'z_score': ``(O11 − E11) / √E11``. Sits between MI and t-score;
+              like MI, it inflates rare pairs.
+            - 'simple_ll': Simplified log-likelihood,
+              ``2 · (O11 · ln(O11 / E11) − (O11 − E11))``. A significance-style
+              score that closely tracks ``log_likelihood``.
+            - 'log_likelihood': Log-likelihood ratio G² over all four cells of the
+              contingency table (Dunning 1993). A significance-style score that
+              follows a χ² distribution with one degree of freedom
+              (3.84 ≈ p < .05, 10.83 ≈ p < .001, two-sided).
+            - 'dice': ``2 · O11 / (R1 + C1)``, the share of the target's contexts
+              and the collocate's occurrences that the pair accounts for. Ranges
+              from 0 to 1.
+            - 'log_dice': ``14 + log2(dice)`` (Rychlý 2008). Maximum is 14; each
+              point lower means half the Dice value. Does not depend on corpus
+              size, so scores can be compared across corpora.
+            - 'log_odds_ratio': ``ln((O11+½)(O22+½) / ((O12+½)(O21+½)))``. An
+              effect size; the +½ keeps it finite when a cell is 0.
+            - 'delta_p': ``O11/R1 − O21/(N−R1)``. How much more likely the
+              collocate is inside the target's contexts than outside them.
+              Directional: it is not symmetric between target and collocate.
+
+            Sign conventions: ``mi``, ``local_mi``, ``t_score``, ``z_score`` and
+            ``delta_p`` are 0 when O11 = E11 and negative when the pair occurs less
+            often than expected (O11 < E11); ``log_odds_ratio`` behaves the same up to
+            the small +½ adjustment. ``mi3`` is not 0 at independence and can stay
+            positive for repelled pairs, so use it only for ranking attracted
+            collocates. ``simple_ll`` and ``log_likelihood`` are
+            by themselves two-sided (positive for both attraction and repulsion),
+            so they are reported in their one-sided form: multiplied by the sign of
+            ``O11 − E11``. Take the absolute value to recover the two-sided statistic.
+            ``dice`` and ``log_dice`` are never negative and do not distinguish
+            repulsion. See Evert (2008), *Corpora and Collocations*, for details.
+
     Returns:
         list[dict] | pd.DataFrame: Collocation results with the following fields:
         
@@ -878,6 +1058,9 @@ def find_collocates(
               ``method='window'``, token frequency; in ``method='sentence'``,
               sentence frequency.
             - **p_value** (float): P-value from Fisher's exact test.
+            - One float field per requested measure (e.g. **log_dice**,
+              **t_score**), present only if ``measures`` is set or ``sort_by``
+              names a measure.
             - **adjusted_p_value** (float, optional): Present only if ``correction`` is set.
 
     Example:
@@ -897,14 +1080,19 @@ def find_collocates(
         ...     filters={"min_obs_local": 1},
         ...     return_type="dataframe",
         ... )
-        >>> df[["target", "collocate", "obs_local", "p_value"]].head()
+        >>> top_collocates = df[["target", "collocate", "obs_local", "p_value"]].head(10)
+        >>> df.to_csv("collocates.csv", index=False)
+        >>> scored = find_collocates(
+        ...     sentences, target_words="人民", horizon=2,
+        ...     measures=["logDice", "t-score", "simple-ll"], sort_by="log_dice",
+        ... )
         >>> rows = find_collocates(
         ...     sentences=sentences,
         ...     target_words="人民",
         ...     method="sentence",
         ...     return_type="list",
         ... )
-        >>> rows[:2]
+        >>> sample_rows = rows[:2]
     """
     # Validate parameters that don't require data access
     return_type = _resolve_return_type(return_type)
@@ -920,12 +1108,21 @@ def find_collocates(
         raise ValueError("ascending must be a boolean")
     if not isinstance(pooled, bool):
         raise ValueError("pooled must be a boolean")
+    measures = _resolve_measures(measures)
     valid_sort_keys = {
         "target", "collocate", "exp_local", "obs_local",
         "ratio_local", "obs_global", "p_value", "adjusted_p_value",
     }
     if sort_by not in valid_sort_keys:
-        raise ValueError(f"Invalid sort_by '{sort_by}'. Valid keys are: {valid_sort_keys}")
+        measure_key = _normalize_measure_name(sort_by)
+        if measure_key not in _ASSOCIATION_MEASURES:
+            raise ValueError(
+                f"Invalid sort_by '{sort_by}'. Valid keys are: {valid_sort_keys} "
+                f"or any measure in {sorted(_ASSOCIATION_MEASURES)}"
+            )
+        sort_by = measure_key
+        if sort_by not in measures:
+            measures.append(sort_by)
     if sort_by == "adjusted_p_value" and correction is None:
         raise ValueError("sort_by='adjusted_p_value' requires a correction method to be set")
     
@@ -1005,8 +1202,9 @@ def find_collocates(
         batch_words=batch_words,
         max_sentence_length=max_sentence_length,
         pool_label=pool_label,
+        measures=measures,
     )
-    
+
     if CYTHON_AVAILABLE:
         if method == 'window':
             results = _calculate_collocations_window_cython(
@@ -1642,9 +1840,10 @@ def kwic(
         ...     separator="",
         ...     return_type="dataframe",
         ... )
-        >>> kwic_df[["left", "node", "right"]].head()
+        >>> preview = kwic_df[["left", "node", "right"]].head(10)
+        >>> kwic_df.to_csv("kwic_lines.csv", index=False)
         >>> kwic_rows = kwic(sentences, target="天", horizon=1, return_type="list")
-        >>> kwic_rows[:2]
+        >>> sample_kwic_rows = kwic_rows[:2]
     """
     return_type = _resolve_return_type(return_type)
 
@@ -1786,11 +1985,14 @@ def compare_collocates(
         ...     min_obs=1,
         ...     return_type="dataframe",
         ... )
-        >>> cmp_df[["target", "collocate", "ratio_a", "ratio_b", "status"]].head()
+        >>> comparison_preview = cmp_df[
+        ...     ["target", "collocate", "ratio_a", "ratio_b", "status"]
+        ... ].head(10)
+        >>> cmp_df.to_csv("collocate_comparison.csv", index=False)
         >>> cmp_rows = compare_collocates(
         ...     corpus_a, corpus_b, target_words="赋税", min_obs=1, return_type="list"
         ... )
-        >>> cmp_rows[:2]
+        >>> sample_compare_rows = cmp_rows[:2]
     """
     return_type = _resolve_return_type(return_type)
 
