@@ -284,7 +284,7 @@ class LDAGibbsSampler:
             token_idx += doc_len
             self.z[d, :doc_len] = doc_topics
             
-            for i, (word_id, topic) in enumerate(zip(doc, doc_topics)):
+            for word_id, topic in zip(doc, doc_topics):
                 self.n_wt[word_id, topic] += 1
                 self.n_dt[d, topic] += 1
                 self.n_t[topic] += 1

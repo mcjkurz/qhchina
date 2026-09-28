@@ -5,7 +5,6 @@ Provides balanced batch sampling for temporal training and Cython extension acce
 """
 
 import logging
-import numpy as np
 from collections.abc import Iterable
 from ....config import get_rng, resolve_seed
 

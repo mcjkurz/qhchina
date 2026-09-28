@@ -1055,6 +1055,9 @@ class TestAssociationMeasures:
             "log_likelihood": sign * g2,
             "dice": dice,
             "log_dice": 14 + math.log2(dice),
+            # In sentence mode R1 = f(A), so Evert's table-based Dice is identical.
+            "dice_evert": 2 * a / (R1 + C1),
+            "log_dice_evert": 14 + math.log2(2 * a / (R1 + C1)),
             "log_odds_ratio": math.log((a + .5) * (d + .5) / ((b + .5) * (c + .5))),
             "delta_p": a / R1 - c / R2,
         }
@@ -1068,9 +1071,41 @@ class TestAssociationMeasures:
 
     @pytest.mark.parametrize("collocate,table", [("cat", (3, 2, 1, 4)), ("the", (3, 2, 5, 0))])
     def test_values_match_formulas(self, backend, collocate, table):
-        row = self._rows(measures="all")[collocate]
-        for name, value in self._expected(*table).items():
+        expected = self._expected(*table)
+        row = self._rows(measures=list(expected))[collocate]
+        for name, value in expected.items():
             assert row[name] == pytest.approx(value), name
+
+    def test_all_excludes_evert_variants(self, backend):
+        from qhchina.analytics.collocations import find_collocates, _ASSOCIATION_MEASURES
+        df = find_collocates(self.SENTENCES, "dog", method="sentence", measures="all")
+        added = list(df.columns[len(self.BASE_COLUMNS):])
+        assert "dice_evert" not in added and "log_dice_evert" not in added
+        assert set(added) == set(_ASSOCIATION_MEASURES) - {"dice_evert", "log_dice_evert"}
+        df = find_collocates(self.SENTENCES, "dog", method="sentence",
+                             measures=["all", "dice_evert"])
+        assert "dice_evert" in df.columns
+
+    def test_window_dice_uses_target_frequency(self, backend):
+        """Window-mode Dice is 2·f(A,B)/(f(A)+f(B)), not Evert's 2·O11/(R1+C1)."""
+        import math
+        from qhchina.analytics.collocations import find_collocates
+        # horizon=2 around 'a': R1 = 4 window positions, f(a) = 2, f(b) = 2, O11 = 2.
+        # Standard Dice = 2*2/(2+2) = 1.0; the R1-based version would be 4/6.
+        rows = find_collocates(
+            [["a", "b", "x", "y"], ["a", "z", "b"]], "a", horizon=2,
+            measures=["dice", "log_dice", "dice_evert", "log_dice_evert"],
+            return_type="list",
+        )
+        b = next(r for r in rows if r["collocate"] == "b")
+        assert b["obs_local"] == 2 and b["obs_global"] == 2
+        assert b["dice"] == pytest.approx(1.0)
+        assert b["log_dice"] == pytest.approx(14.0)
+        assert b["dice_evert"] == pytest.approx(4 / 6)
+        assert b["log_dice_evert"] == pytest.approx(14 + math.log2(4 / 6))
+        x = next(r for r in rows if r["collocate"] == "x")
+        assert x["dice"] == pytest.approx(2 * 1 / (2 + 1))
+        assert x["log_dice"] == pytest.approx(14 + math.log2(2 / 3))
 
     def test_signs_attraction_and_repulsion(self, backend):
         rows = self._rows(measures="all")
@@ -1090,6 +1125,26 @@ class TestAssociationMeasures:
             measures=["logDice", "t-score", "MI", "log_dice"],
         )
         assert list(df.columns) == self.BASE_COLUMNS + ["log_dice", "t_score", "mi"]
+
+    def test_filters_log_lists_every_filter(self, caplog, monkeypatch):
+        import logging
+        from qhchina.analytics.collocations import find_collocates
+        # The package logger does not propagate to root, where caplog listens.
+        monkeypatch.setattr(logging.getLogger("qhchina"), "propagate", True)
+        with caplog.at_level(logging.INFO, logger="qhchina.analytics.collocations"):
+            find_collocates(
+                self.SENTENCES, "dog", method="sentence", correction="fdr_bh",
+                filters={"max_adjusted_p": 0.9, "stopwords": ["the", "x"], "min_obs_local": 1},
+            )
+        line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Filters:"))
+        assert line == "Filters: max_adjusted_p=0.9, stopwords=<2 words>, min_obs_local=1"
+
+    def test_optional_arguments_are_keyword_only(self):
+        from qhchina.analytics.collocations import find_collocates
+        with pytest.raises(TypeError):
+            find_collocates(self.SENTENCES, "dog", "sentence")
+        with pytest.raises(TypeError):
+            find_collocates(self.SENTENCES, "dog", horizen=3)
 
     def test_unknown_measure_raises(self):
         from qhchina.analytics.collocations import find_collocates

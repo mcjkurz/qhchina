@@ -313,7 +313,7 @@ class Word2Vec:
         
         # Find genuinely new words that now meet threshold
         new_words = []
-        for word, count in new_counts.items():
+        for word in new_counts:
             if word not in self.vocab and self.word_counts[word] >= self.min_word_count:
                 new_words.append(word)
         

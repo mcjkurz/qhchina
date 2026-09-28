@@ -24,7 +24,6 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
 from .cython_ext.statistics import batch_fisher_exact, batch_chi2, batch_log_likelihood
 from .vectors import cosine_similarity as _cosine_similarity, cosine_distance
 from ..config import resolve_seed
@@ -1101,7 +1100,7 @@ class Stylometry:
                 dist = distance_fn(text_vector, doc_vector)
                 distances.append((self.document_labels[i], self.document_ids[i], float(dist)))
             distances.sort(key=lambda x: x[2])
-            results = [(author, dist) for author, doc_id, dist in distances[:k]]
+            results = [(author, dist) for author, _, dist in distances[:k]]
             return results
     
     def _predict_svm(self, text: list[str], k: int) -> list[tuple[str, float]]:
@@ -2664,7 +2663,6 @@ def compare_corpora(corpusA: Iterable[str] | Iterable[list[str]],
     c_arr = totalA - a_arr
     d_arr = totalB - b_arr
     
-    n_words = len(kept_words)
     stat_values = None
     
     if method == 'fisher':

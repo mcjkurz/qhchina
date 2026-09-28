@@ -6,7 +6,6 @@ and cached locally in ~/.cache/qhchina/fonts/.
 """
 
 import logging
-import os
 import threading
 from pathlib import Path
 
